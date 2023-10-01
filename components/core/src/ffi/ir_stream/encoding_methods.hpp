@@ -6,7 +6,7 @@
 
 #include "../encoding_methods.hpp"
 #include "attributes.hpp"
-#include "byteswap.h"
+#include "byteswap.hpp"
 
 namespace ffi::ir_stream {
 template <typename integer_t>

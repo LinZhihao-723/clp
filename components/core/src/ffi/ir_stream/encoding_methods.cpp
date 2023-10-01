@@ -11,16 +11,6 @@ using std::string_view;
 using std::vector;
 
 namespace ffi::ir_stream {
-// Local function prototypes
-/**
- * Encodes an integer into the IR stream
- * @tparam integer_t
- * @param value
- * @param ir_buf
- */
-template <typename integer_t>
-static void encode_int(integer_t value, vector<int8_t>& ir_buf);
-
 /**
  * Encodes the given logtype into the IR stream
  * @param logtype
