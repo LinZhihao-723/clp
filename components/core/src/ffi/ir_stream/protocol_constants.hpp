@@ -25,6 +25,7 @@ namespace Metadata {
     constexpr char TimestampPatternSyntaxKey[] = "TIMESTAMP_PATTERN_SYNTAX";
     constexpr char TimeZoneIdKey[] = "TZ_ID";
     constexpr char ReferenceTimestampKey[] = "REFERENCE_TIMESTAMP";
+    constexpr char AttributeTableKey[] = "ATTRIBUTES";
 
     constexpr char VariablesSchemaIdKey[] = "VARIABLES_SCHEMA_ID";
     constexpr char VariableEncodingMethodsIdKey[] = "VARIABLE_ENCODING_METHODS_ID";

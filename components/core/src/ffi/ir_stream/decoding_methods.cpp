@@ -438,7 +438,8 @@ static IRErrorCode decode_attributes(
         if (cProtocol::Payload::AttrNull == encoded_tag) {
             attributes.emplace_back(std::nullopt);
             continue;
-        } else if (is_attr_int_tag()) {
+        }
+        if (is_attr_int_tag()) {
             attr_int_t attr_int{};
             if (auto const error_code{decode_attr_int(reader, encoded_tag, attr_int)};
                 IRErrorCode_Success != error_code)

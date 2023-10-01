@@ -258,6 +258,35 @@ namespace four_byte_encoding {
         return encode_metadata(metadata_json, ir_buf);
     }
 
+    bool encode_preamble(
+            string_view timestamp_pattern,
+            string_view timestamp_pattern_syntax,
+            string_view time_zone_id,
+            epoch_time_ms_t reference_timestamp,
+            vector<AttributeInfo> const& attribute_table,
+            vector<int8_t>& ir_buf
+    ) {
+        // Write magic number
+        for (auto b : cProtocol::FourByteEncodingMagicNumber) {
+            ir_buf.push_back(b);
+        }
+
+        // Assemble metadata
+        nlohmann::json metadata_json;
+        add_base_metadata_fields(
+                timestamp_pattern,
+                timestamp_pattern_syntax,
+                time_zone_id,
+                metadata_json
+        );
+        metadata_json[cProtocol::Metadata::ReferenceTimestampKey]
+                = std::to_string(reference_timestamp);
+
+        metadata_json[cProtocol::Metadata::AttributeTableKey] = nlohmann::json(attribute_table);
+
+        return encode_metadata(metadata_json, ir_buf);
+    }
+
     bool encode_message(
             epoch_time_ms_t timestamp_delta,
             string_view message,

@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include <json/single_include/nlohmann/json.hpp>
+
 #include "encoding_methods.hpp"
 #include "protocol_constants.hpp"
 
@@ -52,5 +54,12 @@ auto Attribute::encode(std::vector<int8_t>& ir_buf) const -> bool {
         return attr_str_handler();
     }
     return false;
+}
+
+auto to_json(nlohmann::json& data, AttributeInfo const& attr_info) -> void {
+    data = nlohmann::json{
+            {AttributeInfo::cNameKey, attr_info.get_name()},
+            {AttributeInfo::cTypeTagKey, attr_info.get_type_tag()}
+    };
 }
 }  // namespace ffi::ir_stream
