@@ -62,7 +62,7 @@ public:
         return m_attribute == rhs.m_attribute;
     }
 
-    [[nodiscard]] auto validate_type(AttributeInfo const& attr_info) -> bool {
+    [[nodiscard]] auto validate_type(AttributeInfo const& attr_info) const -> bool {
         auto const type_tag{attr_info.get_type_tag()};
         if (AttributeInfo::TypeTag::String == type_tag) {
             return is_type<attr_str_t>();

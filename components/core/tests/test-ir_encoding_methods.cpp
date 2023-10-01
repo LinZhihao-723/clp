@@ -587,7 +587,7 @@ TEST_CASE("attribute_serialization", "[ffi][decode_next_message_with_attributes]
     test_serialization_with_attributes(
         "this is a test message",
         get_next_timestamp_for_test<four_byte_encoded_variable_t>(),
-        {std::nullopt, "This is the log tag", 10086, 31, "[error]", 123419}
+        {std::nullopt, "This is the log tag", "", 10086, 31, "[error]", 123419}
     );
     test_serialization_with_attributes(
         "this is a test message",
