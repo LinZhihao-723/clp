@@ -456,6 +456,9 @@ static IRErrorCode decode_attributes(
             }
             attributes.emplace_back(attr_str);
         } else {
+            if (attributes.empty() && cProtocol::Eof == encoded_tag) {
+                return IRErrorCode_Eof;
+            }
             return IRErrorCode_Corrupted_IR;
         }
     }
