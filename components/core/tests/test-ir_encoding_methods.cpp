@@ -1,3 +1,5 @@
+#include <optional>
+
 // Catch2
 #include <Catch2/single_include/catch2/catch.hpp>
 
@@ -7,6 +9,7 @@
 // Project headers
 #include "../src/BufferReader.hpp"
 #include "../src/ffi/encoding_methods.hpp"
+#include "../src/ffi/ir_stream/attributes.hpp"
 #include "../src/ffi/ir_stream/decoding_methods.hpp"
 #include "../src/ffi/ir_stream/encoding_methods.hpp"
 #include "../src/ffi/ir_stream/protocol_constants.hpp"
@@ -24,6 +27,9 @@ using ffi::four_byte_encoded_variable_t;
 using ffi::ir_stream::cProtocol::EightByteEncodingMagicNumber;
 using ffi::ir_stream::cProtocol::FourByteEncodingMagicNumber;
 using ffi::ir_stream::cProtocol::MagicNumberLength;
+using ffi::ir_stream::Attribute;
+using ffi::ir_stream::attr_int_t;
+using ffi::ir_stream::attr_str_t;
 using ffi::ir_stream::decode_preamble;
 using ffi::ir_stream::encoded_tag_t;
 using ffi::ir_stream::get_encoding_type;
@@ -538,6 +544,61 @@ TEST_CASE("validate_protocol_version", "[ffi][validate_version_protocol]") {
     REQUIRE(ffi::ir_stream::IRProtocolErrorCode_Supported
             == validate_protocol_version(ffi::ir_stream::cProtocol::Metadata::VersionValue));
     REQUIRE(ffi::ir_stream::IRProtocolErrorCode_Supported == validate_protocol_version("v0.0.0"));
+}
+
+TEST_CASE("attribute_serialization", "[ffi][decode_next_message_with_attributes]") {
+    auto test_serialization_with_attributes = [](
+            std::string_view message,
+            epoch_time_ms_t ts_delta,
+            vector<std::optional<Attribute>> const& attributes
+    ) -> void {
+        vector<int8_t> ir_encoding_buffer;
+        std::string encoded_log_type;
+        REQUIRE(ffi::ir_stream::four_byte_encoding::encode_message(
+                ts_delta,
+                message,
+                encoded_log_type,
+                attributes,
+                ir_encoding_buffer
+        ));
+        BufferReader buf_reader{
+                size_checked_pointer_cast<char const>(ir_encoding_buffer.data()),
+                ir_encoding_buffer.size()};
+        std::string decoded_message;
+        epoch_time_ms_t decoded_ts_delta;
+        vector<std::optional<Attribute>> decoded_attributes;
+        auto const num_attributes{attributes.size()};
+        REQUIRE(IRErrorCode::IRErrorCode_Success
+                == ffi::ir_stream::four_byte_encoding::decode_next_message_with_attributes(
+                        buf_reader,
+                        decoded_message,
+                        decoded_ts_delta,
+                        decoded_attributes,
+                        num_attributes
+        ));
+        REQUIRE(message == decoded_message);
+        REQUIRE(ts_delta == decoded_ts_delta);
+        REQUIRE(num_attributes == decoded_attributes.size());
+        for (size_t i = 0; i < num_attributes; ++i) {
+            REQUIRE(attributes[i] == decoded_attributes[i]);
+        }
+    };
+
+    test_serialization_with_attributes(
+        "this is a test message",
+        get_next_timestamp_for_test<four_byte_encoded_variable_t>(),
+        {std::nullopt, "This is the log tag", 10086, 31, "[error]", 123419}
+    );
+    test_serialization_with_attributes(
+        "this is a test message",
+        get_next_timestamp_for_test<four_byte_encoded_variable_t>(),
+        {std::nullopt, std::nullopt, std::nullopt, std::nullopt}
+    );
+    test_serialization_with_attributes(
+        "this is a test message",
+        get_next_timestamp_for_test<four_byte_encoded_variable_t>(),
+        {"thisasdfaa a;sdf ", std::nullopt, 123412343332342444, "[INFO]", 1234, 0, std::nullopt, 33}
+    );
 }
 
 TEMPLATE_TEST_CASE(

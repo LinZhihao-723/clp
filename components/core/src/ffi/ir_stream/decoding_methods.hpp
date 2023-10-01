@@ -1,11 +1,13 @@
 #ifndef FFI_IR_STREAM_DECODING_METHODS_HPP
 #define FFI_IR_STREAM_DECODING_METHODS_HPP
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "../../ReaderInterface.hpp"
 #include "../encoding_methods.hpp"
+#include "attributes.hpp"
 
 namespace ffi::ir_stream {
 using encoded_tag_t = int8_t;
@@ -199,6 +201,14 @@ namespace four_byte_encoding {
             ReaderInterface& reader,
             std::string& message,
             epoch_time_ms_t& timestamp_delta
+    );
+
+    IRErrorCode decode_next_message_with_attributes(
+            ReaderInterface& reader,
+            std::string& message,
+            epoch_time_ms_t& timestamp_delta,
+            std::vector<std::optional<Attribute>>& attributes,
+            size_t num_attributes
     );
 }  // namespace four_byte_encoding
 }  // namespace ffi::ir_stream

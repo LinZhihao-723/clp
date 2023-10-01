@@ -105,6 +105,12 @@ generic_decode_next_message(ReaderInterface& reader, string& message, epoch_time
 static IRErrorCode
 read_metadata_info(ReaderInterface& reader, encoded_tag_t& metadata_type, uint16_t& metadata_size);
 
+static IRErrorCode decode_attributes(
+        ReaderInterface& reader,
+        vector<std::optional<Attribute>>& attributes,
+        size_t num_attributes
+);
+
 template <typename encoded_variable_t>
 static bool is_variable_tag(encoded_tag_t tag, bool& is_encoded_var) {
     static_assert(
@@ -342,6 +348,119 @@ read_metadata_info(ReaderInterface& reader, encoded_tag_t& metadata_type, uint16
     return IRErrorCode_Success;
 }
 
+static IRErrorCode
+decode_attr_int(ReaderInterface& reader, encoded_tag_t tag, attr_int_t& attr_int) {
+    if (cProtocol::Payload::AttrNumByte == tag) {
+        int8_t value{};
+        if (false == decode_int(reader, value)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_int = value;
+    } else if (cProtocol::Payload::AttrNumShort == tag) {
+        int16_t value{};
+        if (false == decode_int(reader, value)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_int = value;
+    } else if (cProtocol::Payload::AttrNumInt == tag) {
+        int32_t value{};
+        if (false == decode_int(reader, value)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_int = value;
+    } else if (cProtocol::Payload::AttrNumLong == tag) {
+        int64_t value{};
+        if (false == decode_int(reader, value)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_int = value;
+    } else {
+        return IRErrorCode_Decode_Error;
+    }
+    return IRErrorCode_Success;
+}
+
+static IRErrorCode
+decode_attr_str(ReaderInterface& reader, encoded_tag_t tag, attr_str_t& attr_str) {
+    size_t attr_str_length{};
+    if (cProtocol::Payload::AttrStrLenByte == tag) {
+        uint8_t len{};
+        if (false == decode_int(reader, len)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_str_length = len;
+    } else if (cProtocol::Payload::AttrStrLenShort == tag) {
+        uint16_t len{};
+        if (false == decode_int(reader, len)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_str_length = len;
+    } else if (cProtocol::Payload::AttrStrLenInt == tag) {
+        uint32_t len{};
+        if (false == decode_int(reader, len)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        attr_str_length = len;
+    } else {
+        return IRErrorCode_Decode_Error;
+    }
+    if (ErrorCode_Success != reader.try_read_string(attr_str_length, attr_str)) {
+        return IRErrorCode_Incomplete_IR;
+    }
+    return IRErrorCode_Success;
+}
+
+static IRErrorCode decode_attributes(
+        ReaderInterface& reader,
+        vector<std::optional<Attribute>>& attributes,
+        size_t num_attributes
+) {
+    if (0 == num_attributes) {
+        return IRErrorCode_Success;
+    }
+    attributes.clear();
+    encoded_tag_t encoded_tag{cProtocol::Eof};
+    auto is_attr_int_tag = [&]() -> bool {
+        return cProtocol::Payload::AttrNumByte == encoded_tag
+               || cProtocol::Payload::AttrNumShort == encoded_tag
+               || cProtocol::Payload::AttrNumInt == encoded_tag
+               || cProtocol::Payload::AttrNumLong == encoded_tag;
+    };
+    auto is_attr_str_tag = [&]() -> bool {
+        return cProtocol::Payload::AttrStrLenByte == encoded_tag
+               || cProtocol::Payload::AttrStrLenShort == encoded_tag
+               || cProtocol::Payload::AttrStrLenInt == encoded_tag;
+    };
+    while (attributes.size() < num_attributes) {
+        if (ErrorCode_Success != reader.try_read_numeric_value(encoded_tag)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        if (cProtocol::Payload::AttrNull == encoded_tag) {
+            attributes.emplace_back(std::nullopt);
+            continue;
+        } else if (is_attr_int_tag()) {
+            attr_int_t attr_int{};
+            if (auto const error_code{decode_attr_int(reader, encoded_tag, attr_int)};
+                IRErrorCode_Success != error_code)
+            {
+                return error_code;
+            }
+            attributes.emplace_back(attr_int);
+        } else if (is_attr_str_tag()) {
+            attr_str_t attr_str;
+            if (auto const error_code{decode_attr_str(reader, encoded_tag, attr_str)};
+                IRErrorCode_Success != error_code)
+            {
+                return error_code;
+            }
+            attributes.emplace_back(attr_str);
+        } else {
+            return IRErrorCode_Corrupted_IR;
+        }
+    }
+    return IRErrorCode_Success;
+}
+
 template <typename encoded_variable_t>
 auto deserialize_ir_message(
         ReaderInterface& reader,
@@ -506,6 +625,21 @@ namespace four_byte_encoding {
                 message,
                 timestamp_delta
         );
+    }
+
+    IRErrorCode decode_next_message_with_attributes(
+            ReaderInterface& reader,
+            std::string& message,
+            epoch_time_ms_t& timestamp_delta,
+            std::vector<std::optional<Attribute>>& attributes,
+            size_t num_attributes
+    ) {
+        if (auto const error_code{decode_attributes(reader, attributes, num_attributes)};
+            IRErrorCode_Success != error_code)
+        {
+            return error_code;
+        }
+        return decode_next_message(reader, message, timestamp_delta);
     }
 }  // namespace four_byte_encoding
 

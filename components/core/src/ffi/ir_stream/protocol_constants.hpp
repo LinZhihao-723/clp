@@ -31,6 +31,15 @@ namespace Metadata {
 }  // namespace Metadata
 
 namespace Payload {
+    constexpr int8_t AttrNull = 0x40;
+    constexpr int8_t AttrNumByte = 0x41;
+    constexpr int8_t AttrNumShort = 0x42;
+    constexpr int8_t AttrNumInt = 0x43;
+    constexpr int8_t AttrNumLong = 0x44;
+    constexpr int8_t AttrStrLenByte = 0x45;
+    constexpr int8_t AttrStrLenShort = 0x46;
+    constexpr int8_t AttrStrLenInt = 0x47;
+
     constexpr int8_t VarFourByteEncoding = 0x18;
     constexpr int8_t VarEightByteEncoding = 0x19;
 
@@ -48,6 +57,11 @@ namespace Payload {
     constexpr int8_t TimestampDeltaInt = 0x33;
     constexpr int8_t TimestampDeltaLong = 0x34;
 }  // namespace Payload
+
+namespace Attribute {
+    constexpr int8_t String = 0x40;
+    constexpr int8_t Int = 0x41;
+}  // namespace Attribute
 
 constexpr int8_t FourByteEncodingMagicNumber[]
         = {static_cast<int8_t>(0xFD), 0x2F, static_cast<int8_t>(0xB5), 0x29};
