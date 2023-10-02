@@ -11,16 +11,6 @@ using std::string_view;
 using std::vector;
 
 namespace ffi::ir_stream {
-// Local function prototypes
-/**
- * Encodes an integer into the IR stream
- * @tparam integer_t
- * @param value
- * @param ir_buf
- */
-template <typename integer_t>
-static void encode_int(integer_t value, vector<int8_t>& ir_buf);
-
 /**
  * Encodes the given logtype into the IR stream
  * @param logtype
@@ -36,6 +26,9 @@ static bool encode_logtype(string_view logtype, vector<int8_t>& ir_buf);
  * @return true on success, false otherwise
  */
 static bool encode_metadata(nlohmann::json& metadata, vector<int8_t>& ir_buf);
+
+static bool
+encode_attributes(vector<std::optional<Attribute>> const& attributes, vector<int8_t>& ir_buf);
 
 /**
  * Adds the basic metadata fields to the given JSON object
@@ -93,21 +86,6 @@ private:
     vector<int8_t>& m_ir_buf;
 };
 
-template <typename integer_t>
-static void encode_int(integer_t value, vector<int8_t>& ir_buf) {
-    integer_t value_big_endian;
-    static_assert(sizeof(integer_t) == 2 || sizeof(integer_t) == 4 || sizeof(integer_t) == 8);
-    if constexpr (sizeof(value) == 2) {
-        value_big_endian = bswap_16(value);
-    } else if constexpr (sizeof(value) == 4) {
-        value_big_endian = bswap_32(value);
-    } else if constexpr (sizeof(value) == 8) {
-        value_big_endian = bswap_64(value);
-    }
-    auto data = reinterpret_cast<int8_t*>(&value_big_endian);
-    ir_buf.insert(ir_buf.end(), data, data + sizeof(value));
-}
-
 static bool encode_logtype(string_view logtype, vector<int8_t>& ir_buf) {
     auto length = logtype.length();
     if (length <= UINT8_MAX) {
@@ -145,6 +123,23 @@ static bool encode_metadata(nlohmann::json& metadata, vector<int8_t>& ir_buf) {
     }
     ir_buf.insert(ir_buf.cend(), metadata_serialized.cbegin(), metadata_serialized.cend());
 
+    return true;
+}
+
+static bool
+encode_attributes(vector<std::optional<Attribute>> const& attributes, vector<int8_t>& ir_buf) {
+    if (attributes.empty()) {
+        return true;
+    }
+    for (auto const& attribute : attributes) {
+        if (false == attribute.has_value()) {
+            ir_buf.push_back(cProtocol::Payload::AttrNull);
+            continue;
+        }
+        if (false == attribute.value().encode(ir_buf)) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -253,12 +248,62 @@ namespace four_byte_encoding {
         return encode_metadata(metadata_json, ir_buf);
     }
 
+    bool encode_preamble(
+            string_view timestamp_pattern,
+            string_view timestamp_pattern_syntax,
+            string_view time_zone_id,
+            epoch_time_ms_t reference_timestamp,
+            vector<AttributeInfo> const& attribute_table,
+            vector<int8_t>& ir_buf
+    ) {
+        // Write magic number
+        for (auto b : cProtocol::FourByteEncodingMagicNumber) {
+            ir_buf.push_back(b);
+        }
+
+        // Assemble metadata
+        nlohmann::json metadata_json;
+        add_base_metadata_fields(
+                timestamp_pattern,
+                timestamp_pattern_syntax,
+                time_zone_id,
+                metadata_json
+        );
+        metadata_json[cProtocol::Metadata::ReferenceTimestampKey]
+                = std::to_string(reference_timestamp);
+
+        metadata_json[cProtocol::Metadata::AttributeTableKey] = nlohmann::json(attribute_table);
+
+        return encode_metadata(metadata_json, ir_buf);
+    }
+
     bool encode_message(
             epoch_time_ms_t timestamp_delta,
             string_view message,
             string& logtype,
             vector<int8_t>& ir_buf
     ) {
+        if (false == encode_message(message, logtype, ir_buf)) {
+            return false;
+        }
+
+        if (false == encode_timestamp(timestamp_delta, ir_buf)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool encode_message(
+            epoch_time_ms_t timestamp_delta,
+            string_view message,
+            string& logtype,
+            vector<std::optional<Attribute>> const& attributes,
+            vector<int8_t>& ir_buf
+    ) {
+        if (false == encode_attributes(attributes, ir_buf)) {
+            return false;
+        }
         if (false == encode_message(message, logtype, ir_buf)) {
             return false;
         }

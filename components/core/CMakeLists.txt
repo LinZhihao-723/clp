@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5.1)
 project(CLP LANGUAGES CXX C)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(default_build_type "Release")
     message(STATUS "No build type specified. Setting to '${default_build_type}'.")
@@ -231,6 +233,8 @@ set(SOURCE_FILES_clp
         src/ffi/encoding_methods.hpp
         src/ffi/encoding_methods.inc
         src/ffi/ir_stream/byteswap.hpp
+        src/ffi/ir_stream/attributes.cpp
+        src/ffi/ir_stream/attributes.hpp
         src/ffi/ir_stream/decoding_methods.cpp
         src/ffi/ir_stream/decoding_methods.hpp
         src/ffi/ir_stream/decoding_methods.inc
@@ -416,6 +420,8 @@ set(SOURCE_FILES_clg
         src/ffi/encoding_methods.cpp
         src/ffi/encoding_methods.hpp
         src/ffi/encoding_methods.inc
+        src/ffi/ir_stream/attributes.cpp
+        src/ffi/ir_stream/attributes.hpp
         src/ffi/ir_stream/decoding_methods.cpp
         src/ffi/ir_stream/decoding_methods.hpp
         src/ffi/ir_stream/decoding_methods.inc
@@ -582,6 +588,8 @@ set(SOURCE_FILES_clo
         src/ffi/encoding_methods.cpp
         src/ffi/encoding_methods.hpp
         src/ffi/encoding_methods.inc
+        src/ffi/ir_stream/attributes.cpp
+        src/ffi/ir_stream/attributes.hpp
         src/ffi/ir_stream/decoding_methods.cpp
         src/ffi/ir_stream/decoding_methods.hpp
         src/ffi/ir_stream/decoding_methods.inc
@@ -758,6 +766,8 @@ set(SOURCE_FILES_unitTest
         src/ffi/encoding_methods.hpp
         src/ffi/encoding_methods.inc
         src/ffi/ir_stream/byteswap.hpp
+        src/ffi/ir_stream/attributes.cpp
+        src/ffi/ir_stream/attributes.hpp
         src/ffi/ir_stream/decoding_methods.cpp
         src/ffi/ir_stream/decoding_methods.hpp
         src/ffi/ir_stream/decoding_methods.inc
