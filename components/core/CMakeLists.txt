@@ -769,6 +769,8 @@ set(SOURCE_FILES_unitTest
         src/ffi/ir_stream/encoding_methods.cpp
         src/ffi/ir_stream/encoding_methods.hpp
         src/ffi/ir_stream/protocol_constants.hpp
+        src/ffi/ir_stream/SchemaTree.cpp
+        src/ffi/ir_stream/SchemaTree.hpp
         src/ffi/search/CompositeWildcardToken.cpp
         src/ffi/search/CompositeWildcardToken.hpp
         src/ffi/search/ExactVariableToken.cpp
@@ -905,6 +907,7 @@ set(SOURCE_FILES_unitTest
         tests/test-Grep.cpp
         tests/test-ir_encoding_methods.cpp
         tests/test-ir_parsing.cpp
+        tests/test-ir_schema.cpp
         tests/test-main.cpp
         tests/test-math_utils.cpp
         tests/test-ParserWithUserSchema.cpp
