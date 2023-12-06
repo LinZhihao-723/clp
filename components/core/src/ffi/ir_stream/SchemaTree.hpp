@@ -121,6 +121,8 @@ public:
             size_t& node_id
     ) -> bool;
 
+    [[nodiscard]] auto get_size() const -> size_t { return m_tree_nodes.size(); }
+
 private:
     std::vector<SchemaTreeNode> m_tree_nodes;
 };

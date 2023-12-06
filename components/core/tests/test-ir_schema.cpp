@@ -2,6 +2,7 @@
 #include <Catch2/single_include/catch2/catch.hpp>
 
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
+#include "../src/ffi/ir_stream/Values.hpp"
 
 using ffi::ir_stream::SchemaTree;
 using ffi::ir_stream::SchemaTreeException;
@@ -37,11 +38,19 @@ TEST_CASE("schema_tree", "[ffi][schema]") {
     test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Int, 2, false);
     test_node(1, "b", SchemaTreeNodeValueType::Obj, 3, false);
     test_node(3, "c", SchemaTreeNodeValueType::Obj, 4, false);
+    test_node(3, "d", SchemaTreeNodeValueType::Int, 5, false);
+    test_node(3, "d", SchemaTreeNodeValueType::Bool, 6, false);
+    test_node(4, "d", SchemaTreeNodeValueType::Int, 7, false);
+    test_node(4, "d", SchemaTreeNodeValueType::Str, 8, false);
 
     test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Obj, 1, true);
     test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Int, 2, true);
     test_node(1, "b", SchemaTreeNodeValueType::Obj, 3, true);
     test_node(3, "c", SchemaTreeNodeValueType::Obj, 4, true);
+    test_node(3, "d", SchemaTreeNodeValueType::Int, 5, true);
+    test_node(3, "d", SchemaTreeNodeValueType::Bool, 6, true);
+    test_node(4, "d", SchemaTreeNodeValueType::Int, 7, true);
+    test_node(4, "d", SchemaTreeNodeValueType::Str, 8, true);
 
     bool catch_exception{false};
     try {
