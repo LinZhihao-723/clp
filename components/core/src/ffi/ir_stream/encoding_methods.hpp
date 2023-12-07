@@ -7,6 +7,24 @@
 #include "../encoding_methods.hpp"
 
 namespace ffi::ir_stream {
+/**
+ * Encodes an integer into the IR stream.
+ * @tparam integer_t
+ * @param value
+ * @param ir_buf
+ */
+template <typename integer_t>
+void encode_int(integer_t value, std::vector<int8_t>& ir_buf);
+
+/**
+ * Encodes a floating number into IR stream.
+ * @tparam float_t
+ * @param value
+ * @param ir_buf
+ */
+template <typename float_t>
+void encode_floating_number(float_t value, std::vector<int8_t>& ir_buf);
+
 namespace eight_byte_encoding {
     /**
      * Encodes the preamble for the eight-byte encoding IR stream
@@ -93,4 +111,5 @@ namespace four_byte_encoding {
 }  // namespace four_byte_encoding
 }  // namespace ffi::ir_stream
 
+#include "encoding_methods.inc"
 #endif  // FFI_IR_STREAM_ENCODING_METHODS_HPP

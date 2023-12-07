@@ -28,7 +28,8 @@ private:
 };
 
 enum class SchemaTreeNodeValueType : uint8_t {
-    Int = 0,
+    Unknown = 0,
+    Int,
     Float,
     Bool,
     Str,

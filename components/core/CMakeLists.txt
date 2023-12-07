@@ -238,6 +238,7 @@ set(SOURCE_FILES_clp
         src/ffi/ir_stream/decoding_methods.inc
         src/ffi/ir_stream/encoding_methods.cpp
         src/ffi/ir_stream/encoding_methods.hpp
+        src/ffi/ir_stream/encoding_methods.inc
         src/FileReader.cpp
         src/FileReader.hpp
         src/FileWriter.cpp
@@ -768,9 +769,12 @@ set(SOURCE_FILES_unitTest
         src/ffi/ir_stream/decoding_methods.inc
         src/ffi/ir_stream/encoding_methods.cpp
         src/ffi/ir_stream/encoding_methods.hpp
+        src/ffi/ir_stream/encoding_methods.inc
         src/ffi/ir_stream/protocol_constants.hpp
         src/ffi/ir_stream/SchemaTree.cpp
         src/ffi/ir_stream/SchemaTree.hpp
+        src/ffi/ir_stream/Values.cpp
+        src/ffi/ir_stream/Values.hpp
         src/ffi/search/CompositeWildcardToken.cpp
         src/ffi/search/CompositeWildcardToken.hpp
         src/ffi/search/ExactVariableToken.cpp
