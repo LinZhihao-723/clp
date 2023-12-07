@@ -1,6 +1,9 @@
 // Catch2
+#include <vector>
+
 #include <Catch2/single_include/catch2/catch.hpp>
 
+#include "../src/BufferReader.hpp"
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
 #include "../src/ffi/ir_stream/Values.hpp"
 
@@ -8,6 +11,12 @@ using ffi::ir_stream::SchemaTree;
 using ffi::ir_stream::SchemaTreeException;
 using ffi::ir_stream::SchemaTreeNode;
 using ffi::ir_stream::SchemaTreeNodeValueType;
+
+using ffi::ir_stream::Value;
+using ffi::ir_stream::value_bool_t;
+using ffi::ir_stream::value_float_t;
+using ffi::ir_stream::value_int_t;
+using ffi::ir_stream::value_str_t;
 
 TEST_CASE("schema_tree", "[ffi][schema]") {
     SchemaTree schema_tree;
@@ -60,5 +69,62 @@ TEST_CASE("schema_tree", "[ffi][schema]") {
         if (ErrorCode_BadParam == ex.get_error_code()) {
             catch_exception = true;
         }
+    }
+}
+
+TEST_CASE("values", "[ffi][key_value_pairs]") {
+    std::vector<Value> expected_values;
+    std::vector<int8_t> ir_buffer;
+
+    // Int values
+    expected_values.emplace_back(static_cast<value_int_t>(0));
+    expected_values.emplace_back(static_cast<value_int_t>(INT32_MAX));
+    expected_values.emplace_back(static_cast<value_int_t>(INT32_MIN));
+    expected_values.emplace_back(static_cast<value_int_t>(INT32_MAX) + 1);
+    expected_values.emplace_back(static_cast<value_int_t>(INT32_MIN) - 1);
+    expected_values.emplace_back(static_cast<value_int_t>(INT64_MAX));
+    expected_values.emplace_back(static_cast<value_int_t>(INT64_MIN));
+
+    // Float values
+    expected_values.emplace_back(static_cast<value_float_t>(0));
+    expected_values.emplace_back(static_cast<value_float_t>(1.2));
+    expected_values.emplace_back(static_cast<value_float_t>(-1.2));
+
+    // Bool
+    expected_values.emplace_back(true);
+    expected_values.emplace_back(false);
+
+    // Str
+    expected_values.emplace_back("");
+    expected_values.emplace_back("This is a test string");
+    std::string short_length;
+    for (size_t i{0}; i < static_cast<size_t>(sizeof(uint16_t)); ++i) {
+        short_length.append("a");
+    }
+    expected_values.emplace_back(short_length);
+    std::string int_length;
+    for (size_t i{0}; i < static_cast<size_t>(sizeof(uint16_t)); ++i) {
+        int_length.append("ab");
+    }
+    expected_values.emplace_back(int_length);
+
+    // Encode
+    for (auto const& value : expected_values) {
+        REQUIRE(value.encode(ir_buffer));
+    }
+
+    auto const num_values{expected_values.size()};
+
+    // Decode
+    BufferReader reader{size_checked_pointer_cast<char const>(ir_buffer.data()), ir_buffer.size()};
+    std::vector<Value> decoded_values(num_values);
+    for (auto& value : decoded_values) {
+        REQUIRE(ffi::ir_stream::IRErrorCode_Success == value.decode_from_reader(reader));
+    }
+
+    // Value compare
+    for (size_t i{0}; i < num_values; ++i) {
+        bool const is_same{expected_values.at(i) == decoded_values.at(i)};
+        REQUIRE(is_same);
     }
 }

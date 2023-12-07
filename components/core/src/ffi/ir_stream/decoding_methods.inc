@@ -6,10 +6,52 @@
 
 #include "../../ir/parsing.hpp"
 #include "../encoding_methods.hpp"
+#include "byteswap.hpp"
 #include "decoding_methods.hpp"
 #include "protocol_constants.hpp"
 
 namespace ffi::ir_stream {
+template <typename integer_t>
+bool decode_int(ReaderInterface& reader, integer_t& value) {
+    integer_t value_little_endian;
+    if (reader.try_read_numeric_value(value_little_endian) != ErrorCode_Success) {
+        return false;
+    }
+
+    constexpr auto read_size = sizeof(integer_t);
+    static_assert(read_size == 1 || read_size == 2 || read_size == 4 || read_size == 8);
+    if constexpr (read_size == 1) {
+        value = value_little_endian;
+    } else if constexpr (read_size == 2) {
+        value = bswap_16(value_little_endian);
+    } else if constexpr (read_size == 4) {
+        value = bswap_32(value_little_endian);
+    } else if constexpr (read_size == 8) {
+        value = bswap_64(value_little_endian);
+    }
+    return true;
+}
+
+template <typename float_t>
+bool decode_floating_number(ReaderInterface& reader, float_t& value) {
+    constexpr auto read_size{sizeof(value)};
+    static_assert(4 == read_size || 8 == read_size);
+    if constexpr (4 == read_size) {
+        int32_t bit_representation{};
+        if (false == decode_int(reader, bit_representation)) {
+            return false;
+        }
+        value = bit_cast<float_t>(bit_representation);
+    } else if constexpr (8 == read_size) {
+        int64_t bit_representation{};
+        if (false == decode_int(reader, bit_representation)) {
+            return false;
+        }
+        value = bit_cast<float_t>(bit_representation);
+    }
+    return true;
+}
+
 template <
         bool unescape_logtype,
         typename encoded_variable_t,

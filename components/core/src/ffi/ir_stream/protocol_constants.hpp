@@ -47,6 +47,19 @@ namespace Payload {
     constexpr int8_t TimestampDeltaShort = 0x32;
     constexpr int8_t TimestampDeltaInt = 0x33;
     constexpr int8_t TimestampDeltaLong = 0x34;
+
+    constexpr int8_t ValueInt8 = 0x50;
+    constexpr int8_t ValueInt16 = 0x51;
+    constexpr int8_t ValueInt32 = 0x52;
+    constexpr int8_t ValueInt64 = 0x53;
+    constexpr int8_t ValueTrue = 0x54;
+    constexpr int8_t ValueFalse = 0x55;
+    constexpr int8_t ValueDouble = 0x56;
+
+    constexpr int8_t ValueStrCLP = 0x60;
+    constexpr int8_t ValueStrLenUByte = 0x61;
+    constexpr int8_t ValueStrLenUShort = 0x62;
+    constexpr int8_t ValueStrLenUInt = 0x63;
 }  // namespace Payload
 
 constexpr int8_t FourByteEncodingMagicNumber[]
