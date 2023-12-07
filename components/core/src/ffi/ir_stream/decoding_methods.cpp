@@ -2,7 +2,6 @@
 
 #include <regex>
 
-#include "byteswap.hpp"
 #include "protocol_constants.hpp"
 
 using std::is_same_v;
@@ -19,17 +18,6 @@ namespace ffi::ir_stream {
  */
 template <typename encoded_variable_t>
 static bool is_variable_tag(encoded_tag_t tag, bool& is_encoded_var);
-
-/**
- * Decodes an integer from the given reader
- * @tparam integer_t Type of the integer to decode
- * @param reader
- * @param value Returns the decoded integer
- * @return true on success, false if the reader doesn't contain enough data to
- * decode
- */
-template <typename integer_t>
-static bool decode_int(ReaderInterface& reader, integer_t& value);
 
 /**
  * Decodes the next logtype string from the given reader
@@ -131,27 +119,6 @@ static bool is_variable_tag(encoded_tag_t tag, bool& is_encoded_var) {
         }
     }
     return false;
-}
-
-template <typename integer_t>
-static bool decode_int(ReaderInterface& reader, integer_t& value) {
-    integer_t value_little_endian;
-    if (reader.try_read_numeric_value(value_little_endian) != ErrorCode_Success) {
-        return false;
-    }
-
-    constexpr auto read_size = sizeof(integer_t);
-    static_assert(read_size == 1 || read_size == 2 || read_size == 4 || read_size == 8);
-    if constexpr (read_size == 1) {
-        value = value_little_endian;
-    } else if constexpr (read_size == 2) {
-        value = bswap_16(value_little_endian);
-    } else if constexpr (read_size == 4) {
-        value = bswap_32(value_little_endian);
-    } else if constexpr (read_size == 8) {
-        value = bswap_64(value_little_endian);
-    }
-    return true;
 }
 
 static IRErrorCode
@@ -483,8 +450,9 @@ IRProtocolErrorCode validate_protocol_version(std::string_view protocol_version)
         return IRProtocolErrorCode_Invalid;
     }
     std::string_view current_build_protocol_version{cProtocol::Metadata::VersionValue};
-    auto get_major_version{
-            [](std::string_view version) { return version.substr(0, version.find('.')); }};
+    auto get_major_version{[](std::string_view version) {
+        return version.substr(0, version.find('.'));
+    }};
     if (current_build_protocol_version < protocol_version) {
         return IRProtocolErrorCode_Too_New;
     }

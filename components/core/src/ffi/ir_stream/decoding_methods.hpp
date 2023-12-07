@@ -45,6 +45,28 @@ private:
 };
 
 /**
+ * Decodes an integer from the given reader
+ * @tparam integer_t Type of the integer to decode
+ * @param reader
+ * @param value Returns the decoded integer
+ * @return true on success, false if the reader doesn't contain enough data to
+ * decode
+ */
+template <typename integer_t>
+bool decode_int(ReaderInterface& reader, integer_t& value);
+
+/**
+ * Decodes a non-CLP-encoded floating point from the given reader.
+ * @tparam float_t Type of the floating number.
+ * @param reader
+ * @param value Returns the decoded float.
+ * @return true on success, false if the reader doesn't contain enough data to
+ * decode.
+ */
+template <typename float_t>
+bool decode_floating_number(ReaderInterface& reader, float_t& value);
+
+/**
  * Decodes the encoding type for the encoded IR stream
  * @param reader
  * @param is_four_bytes_encoding Returns the encoding type

@@ -11,6 +11,7 @@
 
 #include "../../ReaderInterface.hpp"
 #include "../../TraceableException.hpp"
+#include "decoding_methods.hpp"
 #include "SchemaTree.hpp"
 
 namespace ffi::ir_stream {
@@ -126,6 +127,16 @@ public:
     }
 
     /**
+     * Sets the underlying value with the given data.
+     * @tparam value_type
+     * @param value
+     */
+    template <typename value_type, typename = std::enable_if<is_valid_value_type<value_type>>>
+    auto set(value_type const& value) -> void {
+        m_value = value;
+    }
+
+    /**
      * Gets an immutable representation of the underlying value as the given
      * value_type.
      * @tparam value_type
@@ -171,16 +182,25 @@ public:
     [[nodiscard]] auto encode(std::vector<int8_t>& ir_buf) const -> bool;
 
     /**
+     * Decodes the next value from the given reader.
+     * @param reader
+     * @param value
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    [[nodiscard]] auto decode_from_reader(ReaderInterface& reader) -> IRErrorCode;
+
+    /**
      * @return SchemaTreeNodeValueType based on the underlying value type.
      */
     [[nodiscard]] auto get_expected_schema_tree_node_type() const -> SchemaTreeNodeValueType;
 
-    /**
-     * Decodes the next value from the given reader.
-     * @param reader
-     * @return Decoded value.
-     */
-    static auto decode(ReaderInterface& reader) -> Value;
+    [[nodiscard]] auto operator==(Value const& rhs) const -> bool { return m_value == rhs.m_value; }
+
+    [[nodiscard]] auto operator!=(Value const& rhs) const -> bool {
+        return (false == operator==(rhs));
+    }
 
 private:
     value_t m_value{std::monostate{}};

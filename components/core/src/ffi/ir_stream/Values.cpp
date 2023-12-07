@@ -1,10 +1,18 @@
 #include "Values.hpp"
 
+#include "decoding_methods.hpp"
 #include "encoding_methods.hpp"
 #include "protocol_constants.hpp"
 
 namespace ffi::ir_stream {
 namespace {
+    /**
+     * Encodes the given integer value into IR.
+     * @param value
+     * @param ir_buf
+     * @return true on success.
+     * @return false on failure.
+     */
     auto encode_value_int(value_int_t value, std::vector<int8_t>& ir_buf) -> bool {
         bool success{true};
         if (INT32_MIN <= value && value <= INT32_MAX) {
@@ -19,6 +27,41 @@ namespace {
         return success;
     }
 
+    /**
+     * Decodes an integer value into the reader.
+     * @param reader
+     * @param tag
+     * @param value Returns the decoded value.
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    auto decode_value_int(ReaderInterface& reader, int8_t tag, value_t& value) -> IRErrorCode {
+        if (cProtocol::Payload::ValueInt32 == tag) {
+            int32_t int_value{};
+            if (false == decode_int(reader, int_value)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            value = static_cast<value_int_t>(int_value);
+        } else if (cProtocol::Payload::ValueInt64 == tag) {
+            int64_t int_value{};
+            if (false == decode_int(reader, int_value)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            value = static_cast<value_int_t>(int_value);
+        } else {
+            return IRErrorCode_Corrupted_IR;
+        }
+        return IRErrorCode_Success;
+    }
+
+    /**
+     * Encodes the given float value into IR.
+     * @param value
+     * @param ir_buf
+     * @return true on success.
+     * @return false on failure.
+     */
     auto encode_value_float(value_float_t value, std::vector<int8_t>& ir_buf) -> bool {
         static_assert(std::is_same_v<value_float_t, double>, "Currently only double is supported.");
         ir_buf.push_back(cProtocol::Payload::ValueDouble);
@@ -26,6 +69,35 @@ namespace {
         return true;
     }
 
+    /**
+     * Decodes a float value into the reader.
+     * @param reader
+     * @param tag
+     * @param value Returns the decoded value.
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    auto decode_value_float(ReaderInterface& reader, int8_t tag, value_t& value) -> IRErrorCode {
+        if (cProtocol::Payload::ValueDouble == tag) {
+            double float_value{};
+            if (false == decode_floating_number(reader, float_value)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            value = float_value;
+        } else {
+            return IRErrorCode_Corrupted_IR;
+        }
+        return IRErrorCode_Success;
+    }
+
+    /**
+     * Encodes the given boolean value into IR.
+     * @param value
+     * @param ir_buf
+     * @return true on success.
+     * @return false on failure.
+     */
     auto encode_value_bool(value_bool_t value, std::vector<int8_t>& ir_buf) -> bool {
         if (value) {
             ir_buf.push_back(cProtocol::Payload::ValueTrue);
@@ -35,6 +107,13 @@ namespace {
         return true;
     }
 
+    /**
+     * Encodes the given string value as a normal string.
+     * @param value
+     * @param ir_buf
+     * @return true on success.
+     * @return false on failure.
+     */
     auto encode_normal_str(std::string_view value, std::vector<int8_t>& ir_buf) -> bool {
         auto const length{value.length()};
         if (length <= UINT8_MAX) {
@@ -50,9 +129,17 @@ namespace {
         } else {
             return false;
         }
+        ir_buf.insert(ir_buf.cend(), value.cbegin(), value.cend());
         return true;
     }
 
+    /**
+     * Encodes the given string value into IR.
+     * @param value
+     * @param ir_buf
+     * @return true on success.
+     * @return false on failure.
+     */
     auto encode_value_str(std::string_view value, std::vector<int8_t>& ir_buf) -> bool {
         if (std::string_view::npos == value.find(' ')) {
             encode_normal_str(value, ir_buf);
@@ -61,6 +148,46 @@ namespace {
             encode_normal_str(value, ir_buf);
         }
         return true;
+    }
+
+    /**
+     * Decodes a normal string from the given reader.
+     * @param reader
+     * @param tag
+     * @param value Returns the decoded value.
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    auto decode_normal_str(ReaderInterface& reader, int8_t tag, value_t& value) -> IRErrorCode {
+        size_t str_length{};
+        if (cProtocol::Payload::ValueStrLenUByte == tag) {
+            uint8_t length{};
+            if (false == decode_int(reader, length)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            str_length = static_cast<size_t>(length);
+        } else if (cProtocol::Payload::ValueStrLenUShort == tag) {
+            uint16_t length{};
+            if (false == decode_int(reader, length)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            str_length = static_cast<size_t>(length);
+        } else if (cProtocol::Payload::ValueStrLenUInt == tag) {
+            uint32_t length{};
+            if (false == decode_int(reader, length)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            str_length = static_cast<size_t>(length);
+        } else {
+            return IRErrorCode_Corrupted_IR;
+        }
+        std::string str_value;
+        if (ErrorCode_Success != reader.try_read_string(str_length, str_value)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+        value = str_value;
+        return IRErrorCode_Success;
     }
 }  // namespace
 
@@ -79,6 +206,39 @@ auto Value::encode(std::vector<int8_t>& ir_buf) const -> bool {
         return encode_value_str(get<value_str_t>(), ir_buf);
     }
     return false;
+}
+
+auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
+    int8_t tag{};
+    if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+        return IRErrorCode_Incomplete_IR;
+    }
+
+    IRErrorCode error_code{IRErrorCode_Success};
+    switch (tag) {
+        case cProtocol::Payload::ValueInt32:
+        case cProtocol::Payload::ValueInt64:
+            error_code = decode_value_int(reader, tag, m_value);
+            break;
+        case cProtocol::Payload::ValueDouble:
+            error_code = decode_value_float(reader, tag, m_value);
+            break;
+        case cProtocol::Payload::ValueTrue:
+            m_value = true;
+            break;
+        case cProtocol::Payload::ValueFalse:
+            m_value = false;
+            break;
+        case cProtocol::Payload::ValueStrLenUByte:
+        case cProtocol::Payload::ValueStrLenUShort:
+        case cProtocol::Payload::ValueStrLenUInt:
+            error_code = decode_normal_str(reader, tag, m_value);
+            break;
+        default:
+            error_code = IRErrorCode_Corrupted_IR;
+            break;
+    }
+    return error_code;
 }
 
 auto Value::get_expected_schema_tree_node_type() const -> SchemaTreeNodeValueType {
