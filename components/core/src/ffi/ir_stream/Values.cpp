@@ -241,7 +241,7 @@ auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
     return error_code;
 }
 
-auto Value::get_expected_schema_tree_node_type() const -> SchemaTreeNodeValueType {
+auto Value::get_schema_tree_node_type() const -> SchemaTreeNodeValueType {
     if (is_empty()) {
         return SchemaTreeNodeValueType::Unknown;
     }

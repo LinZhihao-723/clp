@@ -194,7 +194,7 @@ public:
     /**
      * @return SchemaTreeNodeValueType based on the underlying value type.
      */
-    [[nodiscard]] auto get_expected_schema_tree_node_type() const -> SchemaTreeNodeValueType;
+    [[nodiscard]] auto get_schema_tree_node_type() const -> SchemaTreeNodeValueType;
 
     [[nodiscard]] auto operator==(Value const& rhs) const -> bool { return m_value == rhs.m_value; }
 

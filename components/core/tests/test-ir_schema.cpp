@@ -75,38 +75,55 @@ TEST_CASE("schema_tree", "[ffi][schema]") {
 TEST_CASE("values", "[ffi][key_value_pairs]") {
     std::vector<Value> expected_values;
     std::vector<int8_t> ir_buffer;
+    std::vector<SchemaTreeNodeValueType> expected_types;
 
     // Int values
     expected_values.emplace_back(static_cast<value_int_t>(0));
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT32_MAX));
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT32_MIN));
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT32_MAX) + 1);
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT32_MIN) - 1);
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT64_MAX));
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
     expected_values.emplace_back(static_cast<value_int_t>(INT64_MIN));
+    expected_types.push_back(SchemaTreeNodeValueType::Int);
 
     // Float values
     expected_values.emplace_back(static_cast<value_float_t>(0));
+    expected_types.push_back(SchemaTreeNodeValueType::Float);
     expected_values.emplace_back(static_cast<value_float_t>(1.2));
+    expected_types.push_back(SchemaTreeNodeValueType::Float);
     expected_values.emplace_back(static_cast<value_float_t>(-1.2));
+    expected_types.push_back(SchemaTreeNodeValueType::Float);
 
     // Bool
     expected_values.emplace_back(true);
+    expected_types.push_back(SchemaTreeNodeValueType::Bool);
     expected_values.emplace_back(false);
+    expected_types.push_back(SchemaTreeNodeValueType::Bool);
 
     // Str
     expected_values.emplace_back("");
+    expected_types.push_back(SchemaTreeNodeValueType::Str);
     expected_values.emplace_back("This is a test string");
+    expected_types.push_back(SchemaTreeNodeValueType::Str);
     std::string short_length;
     for (size_t i{0}; i < static_cast<size_t>(sizeof(uint16_t)); ++i) {
         short_length.append("a");
     }
     expected_values.emplace_back(short_length);
+    expected_types.push_back(SchemaTreeNodeValueType::Str);
     std::string int_length;
     for (size_t i{0}; i < static_cast<size_t>(sizeof(uint16_t)); ++i) {
         int_length.append("ab");
     }
     expected_values.emplace_back(int_length);
+    expected_types.push_back(SchemaTreeNodeValueType::Str);
 
     // Encode
     for (auto const& value : expected_values) {
@@ -126,5 +143,6 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
     for (size_t i{0}; i < num_values; ++i) {
         bool const is_same{expected_values.at(i) == decoded_values.at(i)};
         REQUIRE(is_same);
+        REQUIRE(decoded_values.at(i).get_schema_tree_node_type() == expected_types.at(i));
     }
 }
