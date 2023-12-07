@@ -37,7 +37,7 @@ using valid_value_types = std::tuple<
         value_type_identity<value_str_t>>;
 
 /**
- * Templates to enum the tuple to create a variable
+ * Templates to enum the tuple to create variant.
  */
 template <typename value_type, typename...>
 struct enum_value_types_to_variant;
