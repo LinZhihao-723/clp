@@ -189,11 +189,21 @@ namespace {
         value = str_value;
         return IRErrorCode_Success;
     }
+
+    /**
+     * Encodes null into IR.
+     * @param ir_buf
+     * @return true on success.
+     */
+    auto encode_null(std::vector<int8_t>& ir_buf) -> bool {
+        ir_buf.push_back(cProtocol::Payload::ValueNull);
+        return true;
+    }
 }  // namespace
 
 auto Value::encode(std::vector<int8_t>& ir_buf) const -> bool {
     if (is_empty()) {
-        return false;
+        return encode_null(ir_buf);
     }
 
     if (is_type<value_int_t>()) {
@@ -234,6 +244,9 @@ auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
         case cProtocol::Payload::ValueStrLenUInt:
             error_code = decode_normal_str(reader, tag, m_value);
             break;
+        case cProtocol::Payload::ValueNull:
+            m_value = std::monostate{};
+            break;
         default:
             error_code = IRErrorCode_Corrupted_IR;
             break;
@@ -243,7 +256,7 @@ auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
 
 auto Value::get_schema_tree_node_type() const -> SchemaTreeNodeValueType {
     if (is_empty()) {
-        return SchemaTreeNodeValueType::Unknown;
+        return SchemaTreeNodeValueType::Obj;
     }
 
     if (is_type<value_int_t>()) {
@@ -255,6 +268,25 @@ auto Value::get_schema_tree_node_type() const -> SchemaTreeNodeValueType {
     } else if (is_type<value_str_t>()) {
         return SchemaTreeNodeValueType::Str;
     }
+
     return SchemaTreeNodeValueType::Unknown;
+}
+
+auto Value::convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value {
+    switch (type) {
+        case SchemaTreeNodeValueType::Int:
+            return {value.get<value_int_t>()};
+        case SchemaTreeNodeValueType::Float:
+            return {value.get<double>()};
+        case SchemaTreeNodeValueType::Bool:
+            return {value.get<bool>()};
+        case SchemaTreeNodeValueType::Str:
+            return {value.get<std::string>()};
+        case SchemaTreeNodeValueType::Obj:
+            return {};
+        default:
+            throw ValueException(ErrorCode_BadParam, __FILENAME__, __LINE__, "Unkown type");
+    }
+    return {};
 }
 }  // namespace ffi::ir_stream

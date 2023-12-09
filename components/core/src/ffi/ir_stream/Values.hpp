@@ -9,6 +9,8 @@
 #include <variant>
 #include <vector>
 
+#include <json/single_include/nlohmann/json.hpp>
+
 #include "../../ReaderInterface.hpp"
 #include "../../TraceableException.hpp"
 #include "decoding_methods.hpp"
@@ -16,6 +18,7 @@
 
 namespace ffi::ir_stream {
 using value_int_t = int64_t;
+using value_uint_t = uint64_t;
 using value_float_t = double;
 using value_bool_t = bool;
 using value_str_t = std::string;
@@ -201,6 +204,9 @@ public:
     [[nodiscard]] auto operator!=(Value const& rhs) const -> bool {
         return (false == operator==(rhs));
     }
+
+    [[nodiscard]] static auto
+    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value;
 
 private:
     value_t m_value{std::monostate{}};

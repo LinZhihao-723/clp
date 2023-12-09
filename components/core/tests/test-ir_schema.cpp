@@ -125,6 +125,10 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
     expected_values.emplace_back(int_length);
     expected_types.push_back(SchemaTreeNodeValueType::Str);
 
+    // Null
+    expected_values.emplace_back();
+    expected_types.push_back(SchemaTreeNodeValueType::Obj);
+
     // Encode
     for (auto const& value : expected_values) {
         REQUIRE(value.encode(ir_buffer));
