@@ -767,6 +767,8 @@ set(SOURCE_FILES_unitTest
         src/ffi/ir_stream/decoding_methods.cpp
         src/ffi/ir_stream/decoding_methods.hpp
         src/ffi/ir_stream/decoding_methods.inc
+        src/ffi/ir_stream/encoding_json.cpp
+        src/ffi/ir_stream/encoding_json.hpp
         src/ffi/ir_stream/encoding_methods.cpp
         src/ffi/ir_stream/encoding_methods.hpp
         src/ffi/ir_stream/encoding_methods.inc

@@ -6,11 +6,12 @@
 
 namespace ffi::ir_stream {
 namespace {
-    template <typename JsonObjectIterator>
+    using JsonObjectIterator = decltype(std::declval<nlohmann::json const>().items().begin());
+
     struct DfsStackNode {
         DfsStackNode(JsonObjectIterator b, JsonObjectIterator e, size_t id)
-                : begin{b},
-                  end{e},
+                : begin(b),
+                  end(e),
                   schema_tree_node_id{id} {}
 
         JsonObjectIterator begin;
@@ -30,123 +31,156 @@ namespace {
         }
         return true;
     }
-}  // namespace
 
-auto serialize_json_array(
-        nlohmann::json const& json_array,
-        SchemaTree& schema_tree,
-        std::vector<int8_t>& ir_buf,
-        std::vector<size_t>& inserted_schema_tree_node_ids
-) -> bool {
-    ir_buf.push_back(cProtocol::Payload::ArrayBegin);
+    auto serialize_json_array(
+            nlohmann::json const& json_array,
+            SchemaTree& schema_tree,
+            std::vector<int8_t>& ir_buf,
+            std::vector<size_t>& inserted_schema_tree_node_ids
+    ) -> bool;
 
-    if (false == json_array.is_array()) {
-        return false;
-    }
-    for (auto const& item : json_array) {
-        if (false == item.is_object() || false == item.is_array()) {
-            // TODO: currently, we don't support raw values in an array.
-            return false;
-        }
-        if (false
-            == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
-        {
-            return false;
-        }
-    }
+    auto serialize_json_object(
+            nlohmann::json const& json_array,
+            SchemaTree& schema_tree,
+            std::vector<int8_t>& ir_buf,
+            std::vector<size_t>& inserted_schema_tree_node_ids
+    ) -> bool;
 
-    ir_buf.push_back(cProtocol::Payload::ArrayEnd);
-    return true;
-}
-
-auto serialize_json_object(
-        nlohmann::json const& json_obj,
-        SchemaTree& schema_tree,
-        std::vector<int8_t>& ir_buf,
-        std::vector<size_t>& inserted_schema_tree_node_ids
-) -> bool {
-    if (json_obj.is_array()) {
-        return serialize_json_object(json_obj, schema_tree, ir_buf, inserted_schema_tree_node_ids);
-    }
-    if (false == json_obj.is_object()) {
-        return false;
-    }
-    std::vector<DfsStackNode<nlohmann::detail::iter_impl<nlohmann::json const>>> working_stack;
-    working_stack
-            .emplace_back(json_obj.items().begin(), json_obj.items().end(), SchemaTree::cRootId);
-    while (false == working_stack.empty()) {
-        auto& [it_curr, it_end, parent_id]{working_stack.back()};
-        if (it_curr == it_end) {
-            working_stack.pop_back();
-            continue;
-        }
-        std::string_view key{it_curr.key()};
-        auto const& value{it_curr.value()};
-        ++it_curr;
-
-        if (value.is_array()) {
-            size_t node_id{};
-            auto const inserted{
-                    schema_tree
-                            .try_insert_node(parent_id, key, SchemaTreeNodeValueType::Obj, node_id)
-            };
-            if (inserted) {
-                inserted_schema_tree_node_ids.push_back(node_id);
-            }
-            if (false == encode_schema_id(node_id, ir_buf)) {
-                return false;
-            }
-            if (false
-                == serialize_json_array(value, schema_tree, ir_buf, inserted_schema_tree_node_ids))
-            {
-                return false;
-            }
-            continue;
-        } else if (value.is_object()) {
-            size_t node_id{};
-            auto const inserted{
-                    schema_tree
-                            .try_insert_node(parent_id, key, SchemaTreeNodeValueType::Obj, node_id)
-            };
-            if (inserted) {
-                inserted_schema_tree_node_ids.push_back(node_id);
-            }
-            working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
-            continue;
-        }
-
-        SchemaTreeNodeValueType type{SchemaTreeNodeValueType::Unknown};
-        if (value.is_number_integer()) {
-            type = SchemaTreeNodeValueType::Int;
-        } else if (value.is_number_float()) {
-            type = SchemaTreeNodeValueType::Float;
-        } else if (value.is_boolean()) {
-            type = SchemaTreeNodeValueType::Bool;
-        } else if (value.is_string()) {
-            type = SchemaTreeNodeValueType::Str;
-        } else if (value.is_null()) {
-            type == SchemaTreeNodeValueType::Obj;
-        }
-        if (type == SchemaTreeNodeValueType::Unknown) {
-            return false;
-        }
+    auto get_schema_node_id(
+            SchemaTree& schema_tree,
+            size_t parent_id,
+            SchemaTreeNodeValueType type,
+            std::string_view key,
+            std::vector<size_t>& inserted_schema_tree_node_ids
+    ) -> size_t {
         size_t node_id{};
         auto const inserted{schema_tree.try_insert_node(parent_id, key, type, node_id)};
         if (inserted) {
             inserted_schema_tree_node_ids.push_back(node_id);
         }
-        auto const value_from_json{Value::convert_from_json(type, value)};
-        if (false == encode_schema_id(node_id, ir_buf)) {
-            return false;
-        }
-        if (false == value_from_json.encode(ir_buf)) {
-            return false;
-        }
+        return node_id;
     }
 
-    ir_buf.push_back(cProtocol::Payload::KeyValuePairRecordDeliminator);
-    return true;
-}
+    auto serialize_json_array(
+            nlohmann::json const& json_array,
+            SchemaTree& schema_tree,
+            std::vector<int8_t>& ir_buf,
+            std::vector<size_t>& inserted_schema_tree_node_ids
+    ) -> bool {
+        ir_buf.push_back(cProtocol::Payload::ArrayBegin);
+
+        if (false == json_array.is_array()) {
+            return false;
+        }
+        for (auto const& item : json_array) {
+            if (false == item.is_object() || false == item.is_array()) {
+                // TODO: currently, we don't support raw values in an array.
+                return false;
+            }
+            if (false
+                == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
+            {
+                return false;
+            }
+        }
+
+        ir_buf.push_back(cProtocol::Payload::ArrayEnd);
+        return true;
+    }
+
+    auto serialize_json_object(
+            nlohmann::json const& root,
+            SchemaTree& schema_tree,
+            std::vector<int8_t>& ir_buf,
+            std::vector<size_t>& inserted_schema_tree_node_ids
+    ) -> bool {
+        if (root.is_array()) {
+            return serialize_json_object(root, schema_tree, ir_buf, inserted_schema_tree_node_ids);
+        }
+        if (false == root.is_object()) {
+            return false;
+        }
+        std::vector<DfsStackNode> working_stack;
+        working_stack.emplace_back(root.items().begin(), root.items().end(), SchemaTree::cRootId);
+        while (false == working_stack.empty()) {
+            auto& [it_curr, it_end, parent_id]{working_stack.back()};
+            if (it_curr == it_end) {
+                working_stack.pop_back();
+                continue;
+            }
+            std::string_view key{it_curr.key()};
+            auto const& value{it_curr.value()};
+            ++it_curr;
+
+            if (value.is_array()) {
+                auto const node_id{get_schema_node_id(
+                        schema_tree,
+                        parent_id,
+                        SchemaTreeNodeValueType::Obj,
+                        key,
+                        inserted_schema_tree_node_ids
+                )};
+                if (false == encode_schema_id(node_id, ir_buf)) {
+                    return false;
+                }
+                if (false
+                    == serialize_json_array(
+                            value,
+                            schema_tree,
+                            ir_buf,
+                            inserted_schema_tree_node_ids
+                    ))
+                {
+                    return false;
+                }
+                continue;
+            } else if (value.is_object()) {
+                auto const node_id{get_schema_node_id(
+                        schema_tree,
+                        parent_id,
+                        SchemaTreeNodeValueType::Obj,
+                        key,
+                        inserted_schema_tree_node_ids
+                )};
+                working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
+                continue;
+            }
+
+            auto type{SchemaTreeNodeValueType::Unknown};
+            if (value.is_number_integer()) {
+                type = SchemaTreeNodeValueType::Int;
+            } else if (value.is_number_float()) {
+                type = SchemaTreeNodeValueType::Float;
+            } else if (value.is_boolean()) {
+                type = SchemaTreeNodeValueType::Bool;
+            } else if (value.is_string()) {
+                type = SchemaTreeNodeValueType::Str;
+            } else if (value.is_null()) {
+                type = SchemaTreeNodeValueType::Obj;
+            }
+            if (type == SchemaTreeNodeValueType::Unknown) {
+                return false;
+            }
+            auto const value_from_json{Value::convert_from_json(type, value)};
+            auto const node_id{get_schema_node_id(
+                    schema_tree,
+                    parent_id,
+                    type,
+                    key,
+                    inserted_schema_tree_node_ids
+            )};
+            if (false == encode_schema_id(node_id, ir_buf)) {
+                return false;
+            }
+            if (false == value_from_json.encode(ir_buf)) {
+                return false;
+            }
+        }
+
+        ir_buf.push_back(cProtocol::Payload::KeyValuePairRecordDeliminator);
+        return true;
+    }
+}  // namespace
 
 auto encode_json_object(
         nlohmann::json const& json,
