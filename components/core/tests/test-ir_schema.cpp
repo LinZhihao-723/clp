@@ -47,6 +47,7 @@ TEST_CASE("schema_tree", "[ffi][schema]") {
     test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Int, 2, false);
     test_node(1, "b", SchemaTreeNodeValueType::Obj, 3, false);
     test_node(3, "c", SchemaTreeNodeValueType::Obj, 4, false);
+    schema_tree.snapshot();
     test_node(3, "d", SchemaTreeNodeValueType::Int, 5, false);
     test_node(3, "d", SchemaTreeNodeValueType::Bool, 6, false);
     test_node(4, "d", SchemaTreeNodeValueType::Int, 7, false);
@@ -60,6 +61,16 @@ TEST_CASE("schema_tree", "[ffi][schema]") {
     test_node(3, "d", SchemaTreeNodeValueType::Bool, 6, true);
     test_node(4, "d", SchemaTreeNodeValueType::Int, 7, true);
     test_node(4, "d", SchemaTreeNodeValueType::Str, 8, true);
+
+    schema_tree.revert();
+    test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Obj, 1, true);
+    test_node(SchemaTree::cRootId, "a", SchemaTreeNodeValueType::Int, 2, true);
+    test_node(1, "b", SchemaTreeNodeValueType::Obj, 3, true);
+    test_node(3, "c", SchemaTreeNodeValueType::Obj, 4, true);
+    test_node(3, "d", SchemaTreeNodeValueType::Int, 5, false);
+    test_node(3, "d", SchemaTreeNodeValueType::Bool, 6, false);
+    test_node(4, "d", SchemaTreeNodeValueType::Int, 7, false);
+    test_node(4, "d", SchemaTreeNodeValueType::Str, 8, false);
 
     bool catch_exception{false};
     try {

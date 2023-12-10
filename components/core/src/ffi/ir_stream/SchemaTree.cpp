@@ -1,6 +1,33 @@
 #include "SchemaTree.hpp"
 
+#include "encoding_methods.hpp"
+#include "protocol_constants.hpp"
+
 namespace ffi::ir_stream {
+auto SchemaTreeNode::encode_as_new_node(std::vector<int8_t>& ir_buf) const -> bool {
+    if (m_id < UINT8_MAX) {
+        ir_buf.push_back(cProtocol::Payload::NewSchemaNodeIdByte);
+        ir_buf.push_back(static_cast<uint8_t>(m_id));
+    } else if (m_id < UINT16_MAX) {
+        ir_buf.push_back(cProtocol::Payload::NewSchemaNodeIdShort);
+        encode_int(static_cast<uint16_t>(m_id), ir_buf);
+    } else {
+        return false;
+    }
+    auto const& name_length{m_key_name.length()};
+    if (name_length < UINT8_MAX) {
+        ir_buf.push_back(cProtocol::Payload::NewSchemaNodeNameLenByte);
+        ir_buf.push_back(static_cast<uint8_t>(name_length));
+    } else if (name_length < UINT16_MAX) {
+        ir_buf.push_back(cProtocol::Payload::NewSchemaNodeNameLenShort);
+        encode_int(static_cast<uint16_t>(name_length), ir_buf);
+    } else {
+        return false;
+    }
+    ir_buf.insert(ir_buf.cend(), m_key_name.cbegin(), m_key_name.cend());
+    return true;
+}
+
 auto SchemaTree::get_node_with_id(size_t id) const -> SchemaTreeNode const& {
     if (m_tree_nodes.size() <= id) {
         throw SchemaTreeException(

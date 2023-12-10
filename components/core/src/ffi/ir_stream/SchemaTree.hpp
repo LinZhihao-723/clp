@@ -70,6 +70,15 @@ public:
 
     auto add_child(size_t child_id) -> void { m_children_ids.push_back(child_id); }
 
+    [[nodiscard]] auto encode_as_new_node(std::vector<int8_t>& ir_buf) const -> bool;
+
+    auto remove_last_inserted_child() -> void {
+        if (m_children_ids.empty()) {
+            return;
+        }
+        m_children_ids.pop_back();
+    }
+
 private:
     size_t m_id;
     size_t m_parent_id;
@@ -124,7 +133,30 @@ public:
 
     [[nodiscard]] auto get_size() const -> size_t { return m_tree_nodes.size(); }
 
+    auto snapshot() -> void { m_snapshot_size = m_tree_nodes.size(); }
+
+    /**
+     * Reverts the tree to the time when the snapshot was taken.
+     */
+    auto revert() -> void {
+        if (0 == m_snapshot_size) {
+            throw SchemaTreeException(
+                    ErrorCode_Failure,
+                    __FILENAME__,
+                    __LINE__,
+                    "Snapshot was not taken."
+            );
+        }
+        while (m_tree_nodes.size() > m_snapshot_size) {
+            auto const& curr_node{m_tree_nodes.back()};
+            m_tree_nodes[curr_node.get_parent_id()].remove_last_inserted_child();
+            m_tree_nodes.pop_back();
+        }
+        m_snapshot_size = 0;
+    }
+
 private:
+    size_t m_snapshot_size{0};
     std::vector<SchemaTreeNode> m_tree_nodes;
 };
 }  // namespace ffi::ir_stream
