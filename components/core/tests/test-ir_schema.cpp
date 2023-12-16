@@ -1,9 +1,13 @@
 // Catch2
 #include <vector>
+#include <iostream>
+
+#include <json/single_include/nlohmann/json.hpp>
 
 #include <Catch2/single_include/catch2/catch.hpp>
 
 #include "../src/BufferReader.hpp"
+#include "../src/ffi/ir_stream/encoding_json.hpp"
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
 #include "../src/ffi/ir_stream/Values.hpp"
 
@@ -11,6 +15,8 @@ using ffi::ir_stream::SchemaTree;
 using ffi::ir_stream::SchemaTreeException;
 using ffi::ir_stream::SchemaTreeNode;
 using ffi::ir_stream::SchemaTreeNodeValueType;
+
+using ffi::ir_stream::encode_json_object;
 
 using ffi::ir_stream::Value;
 using ffi::ir_stream::value_bool_t;
@@ -160,4 +166,21 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
         REQUIRE(is_same);
         REQUIRE(decoded_values.at(i).get_schema_tree_node_type() == expected_types.at(i));
     }
+}
+
+TEST_CASE("encoding_method_json", "[ffi][encoding]") {
+    // nlohmann::json j = {
+    //     {"key1", "value1"}, 
+    //     {"key2", 3.1415926},
+    //     {"key3", {{"key4", 0}, {"key5", false}}},
+    //     {"key6", {{{"key7", "abcd"}}, {{"key8", "efgh"}}}}
+    // };
+    nlohmann::json j = {
+        {"key1", "value1"},
+        {"key2", 3.1415926},
+        {"key3", {{"key4", 0}, {"key5", false}}}
+    };
+    SchemaTree schema_tree;
+    std::vector<int8_t> ir_buf;
+    REQUIRE(encode_json_object(j, schema_tree, ir_buf));
 }
