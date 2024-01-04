@@ -79,6 +79,38 @@ public:
         m_children_ids.pop_back();
     }
 
+    [[nodiscard]] auto dump() const -> std::string {
+        std::string node;
+        node += std::to_string(m_id);
+        node += " ";
+        node += std::to_string(m_parent_id);
+        node += " ";
+        node += m_key_name;
+        node += " ";
+        switch (m_type) {
+            case SchemaTreeNodeValueType::Unknown:
+                node += "Unknown";
+                break;
+            case SchemaTreeNodeValueType::Int:
+                node += "Int";
+                break;
+            case SchemaTreeNodeValueType::Float:
+                node += "Float";
+                break;
+            case SchemaTreeNodeValueType::Bool:
+                node += "Bool";
+                break;
+            case SchemaTreeNodeValueType::Obj:
+                node += "Obj";
+                break;
+            case SchemaTreeNodeValueType::Str:
+                node += "Str";
+                break;
+        }
+        node += "\n";
+        return node;
+    }
+
 private:
     size_t m_id;
     size_t m_parent_id;
@@ -154,6 +186,12 @@ public:
         }
         m_snapshot_size = 0;
     }
+
+    /**
+     * Dumps the tree into a string.
+     * @return Dumped tree.
+     */
+    [[nodiscard]] auto dump() const -> std::string;
 
 private:
     size_t m_snapshot_size{0};

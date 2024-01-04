@@ -1,10 +1,9 @@
 // Catch2
-#include <vector>
 #include <iostream>
-
-#include <json/single_include/nlohmann/json.hpp>
+#include <vector>
 
 #include <Catch2/single_include/catch2/catch.hpp>
+#include <json/single_include/nlohmann/json.hpp>
 
 #include "../src/BufferReader.hpp"
 #include "../src/ffi/ir_stream/encoding_json.hpp"
@@ -169,18 +168,16 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
 }
 
 TEST_CASE("encoding_method_json", "[ffi][encoding]") {
-    // nlohmann::json j = {
-    //     {"key1", "value1"}, 
-    //     {"key2", 3.1415926},
-    //     {"key3", {{"key4", 0}, {"key5", false}}},
-    //     {"key6", {{{"key7", "abcd"}}, {{"key8", "efgh"}}}}
-    // };
-    nlohmann::json j = {
-        {"key1", "value1"},
-        {"key2", 3.1415926},
-        {"key3", {{"key4", 0}, {"key5", false}}}
-    };
+    nlohmann::json j
+            = {{"key1", "value1"},
+               {"key2", 3.1415926},
+               {"key4", {{{"key7", "abcd"}}, {{"key8", "efgh"}}, {{{"key9", "a"}, {"key10", "b"}}}}
+               },
+               {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
+               {"key3", {{"key4", 0}, {"key5", false}}}};
+    std::cerr << j << std::endl;
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
     REQUIRE(encode_json_object(j, schema_tree, ir_buf));
+    std::cerr << "Dump tree:\n" << schema_tree.dump();
 }

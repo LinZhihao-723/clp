@@ -1,5 +1,7 @@
 #include "encoding_json.hpp"
 
+#include <iostream>
+
 #include "encoding_methods.hpp"
 #include "protocol_constants.hpp"
 #include "Values.hpp"
@@ -73,7 +75,7 @@ namespace {
             return false;
         }
         for (auto const& item : json_array) {
-            if (false == item.is_object() || false == item.is_array()) {
+            if (false == item.is_object() && false == item.is_array()) {
                 // TODO: currently, we don't support raw values in an array.
                 return false;
             }
@@ -95,7 +97,7 @@ namespace {
             std::vector<size_t>& inserted_schema_tree_node_ids
     ) -> bool {
         if (root.is_array()) {
-            return serialize_json_object(root, schema_tree, ir_buf, inserted_schema_tree_node_ids);
+            return serialize_json_array(root, schema_tree, ir_buf, inserted_schema_tree_node_ids);
         }
         if (false == root.is_object()) {
             return false;

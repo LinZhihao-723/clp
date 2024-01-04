@@ -81,4 +81,13 @@ auto SchemaTree::try_insert_node(
     m_tree_nodes[parent_id].add_child(node_id);
     return true;
 }
+
+auto SchemaTree::dump() const -> std::string {
+    std::string dump_result;
+    dump_result += "id parent_id key_name type\n";
+    for (auto it{m_tree_nodes.cbegin() + 1}; m_tree_nodes.cend() != it; ++it) {
+        dump_result += it->dump();
+    }
+    return dump_result;
+}
 }  // namespace ffi::ir_stream
