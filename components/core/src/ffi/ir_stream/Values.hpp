@@ -187,7 +187,6 @@ public:
     /**
      * Decodes the next value from the given reader.
      * @param reader
-     * @param value
      * @return IRErrorCode_Success on success
      * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
      * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data

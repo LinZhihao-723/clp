@@ -6,15 +6,19 @@
 #include <json/single_include/nlohmann/json.hpp>
 
 #include "../src/BufferReader.hpp"
+#include "../src/ffi/ir_stream/decoding_json.hpp"
 #include "../src/ffi/ir_stream/encoding_json.hpp"
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
 #include "../src/ffi/ir_stream/Values.hpp"
+
+using ffi::ir_stream::IRErrorCode;
 
 using ffi::ir_stream::SchemaTree;
 using ffi::ir_stream::SchemaTreeException;
 using ffi::ir_stream::SchemaTreeNode;
 using ffi::ir_stream::SchemaTreeNodeValueType;
 
+using ffi::ir_stream::decode_json_object;
 using ffi::ir_stream::encode_json_object;
 
 using ffi::ir_stream::Value;
@@ -168,16 +172,26 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
 }
 
 TEST_CASE("encoding_method_json", "[ffi][encoding]") {
-    nlohmann::json j
-            = {{"key1", "value1"},
-               {"key2", 3.1415926},
-               {"key4", {{{"key7", "abcd"}}, {{"key8", "efgh"}}, {{{"key9", "a"}, {"key10", "b"}}}}
-               },
-               {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
-               {"key3", {{"key4", 0}, {"key5", false}}}};
+    nlohmann::json j = {
+            {"key1", "value1"},
+            {"key2", 3.1415926},
+            {"key4", {{{"key7", "abcd"}}, {{"key8", "efgh"}}, {{{"key9", "a"}, {"key10", "b"}}}}},
+            {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
+            {"key3", {{"key4", 0}, {"key5", false}}}};
     std::cerr << j << std::endl;
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
     REQUIRE(encode_json_object(j, schema_tree, ir_buf));
-    std::cerr << "Dump tree:\n" << schema_tree.dump();
+    // std::cerr << "Encoded size: " << ir_buf.size() << "\n";
+    // for (auto c : ir_buf) {
+    //     std::cerr << std::hex << static_cast<uint32_t>(c) << " ";
+    // }
+    // std::cerr << "\n";
+
+    SchemaTree decoded_schema_tree;
+    nlohmann::json decoded_json_obj;
+    BufferReader reader{size_checked_pointer_cast<char const>(ir_buf.data()), ir_buf.size()};
+    REQUIRE(IRErrorCode::IRErrorCode_Success
+            == decode_json_object(reader, decoded_schema_tree, decoded_json_obj));
+    REQUIRE(schema_tree == decoded_schema_tree);
 }

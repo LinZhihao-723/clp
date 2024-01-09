@@ -193,7 +193,9 @@ auto encode_json_object(
     std::vector<int8_t> encoded_json_record;
     std::vector<size_t> inserted_tree_node_ids;
     schema_tree.snapshot();
-    if (false == serialize_json_object(json, schema_tree, ir_buf, inserted_tree_node_ids)) {
+    if (false
+        == serialize_json_object(json, schema_tree, encoded_json_record, inserted_tree_node_ids))
+    {
         schema_tree.revert();
         return false;
     }

@@ -450,9 +450,8 @@ IRProtocolErrorCode validate_protocol_version(std::string_view protocol_version)
         return IRProtocolErrorCode_Invalid;
     }
     std::string_view current_build_protocol_version{cProtocol::Metadata::VersionValue};
-    auto get_major_version{[](std::string_view version) {
-        return version.substr(0, version.find('.'));
-    }};
+    auto get_major_version{
+            [](std::string_view version) { return version.substr(0, version.find('.')); }};
     if (current_build_protocol_version < protocol_version) {
         return IRProtocolErrorCode_Too_New;
     }
