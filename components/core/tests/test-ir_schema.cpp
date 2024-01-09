@@ -172,12 +172,18 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
 }
 
 TEST_CASE("encoding_method_json", "[ffi][encoding]") {
-    nlohmann::json j = {
-            {"key1", "value1"},
-            {"key2", 3.1415926},
-            {"key4", {{{"key7", "abcd"}}, {{"key8", "efgh"}}, {{{"key9", "a"}, {"key10", "b"}}}}},
-            {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
-            {"key3", {{"key4", 0}, {"key5", false}}}};
+    // nlohmann::json j = {
+    //         {"key1", "value1"},
+    //         {"key2", 3.1415926},
+    //         {"key4", {{{"key7", "abcd"}}, {{"key8", "efgh"}}, {{{"key9", "a"}, {"key10",
+    //         "b"}}}}},
+    //         {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
+    //         {"key3", {{"key4", 0}, {"key5", false}}}};
+    nlohmann::json j
+            = {{"key1", "value1"},
+               {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
+               {"key4", 33},
+               {"key5", {{"key6", 77.66}}}};
     std::cerr << j << std::endl;
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;

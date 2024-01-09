@@ -102,6 +102,9 @@ public:
         std::string m_message;
     };
 
+    [[nodiscard]] static auto
+    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value;
+
     /**
      * Constructs a value with a given typed value.
      * @param value
@@ -204,8 +207,7 @@ public:
         return (false == operator==(rhs));
     }
 
-    [[nodiscard]] static auto
-    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value;
+    [[nodiscard]] auto dump() const -> std::string;
 
 private:
     value_t m_value{std::monostate{}};

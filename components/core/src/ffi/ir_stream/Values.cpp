@@ -272,6 +272,24 @@ auto Value::get_schema_tree_node_type() const -> SchemaTreeNodeValueType {
     return SchemaTreeNodeValueType::Unknown;
 }
 
+auto Value::dump() const -> std::string {
+    if (is_empty()) {
+        return "null";
+    }
+
+    if (is_type<value_int_t>()) {
+        return std::to_string(get<value_int_t>());
+    } else if (is_type<value_float_t>()) {
+        return std::to_string(get<value_float_t>());
+    } else if (is_type<value_bool_t>()) {
+        return get<value_bool_t>() ? "True" : "False";
+    } else if (is_type<value_str_t>()) {
+        return static_cast<std::string>(get<value_str_t>());
+    }
+
+    throw ValueException(ErrorCode_Failure, __FILENAME__, __LINE__, "Unknown type");
+}
+
 auto Value::convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value {
     switch (type) {
         case SchemaTreeNodeValueType::Int:
