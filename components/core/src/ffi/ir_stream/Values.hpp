@@ -102,6 +102,8 @@ public:
         std::string m_message;
     };
 
+    static constexpr bool cEnableStrongIntCompression{false};
+
     [[nodiscard]] static auto
     convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& json_val) -> Value;
 

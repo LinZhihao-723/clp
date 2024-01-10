@@ -310,12 +310,11 @@ read_metadata_info(ReaderInterface& reader, encoded_tag_t& metadata_type, uint16
 }
 
 template <typename encoded_variable_t>
-auto deserialize_ir_message(
+auto deserialize_clp_str(
         ReaderInterface& reader,
         string& logtype,
         vector<encoded_variable_t>& encoded_vars,
-        vector<string>& dict_vars,
-        epoch_time_ms_t& timestamp_or_timestamp_delta
+        vector<string>& dict_vars
 ) -> IRErrorCode {
     encoded_tag_t encoded_tag{cProtocol::Eof};
     if (ErrorCode_Success != reader.try_read_numeric_value(encoded_tag)) {
@@ -355,6 +354,24 @@ auto deserialize_ir_message(
         return error_code;
     }
 
+    return IRErrorCode_Success;
+}
+
+template <typename encoded_variable_t>
+auto deserialize_ir_message(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars,
+        epoch_time_ms_t& timestamp_or_timestamp_delta
+) -> IRErrorCode {
+    if (auto const error{deserialize_clp_str(reader, logtype, encoded_vars, dict_vars)};
+        IRErrorCode_Success != error)
+    {
+        return error;
+    }
+
+    encoded_tag_t encoded_tag{};
     // NOTE: for the eight-byte encoding, the timestamp is the actual timestamp;
     // for the four-byte encoding, the timestamp is a timestamp delta
     if (ErrorCode_Success != reader.try_read_numeric_value(encoded_tag)) {
@@ -387,6 +404,48 @@ IRErrorCode get_encoding_type(ReaderInterface& reader, bool& is_four_bytes_encod
         is_four_bytes_encoding = false;
     } else {
         return IRErrorCode_Corrupted_IR;
+    }
+    return IRErrorCode_Success;
+}
+
+template <typename encoded_variable_t>
+auto decode_clp_string(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode {
+    clp_str.clear();
+
+    vector<encoded_variable_t> encoded_vars;
+    vector<string> dict_vars;
+    string logtype;
+    if (auto error_code = deserialize_clp_str(reader, logtype, encoded_vars, dict_vars);
+        IRErrorCode_Success != error_code)
+    {
+        return error_code;
+    }
+
+    auto constant_handler = [&](string const& value, size_t begin_pos, size_t length) {
+        clp_str.append(value, begin_pos, length);
+    };
+
+    auto encoded_int_handler
+            = [&](encoded_variable_t value) { clp_str.append(decode_integer_var(value)); };
+
+    auto encoded_float_handler = [&](encoded_variable_t encoded_float) {
+        clp_str.append(decode_float_var(encoded_float));
+    };
+
+    auto dict_var_handler = [&](string const& dict_var) { clp_str.append(dict_var); };
+
+    try {
+        generic_decode_message<true>(
+                logtype,
+                encoded_vars,
+                dict_vars,
+                constant_handler,
+                encoded_int_handler,
+                encoded_float_handler,
+                dict_var_handler
+        );
+    } catch (DecodingException const& e) {
+        return IRErrorCode_Decode_Error;
     }
     return IRErrorCode_Success;
 }
@@ -473,6 +532,10 @@ namespace four_byte_encoding {
                 timestamp_delta
         );
     }
+
+    auto decode_clp_str(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode {
+        return decode_clp_string<four_byte_encoded_variable_t>(reader, clp_str);
+    }
 }  // namespace four_byte_encoding
 
 namespace eight_byte_encoding {
@@ -483,6 +546,10 @@ namespace eight_byte_encoding {
                 message,
                 timestamp
         );
+    }
+
+    auto decode_clp_str(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode {
+        return decode_clp_string<eight_byte_encoded_variable_t>(reader, clp_str);
     }
 }  // namespace eight_byte_encoding
 
@@ -502,4 +569,11 @@ template auto deserialize_ir_message<eight_byte_encoded_variable_t>(
         vector<string>& dict_vars,
         epoch_time_ms_t& timestamp_or_timestamp_delta
 ) -> IRErrorCode;
+
+template auto
+decode_clp_string<four_byte_encoded_variable_t>(ReaderInterface& reader, std::string& clp_str)
+        -> IRErrorCode;
+template auto
+decode_clp_string<eight_byte_encoded_variable_t>(ReaderInterface& reader, std::string& clp_str)
+        -> IRErrorCode;
 }  // namespace ffi::ir_stream

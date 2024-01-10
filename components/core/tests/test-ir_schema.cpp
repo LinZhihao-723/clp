@@ -1,4 +1,4 @@
-// Catch2
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -10,6 +10,7 @@
 #include "../src/ffi/ir_stream/encoding_json.hpp"
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
 #include "../src/ffi/ir_stream/Values.hpp"
+#include "../src/FileWriter.hpp"
 
 using ffi::ir_stream::IRErrorCode;
 
@@ -219,7 +220,7 @@ TEST_CASE("encoding_method_json_basic", "[ffi][encoding]") {
 }
 
 TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
-    nlohmann::json const j
+    nlohmann::json const j1
             = {1,
                0.11111,
                false,
@@ -234,12 +235,15 @@ TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
                 nullptr,
                 {{"key0", "This is a key value pair record"},
                  {"key1", {1, 0.11111, false, nullptr}}}}};
+    nlohmann::json const j2 = {{"key0", j1}};
 
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
     std::vector<int8_t> encoded_ir_bytes;
 
-    REQUIRE(encode_json_object(j, schema_tree, ir_buf));
+    REQUIRE(encode_json_object(j1, schema_tree, ir_buf));
+    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
+    REQUIRE(encode_json_object(j2, schema_tree, ir_buf));
     encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
 
     SchemaTree decoded_schema_tree;
@@ -249,6 +253,59 @@ TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
             encoded_ir_bytes.size()};
     REQUIRE(IRErrorCode::IRErrorCode_Success
             == decode_json_object(reader, decoded_schema_tree, decoded_json_array));
+    REQUIRE(j1 == decoded_json_array);
+    REQUIRE(IRErrorCode::IRErrorCode_Success
+            == decode_json_object(reader, decoded_schema_tree, decoded_json_array));
+    REQUIRE(j2 == decoded_json_array);
+    std::cerr << j2 << "\n";
+
     REQUIRE(decoded_schema_tree == schema_tree);
-    REQUIRE(j == decoded_json_array);
+}
+
+TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
+    std::ifstream f("large.json");
+    nlohmann::json data = nlohmann::json::parse(f);
+
+    std::vector<int8_t> ir_buf;
+    std::vector<int8_t> encoded_ir_bytes;
+    SchemaTree schema_tree;
+    for (auto const& item : data) {
+        if (false == encode_json_object(item, schema_tree, ir_buf)) {
+            std::cerr << "Failed to encode json: " << item << "\n";
+            break;
+        }
+        encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
+    }
+
+    encoded_ir_bytes.push_back(0);
+    SchemaTree decoded_schema_tree;
+    nlohmann::json decoded_json_obj;
+    BufferReader reader{
+            size_checked_pointer_cast<char const>(encoded_ir_bytes.data()),
+            encoded_ir_bytes.size()};
+    size_t idx{0};
+    FileWriter writer;
+    writer.open("test.clp", FileWriter::OpenMode::CREATE_FOR_WRITING);
+    writer.write(
+            size_checked_pointer_cast<char const>(encoded_ir_bytes.data()),
+            encoded_ir_bytes.size()
+    );
+    writer.close();
+    while (true) {
+        auto const err{decode_json_object(reader, decoded_schema_tree, decoded_json_obj)};
+        if (IRErrorCode::IRErrorCode_Eof == err) {
+            break;
+        }
+        if (IRErrorCode::IRErrorCode_Success != err) {
+            std::cerr << "Failed to decode... Idx: " << idx << "\n";
+            break;
+        }
+        std::cerr << decoded_json_obj << "\n";
+        if (decoded_json_obj != data.at(idx)) {
+            std::cerr << "Idx " << idx << "different: " << data.at(idx) << "\n";
+            break;
+        }
+        ++idx;
+    }
+    std::cerr << "Tree:\n" << decoded_schema_tree.dump() << "\n";
 }

@@ -15,7 +15,13 @@ namespace {
      */
     auto encode_value_int(value_int_t value, std::vector<int8_t>& ir_buf) -> bool {
         bool success{true};
-        if (INT32_MIN <= value && value <= INT32_MAX) {
+        if (Value::cEnableStrongIntCompression && INT8_MIN <= value && value <= INT8_MAX) {
+            ir_buf.push_back(cProtocol::Payload::ValueInt8);
+            ir_buf.push_back(static_cast<int8_t>(value));
+        } else if (Value::cEnableStrongIntCompression && INT16_MIN <= value && value <= INT16_MAX) {
+            ir_buf.push_back(cProtocol::Payload::ValueInt16);
+            encode_int(static_cast<int16_t>(value), ir_buf);
+        } else if (INT32_MIN <= value && value <= INT32_MAX) {
             ir_buf.push_back(cProtocol::Payload::ValueInt32);
             encode_int(static_cast<int32_t>(value), ir_buf);
         } else if (INT64_MIN <= value && value <= INT64_MAX) {
@@ -37,7 +43,19 @@ namespace {
      * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
      */
     auto decode_value_int(ReaderInterface& reader, int8_t tag, value_t& value) -> IRErrorCode {
-        if (cProtocol::Payload::ValueInt32 == tag) {
+        if (Value::cEnableStrongIntCompression && cProtocol::Payload::ValueInt8 == tag) {
+            int8_t int_value{};
+            if (false == decode_int(reader, int_value)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            value = static_cast<value_int_t>(int_value);
+        } else if (Value::cEnableStrongIntCompression && cProtocol::Payload::ValueInt16 == tag) {
+            int16_t int_value{};
+            if (false == decode_int(reader, int_value)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            value = static_cast<value_int_t>(int_value);
+        } else if (cProtocol::Payload::ValueInt32 == tag) {
             int32_t int_value{};
             if (false == decode_int(reader, int_value)) {
                 return IRErrorCode_Incomplete_IR;
@@ -145,7 +163,11 @@ namespace {
             encode_normal_str(value, ir_buf);
         } else {
             // TODO: replace this by CLP string encoding
-            encode_normal_str(value, ir_buf);
+            ir_buf.push_back(cProtocol::Payload::ValueStrCLP);
+            std::string logtype;
+            if (false == four_byte_encoding::encode_message(value, logtype, ir_buf)) {
+                return false;
+            }
         }
         return true;
     }
@@ -191,6 +213,25 @@ namespace {
     }
 
     /**
+     * Decodes a clp encoded string.
+     * @param reader
+     * @param value Returns the decoded value.
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    auto decode_clp_str(ReaderInterface& reader, value_t& value) -> IRErrorCode {
+        std::string str_value;
+        if (auto const error{four_byte_encoding::decode_clp_str(reader, str_value)};
+            IRErrorCode::IRErrorCode_Success != error)
+        {
+            return error;
+        }
+        value = str_value;
+        return IRErrorCode_Success;
+    }
+
+    /**
      * Encodes null into IR.
      * @param ir_buf
      * @return true on success.
@@ -229,6 +270,8 @@ auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
 auto Value::decode_from_reader(ReaderInterface& reader, encoded_tag_t tag) -> IRErrorCode {
     IRErrorCode error_code{IRErrorCode_Success};
     switch (tag) {
+        case cProtocol::Payload::ValueInt8:
+        case cProtocol::Payload::ValueInt16:
         case cProtocol::Payload::ValueInt32:
         case cProtocol::Payload::ValueInt64:
             error_code = decode_value_int(reader, tag, m_value);
@@ -246,6 +289,9 @@ auto Value::decode_from_reader(ReaderInterface& reader, encoded_tag_t tag) -> IR
         case cProtocol::Payload::ValueStrLenUShort:
         case cProtocol::Payload::ValueStrLenUInt:
             error_code = decode_normal_str(reader, tag, m_value);
+            break;
+        case cProtocol::Payload::ValueStrCLP:
+            error_code = decode_clp_str(reader, m_value);
             break;
         case cProtocol::Payload::ValueNull:
             m_value = std::monostate{};
