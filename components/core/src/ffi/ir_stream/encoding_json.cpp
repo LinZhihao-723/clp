@@ -34,6 +34,22 @@ namespace {
         return true;
     }
 
+    auto get_value_type_from_json(nlohmann::json const& value) -> SchemaTreeNodeValueType {
+        auto type{SchemaTreeNodeValueType::Unknown};
+        if (value.is_number_integer()) {
+            type = SchemaTreeNodeValueType::Int;
+        } else if (value.is_number_float()) {
+            type = SchemaTreeNodeValueType::Float;
+        } else if (value.is_boolean()) {
+            type = SchemaTreeNodeValueType::Bool;
+        } else if (value.is_string()) {
+            type = SchemaTreeNodeValueType::Str;
+        } else if (value.is_null()) {
+            type = SchemaTreeNodeValueType::Obj;
+        }
+        return type;
+    }
+
     auto serialize_json_array(
             nlohmann::json const& json_array,
             SchemaTree& schema_tree,
@@ -69,23 +85,25 @@ namespace {
             std::vector<int8_t>& ir_buf,
             std::vector<size_t>& inserted_schema_tree_node_ids
     ) -> bool {
-        ir_buf.push_back(cProtocol::Payload::ArrayBegin);
-
         if (false == json_array.is_array()) {
             return false;
         }
+        ir_buf.push_back(cProtocol::Payload::ArrayBegin);
         for (auto const& item : json_array) {
             if (false == item.is_object() && false == item.is_array()) {
-                // TODO: currently, we don't support raw values in an array.
-                return false;
-            }
-            if (false
-                == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
+                auto const type{get_value_type_from_json(item)};
+                if (type == SchemaTreeNodeValueType::Unknown) {
+                    return false;
+                }
+                auto const value_from_json{Value::convert_from_json(type, item)};
+                if (false == value_from_json.encode(ir_buf)) {
+                    return false;
+                }
+            } else if (false == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
             {
                 return false;
             }
         }
-
         ir_buf.push_back(cProtocol::Payload::ArrayEnd);
         return true;
     }
@@ -148,18 +166,7 @@ namespace {
                 continue;
             }
 
-            auto type{SchemaTreeNodeValueType::Unknown};
-            if (value.is_number_integer()) {
-                type = SchemaTreeNodeValueType::Int;
-            } else if (value.is_number_float()) {
-                type = SchemaTreeNodeValueType::Float;
-            } else if (value.is_boolean()) {
-                type = SchemaTreeNodeValueType::Bool;
-            } else if (value.is_string()) {
-                type = SchemaTreeNodeValueType::Str;
-            } else if (value.is_null()) {
-                type = SchemaTreeNodeValueType::Obj;
-            }
+            auto const type{get_value_type_from_json(value)};
             if (type == SchemaTreeNodeValueType::Unknown) {
                 return false;
             }
