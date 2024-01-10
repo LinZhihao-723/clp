@@ -91,6 +91,7 @@ namespace {
         ir_buf.push_back(cProtocol::Payload::ArrayBegin);
         for (auto const& item : json_array) {
             if (false == item.is_object() && false == item.is_array()) {
+                // Single value encoding.
                 auto const type{get_value_type_from_json(item)};
                 if (type == SchemaTreeNodeValueType::Unknown) {
                     return false;
@@ -99,7 +100,10 @@ namespace {
                 if (false == value_from_json.encode(ir_buf)) {
                     return false;
                 }
-            } else if (false == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
+                continue;
+            }
+            if (false
+                == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
             {
                 return false;
             }
