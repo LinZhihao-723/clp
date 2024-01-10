@@ -217,3 +217,38 @@ TEST_CASE("encoding_method_json_basic", "[ffi][encoding]") {
 
     REQUIRE(schema_tree == decoded_schema_tree);
 }
+
+TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
+    nlohmann::json const j
+            = {1,
+               0.11111,
+               false,
+               "This is a string",
+               nullptr,
+               {{"key0", "This is a key value pair record"},
+                {"key1", "Key value pair record again, lol"}},
+               {1,
+                0.11111,
+                false,
+                "This is a string",
+                nullptr,
+                {{"key0", "This is a key value pair record"},
+                 {"key1", {1, 0.11111, false, nullptr}}}}};
+
+    SchemaTree schema_tree;
+    std::vector<int8_t> ir_buf;
+    std::vector<int8_t> encoded_ir_bytes;
+
+    REQUIRE(encode_json_object(j, schema_tree, ir_buf));
+    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
+
+    SchemaTree decoded_schema_tree;
+    nlohmann::json decoded_json_array;
+    BufferReader reader{
+            size_checked_pointer_cast<char const>(encoded_ir_bytes.data()),
+            encoded_ir_bytes.size()};
+    REQUIRE(IRErrorCode::IRErrorCode_Success
+            == decode_json_object(reader, decoded_schema_tree, decoded_json_array));
+    REQUIRE(decoded_schema_tree == schema_tree);
+    REQUIRE(j == decoded_json_array);
+}

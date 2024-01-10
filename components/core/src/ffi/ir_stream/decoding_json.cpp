@@ -8,6 +8,18 @@
 namespace ffi::ir_stream {
 namespace {
     /**
+     * @return true if the encoded tag is a key value pair.
+     */
+    [[nodiscard]] auto is_encoded_key_value_pair_tag(encoded_tag_t tag) -> bool {
+        return cProtocol::Payload::SchemaNodeIdByte == tag
+               || cProtocol::Payload::SchemaNodeIdShort == tag;
+    }
+
+    [[nodiscard]] auto is_array_tag(encoded_tag_t tag) -> bool {
+        return cProtocol::Payload::ArrayBegin == tag;
+    }
+
+    /**
      * Growths the schema tree.
      * @param encoded_tag
      * @param reader
@@ -77,63 +89,74 @@ namespace {
     }
 
     /**
-     * Deserializes the next key value pair from the reader.
+     * Deserializes the key id from the reader.
      * @param tag
      * @param reader
-     * @param schema_tree This tree will be used to validate the deserialized
-     * value type.
-     * @param decoded_tree_node_id
+     * @param key_id
      * @param decoded_value
      * @return IRErrorCode_Success on success; related error code otherwise.
      */
-    [[nodiscard]] auto deserialize_key_value_pair(
-            encoded_tag_t tag,
-            ReaderInterface& reader,
-            SchemaTree const& schema_tree,
-            size_t& decoded_tree_node_id,
-            Value& decoded_value
-    ) -> IRErrorCode {
+    [[nodiscard]] auto
+    deserialize_key_id(encoded_tag_t tag, ReaderInterface& reader, size_t& key_id) -> IRErrorCode {
         if (cProtocol::Payload::SchemaNodeIdByte == tag) {
             uint8_t tree_node_id{};
             if (false == decode_int(reader, tree_node_id)) {
                 return IRErrorCode::IRErrorCode_Incomplete_IR;
             }
-            decoded_tree_node_id = static_cast<size_t>(tree_node_id);
+            key_id = static_cast<size_t>(tree_node_id);
         } else if (cProtocol::Payload::SchemaNodeIdShort == tag) {
             uint16_t tree_node_id{};
             if (false == decode_int(reader, tree_node_id)) {
                 return IRErrorCode::IRErrorCode_Incomplete_IR;
             }
-            decoded_tree_node_id = static_cast<size_t>(tree_node_id);
+            key_id = static_cast<size_t>(tree_node_id);
         } else {
             return IRErrorCode::IRErrorCode_Corrupted_IR;
         }
+        return IRErrorCode::IRErrorCode_Success;
+    }
 
-        if (auto const error{decoded_value.decode_from_reader(reader)};
+    /**
+     * Deserializes the next value from the reader.
+     * @param tag
+     * @param reader
+     * @param schema_tree This tree will be used to validate the deserialized
+     * value type.
+     * @param key_id
+     * @param value
+     * @return IRErrorCode_Success on success; related error code otherwise.
+     */
+    [[nodiscard]] auto deserialize_value(
+            encoded_tag_t tag,
+            ReaderInterface& reader,
+            SchemaTree const& schema_tree,
+            size_t key_id,
+            Value& value
+    ) -> IRErrorCode {
+        if (auto const error{value.decode_from_reader(reader, tag)};
             IRErrorCode::IRErrorCode_Success != error)
         {
             return error;
         }
-        if (decoded_value.get_schema_tree_node_type()
-            != schema_tree.get_node_with_id(decoded_tree_node_id).get_type())
-        {
+        if (value.get_schema_tree_node_type() != schema_tree.get_node_with_id(key_id).get_type()) {
             return IRErrorCode::IRErrorCode_Decode_Error;
         }
-        return IRErrorCode_Success;
+        return IRErrorCode::IRErrorCode_Success;
     }
 
     /**
      * Inserts the decoded key value pair into the json object.
+     * @tparam ValueType The type of the value.
      * @param decoded_id
-     * @param decoded_value
+     * @param value
      * @param schema_tree
      * @param keys_to_root
      * @param obj The json object to insert the key value pair.
-     * @return IRErrorCode_Success on success; related error code otherwise.
      */
+    template <typename ValueType>
     [[nodiscard]] auto insert_key_value_pair(
             size_t decoded_id,
-            Value const& decoded_value,
+            ValueType const& value,
             SchemaTree const& schema_tree,
             std::vector<std::string_view>& keys_to_root,
             nlohmann::json& obj
@@ -155,34 +178,23 @@ namespace {
             }
             obj_ptr = &(*it);
         }
-        std::string_view base_key{keys_to_root[0]};
-        switch (schema_tree.get_node_with_id(decoded_id).get_type()) {
-            case SchemaTreeNodeValueType::Int:
-                obj_ptr->emplace(base_key, decoded_value.get<value_int_t>());
-                break;
-            case SchemaTreeNodeValueType::Float:
-                obj_ptr->emplace(base_key, decoded_value.get<value_float_t>());
-                break;
-            case SchemaTreeNodeValueType::Bool:
-                obj_ptr->emplace(base_key, decoded_value.get<value_bool_t>());
-                break;
-            case SchemaTreeNodeValueType::Str:
-                obj_ptr->emplace(
-                        base_key,
-                        static_cast<std::string>(decoded_value.get<value_str_t>())
-                );
-                break;
-            case SchemaTreeNodeValueType::Obj:
-                if (false == decoded_value.is_empty()) {
-                    return IRErrorCode::IRErrorCode_Decode_Error;
-                }
-                obj_ptr->emplace(base_key, nullptr);
-                break;
-            default:
-                return IRErrorCode::IRErrorCode_Decode_Error;
-        }
-        return IRErrorCode::IRErrorCode_Success;
+        obj_ptr->emplace(keys_to_root[0], value);
     }
+
+    /**
+     * Deserializes an encoded json array.
+     * @param tag
+     * @param reader
+     * @param schema_tree
+     * @param array The deserialized array.
+     * @return IRErrorCode_Success on success; related error code otherwise.
+     */
+    [[nodiscard]] auto deserialize_array(
+            encoded_tag_t tag,
+            ReaderInterface& reader,
+            SchemaTree const& schema_tree,
+            nlohmann::json& array
+    ) -> IRErrorCode;
 
     /**
      * Deserializes the next key value pair record. It could contain multiple
@@ -198,6 +210,13 @@ namespace {
             ReaderInterface& reader,
             SchemaTree const& schema_tree,
             nlohmann::json& obj
+    ) -> IRErrorCode;
+
+    [[nodiscard]] auto deserialize_key_value_pair_record(
+            encoded_tag_t tag,
+            ReaderInterface& reader,
+            SchemaTree const& schema_tree,
+            nlohmann::json& obj
     ) -> IRErrorCode {
         Value value;
         size_t id{};
@@ -207,18 +226,144 @@ namespace {
             if (cProtocol::Payload::KeyValuePairRecordDeliminator == tag) {
                 break;
             }
-            if (auto const error{deserialize_key_value_pair(tag, reader, schema_tree, id, value)};
-                IRErrorCode::IRErrorCode_Success != error)
-            {
-                return error;
-            }
-            if (auto const error{insert_key_value_pair(id, value, schema_tree, keys_to_root, obj)};
+            if (auto const error{deserialize_key_id(tag, reader, id)};
                 IRErrorCode::IRErrorCode_Success != error)
             {
                 return error;
             }
             if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                return IRErrorCode::IRErrorCode_Incomplete_IR;
+            }
+            if (is_array_tag(tag)) {
+                nlohmann::json sub_array;
+                if (auto const error{deserialize_array(tag, reader, schema_tree, sub_array)};
+                    IRErrorCode::IRErrorCode_Success != error)
+                {
+                    return error;
+                }
+                if (schema_tree.get_node_with_id(id).get_type() != SchemaTreeNodeValueType::Obj) {
+                    return IRErrorCode::IRErrorCode_Decode_Error;
+                }
+                insert_key_value_pair(id, sub_array, schema_tree, keys_to_root, obj);
+            } else {
+                if (auto const error{deserialize_value(tag, reader, schema_tree, id, value)};
+                    IRErrorCode::IRErrorCode_Success != error)
+                {
+                    return error;
+                }
+                switch (schema_tree.get_node_with_id(id).get_type()) {
+                    case SchemaTreeNodeValueType::Int:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_int_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Float:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_float_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Bool:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_bool_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Str:
+                        insert_key_value_pair(
+                                id,
+                                static_cast<std::string>(value.get<value_str_t>()),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Obj:
+                        if (false == value.is_empty()) {
+                            return IRErrorCode::IRErrorCode_Decode_Error;
+                        }
+                        insert_key_value_pair(id, nullptr, schema_tree, keys_to_root, obj);
+                        break;
+                    default:
+                        return IRErrorCode::IRErrorCode_Decode_Error;
+                }
+            }
+            if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
                 return IRErrorCode_Incomplete_IR;
+            }
+        }
+        return IRErrorCode_Success;
+    }
+
+    [[nodiscard]] auto deserialize_array(
+            encoded_tag_t tag,
+            ReaderInterface& reader,
+            SchemaTree const& schema_tree,
+            nlohmann::json& array
+    ) -> IRErrorCode {
+        if (false == is_array_tag(tag)) {
+            return IRErrorCode_Corrupted_IR;
+        }
+        array = nlohmann::json::array();
+        while (true) {
+            if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            if (cProtocol::Payload::ArrayEnd == tag) {
+                break;
+            }
+
+            if (is_array_tag(tag)) {
+                nlohmann::json sub_array;
+                if (auto const err{deserialize_array(tag, reader, schema_tree, sub_array)};
+                    IRErrorCode::IRErrorCode_Success != err)
+                {
+                    return err;
+                }
+                array.push_back(sub_array);
+            } else if (is_encoded_key_value_pair_tag(tag)) {
+                nlohmann::json key_value_pair_record;
+                if (auto const err{deserialize_key_value_pair_record(
+                            tag,
+                            reader,
+                            schema_tree,
+                            key_value_pair_record
+                    )};
+                    IRErrorCode::IRErrorCode_Success != err)
+                {
+                    return err;
+                }
+                array.push_back(key_value_pair_record);
+            } else {
+                Value val;
+                if (auto const err{val.decode_from_reader(reader, tag)};
+                    IRErrorCode::IRErrorCode_Success != err)
+                {
+                    return err;
+                }
+                if (val.is_empty()) {
+                    array.push_back(nullptr);
+                } else if (val.is_type<value_int_t>()) {
+                    array.push_back(val.get<value_int_t>());
+                } else if (val.is_type<value_float_t>()) {
+                    array.push_back(val.get<value_float_t>());
+                } else if (val.is_type<value_bool_t>()) {
+                    array.push_back(val.get<value_bool_t>());
+                } else if (val.is_type<value_str_t>()) {
+                    array.push_back(val.get<value_str_t>());
+                } else {
+                    return IRErrorCode::IRErrorCode_Corrupted_IR;
+                }
             }
         }
         return IRErrorCode_Success;
@@ -249,10 +394,12 @@ auto decode_json_object(ReaderInterface& reader, SchemaTree& schema_tree, nlohma
         }
     }
 
-    if (cProtocol::Payload::SchemaNodeIdByte == encoded_tag
-        || cProtocol::Payload::SchemaNodeIdShort == encoded_tag)
-    {
+    if (is_encoded_key_value_pair_tag(encoded_tag)) {
         return deserialize_key_value_pair_record(encoded_tag, reader, schema_tree, obj);
+    }
+
+    if (is_array_tag(encoded_tag)) {
+        return deserialize_array(encoded_tag, reader, schema_tree, obj);
     }
 
     return IRErrorCode::IRErrorCode_Decode_Error;
