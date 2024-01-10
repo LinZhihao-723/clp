@@ -223,7 +223,10 @@ auto Value::decode_from_reader(ReaderInterface& reader) -> IRErrorCode {
     if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
         return IRErrorCode_Incomplete_IR;
     }
+    return decode_from_reader(reader, tag);
+}
 
+auto Value::decode_from_reader(ReaderInterface& reader, encoded_tag_t tag) -> IRErrorCode {
     IRErrorCode error_code{IRErrorCode_Success};
     switch (tag) {
         case cProtocol::Payload::ValueInt32:

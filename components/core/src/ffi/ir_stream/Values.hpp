@@ -197,6 +197,17 @@ public:
     [[nodiscard]] auto decode_from_reader(ReaderInterface& reader) -> IRErrorCode;
 
     /**
+     * Decodes the next value from the given reader.
+     * @param reader
+     * @param tag
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    [[nodiscard]] auto decode_from_reader(ReaderInterface& reader, encoded_tag_t tag)
+            -> IRErrorCode;
+
+    /**
      * @return SchemaTreeNodeValueType based on the underlying value type.
      */
     [[nodiscard]] auto get_schema_tree_node_type() const -> SchemaTreeNodeValueType;
