@@ -171,7 +171,7 @@ TEST_CASE("values", "[ffi][key_value_pairs]") {
     }
 }
 
-TEST_CASE("encoding_method_json", "[ffi][encoding]") {
+TEST_CASE("encoding_method_json_basic", "[ffi][encoding]") {
     // nlohmann::json j = {
     //         {"key1", "value1"},
     //         {"key2", 3.1415926},
@@ -179,21 +179,41 @@ TEST_CASE("encoding_method_json", "[ffi][encoding]") {
     //         "b"}}}}},
     //         {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
     //         {"key3", {{"key4", 0}, {"key5", false}}}};
-    nlohmann::json const j
+    nlohmann::json const j1
             = {{"key1", "value1"},
                {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
                {"key4", 33},
                {"key5", {{"key6", 77.66}}},
                {"key7", {{"key8", nullptr}}}};
+    nlohmann::json const j2
+            = {{"key1", 31},
+               {"key0", {{"key1", {{"key2", {{"key3", "False"}}}}}}},
+               {"key4", 33},
+               {"key5", {{"key6", 31.62}}},
+               {"key7", nullptr},
+               {"key8", {{"key9", "hi"}}}};
+
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
-    REQUIRE(encode_json_object(j, schema_tree, ir_buf));
+    std::vector<int8_t> encoded_ir_bytes;
+
+    REQUIRE(encode_json_object(j1, schema_tree, ir_buf));
+    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
+    REQUIRE(encode_json_object(j2, schema_tree, ir_buf));
+    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
 
     SchemaTree decoded_schema_tree;
     nlohmann::json decoded_json_obj;
-    BufferReader reader{size_checked_pointer_cast<char const>(ir_buf.data()), ir_buf.size()};
+    BufferReader reader{
+            size_checked_pointer_cast<char const>(encoded_ir_bytes.data()),
+            encoded_ir_bytes.size()};
+
     REQUIRE(IRErrorCode::IRErrorCode_Success
             == decode_json_object(reader, decoded_schema_tree, decoded_json_obj));
+    REQUIRE(j1 == decoded_json_obj);
+    REQUIRE(IRErrorCode::IRErrorCode_Success
+            == decode_json_object(reader, decoded_schema_tree, decoded_json_obj));
+    REQUIRE(j2 == decoded_json_obj);
+
     REQUIRE(schema_tree == decoded_schema_tree);
-    REQUIRE(j == decoded_json_obj);
 }
