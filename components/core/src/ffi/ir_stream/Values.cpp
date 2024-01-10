@@ -290,16 +290,17 @@ auto Value::dump() const -> std::string {
     throw ValueException(ErrorCode_Failure, __FILENAME__, __LINE__, "Unknown type");
 }
 
-auto Value::convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value {
+auto Value::convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& json_val)
+        -> Value {
     switch (type) {
         case SchemaTreeNodeValueType::Int:
-            return {value.get<value_int_t>()};
+            return {json_val.get<value_int_t>()};
         case SchemaTreeNodeValueType::Float:
-            return {value.get<double>()};
+            return {json_val.get<double>()};
         case SchemaTreeNodeValueType::Bool:
-            return {value.get<bool>()};
+            return {json_val.get<bool>()};
         case SchemaTreeNodeValueType::Str:
-            return {value.get<std::string>()};
+            return {json_val.get<std::string>()};
         case SchemaTreeNodeValueType::Obj:
             return {};
         default:

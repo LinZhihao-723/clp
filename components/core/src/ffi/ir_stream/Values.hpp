@@ -103,7 +103,7 @@ public:
     };
 
     [[nodiscard]] static auto
-    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value;
+    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& json_val) -> Value;
 
     /**
      * Constructs a value with a given typed value.

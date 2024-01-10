@@ -179,20 +179,15 @@ TEST_CASE("encoding_method_json", "[ffi][encoding]") {
     //         "b"}}}}},
     //         {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
     //         {"key3", {{"key4", 0}, {"key5", false}}}};
-    nlohmann::json j
+    nlohmann::json const j
             = {{"key1", "value1"},
                {"key0", {{"key1", {{"key2", {{"key3", false}}}}}}},
                {"key4", 33},
-               {"key5", {{"key6", 77.66}}}};
-    std::cerr << j << std::endl;
+               {"key5", {{"key6", 77.66}}},
+               {"key7", {{"key8", nullptr}}}};
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
     REQUIRE(encode_json_object(j, schema_tree, ir_buf));
-    // std::cerr << "Encoded size: " << ir_buf.size() << "\n";
-    // for (auto c : ir_buf) {
-    //     std::cerr << std::hex << static_cast<uint32_t>(c) << " ";
-    // }
-    // std::cerr << "\n";
 
     SchemaTree decoded_schema_tree;
     nlohmann::json decoded_json_obj;
@@ -200,4 +195,5 @@ TEST_CASE("encoding_method_json", "[ffi][encoding]") {
     REQUIRE(IRErrorCode::IRErrorCode_Success
             == decode_json_object(reader, decoded_schema_tree, decoded_json_obj));
     REQUIRE(schema_tree == decoded_schema_tree);
+    REQUIRE(j == decoded_json_obj);
 }

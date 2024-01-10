@@ -167,23 +167,54 @@ auto decode_json_object(ReaderInterface& reader, SchemaTree& schema_tree, nlohma
         }
     }
 
-    std::cerr << "Deserialized Key Value Pair:\n";
     std::vector<std::string_view> key_chain_to_root;
+    obj = nlohmann::json::object();
     for (auto const& [decoded_id, decoded_value] : key_value_pairs) {
         key_chain_to_root.clear();
         size_t curr_id{decoded_id};
+        nlohmann::json* obj_ptr{&obj};
         while (SchemaTree::cRootId != curr_id) {
             auto const& node{schema_tree.get_node_with_id(curr_id)};
             key_chain_to_root.push_back(node.get_key_name());
             curr_id = node.get_parent_id();
         }
-        auto const num_keys{key_chain_to_root.size()};
-        for (int i{static_cast<int>(num_keys - 1)}; 0 <= i; --i) {
-            std::cerr << key_chain_to_root[i] << ":";
+        for (size_t i{key_chain_to_root.size() - 1}; 0 < i; --i) {
+            auto it{obj_ptr->find(key_chain_to_root[i])};
+            if (obj_ptr->end() == it) {
+                auto [inserted_it,
+                      inserted]{obj_ptr->emplace(key_chain_to_root[i], nlohmann::json::object())};
+                it = inserted_it;
+            }
+            obj_ptr = &(*it);
         }
-        std::cerr << " " << decoded_value.dump() << "\n";
+        std::string_view base_key{key_chain_to_root[0]};
+        switch (schema_tree.get_node_with_id(decoded_id).get_type()) {
+            case SchemaTreeNodeValueType::Int:
+                obj_ptr->emplace(base_key, decoded_value.get<value_int_t>());
+                break;
+            case SchemaTreeNodeValueType::Float:
+                obj_ptr->emplace(base_key, decoded_value.get<value_float_t>());
+                break;
+            case SchemaTreeNodeValueType::Bool:
+                obj_ptr->emplace(base_key, decoded_value.get<value_bool_t>());
+                break;
+            case SchemaTreeNodeValueType::Str:
+                obj_ptr->emplace(
+                        base_key,
+                        static_cast<std::string>(decoded_value.get<value_str_t>())
+                );
+                break;
+            case SchemaTreeNodeValueType::Obj:
+                if (false == decoded_value.is_empty()) {
+                    return IRErrorCode::IRErrorCode_Decode_Error;
+                }
+                obj_ptr->emplace(base_key, nullptr);
+                break;
+            default:
+                return IRErrorCode::IRErrorCode_Decode_Error;
+        }
     }
 
-    return IRErrorCode_Success;
+    return IRErrorCode::IRErrorCode_Success;
 }
 }  // namespace ffi::ir_stream
