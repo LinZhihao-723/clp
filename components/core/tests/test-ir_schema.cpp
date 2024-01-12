@@ -263,7 +263,7 @@ TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
 }
 
 TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
-    std::ifstream f("large.json");
+    std::ifstream f("wmt_large.json");
     nlohmann::json data = nlohmann::json::parse(f);
 
     std::vector<int8_t> ir_buf;
