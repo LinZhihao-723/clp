@@ -88,6 +88,10 @@ namespace {
         if (false == json_array.is_array()) {
             return false;
         }
+        if (json_array.empty()) {
+            ir_buf.push_back(cProtocol::Payload::EmptyArray);
+            return true;
+        }
         ir_buf.push_back(cProtocol::Payload::ArrayBegin);
         for (auto const& item : json_array) {
             if (false == item.is_object() && false == item.is_array()) {
@@ -124,6 +128,10 @@ namespace {
         if (false == root.is_object()) {
             return false;
         }
+        if (root.empty()) {
+            ir_buf.push_back(cProtocol::Payload::EmptyObj);
+            return true;
+        }
         std::vector<DfsStackNode> working_stack;
         working_stack.emplace_back(root.items().begin(), root.items().end(), SchemaTree::cRootId);
         while (false == working_stack.empty()) {
@@ -158,15 +166,30 @@ namespace {
                     return false;
                 }
                 continue;
-            } else if (value.is_object()) {
-                auto const node_id{get_schema_node_id(
-                        schema_tree,
-                        parent_id,
-                        SchemaTreeNodeValueType::Obj,
-                        key,
-                        inserted_schema_tree_node_ids
-                )};
-                working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
+            }
+            if (value.is_object()) {
+                if (value.empty()) {
+                    auto const node_id{get_schema_node_id(
+                            schema_tree,
+                            parent_id,
+                            SchemaTreeNodeValueType::Obj,
+                            key,
+                            inserted_schema_tree_node_ids
+                    )};
+                    if (false == encode_schema_id(node_id, ir_buf)) {
+                        return false;
+                    }
+                    ir_buf.push_back(cProtocol::Payload::EmptyObj);
+                } else {
+                    auto const node_id{get_schema_node_id(
+                            schema_tree,
+                            parent_id,
+                            SchemaTreeNodeValueType::Obj,
+                            key,
+                            inserted_schema_tree_node_ids
+                    )};
+                    working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
+                }
                 continue;
             }
 
@@ -200,7 +223,6 @@ auto encode_json_object(
         SchemaTree& schema_tree,
         std::vector<int8_t>& ir_buf
 ) -> bool {
-    ir_buf.clear();
     std::vector<int8_t> encoded_json_record;
     std::vector<size_t> inserted_tree_node_ids;
     schema_tree.snapshot();

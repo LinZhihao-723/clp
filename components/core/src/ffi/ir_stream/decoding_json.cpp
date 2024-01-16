@@ -12,11 +12,25 @@ namespace {
      */
     [[nodiscard]] auto is_encoded_key_value_pair_tag(encoded_tag_t tag) -> bool {
         return cProtocol::Payload::SchemaNodeIdByte == tag
-               || cProtocol::Payload::SchemaNodeIdShort == tag;
+               || cProtocol::Payload::SchemaNodeIdShort == tag
+               || cProtocol::Payload::KeyValuePairRecordDeliminator == tag;
     }
 
     [[nodiscard]] auto is_array_tag(encoded_tag_t tag) -> bool {
         return cProtocol::Payload::ArrayBegin == tag;
+    }
+
+    [[nodiscard]] auto is_empty_tag(encoded_tag_t tag) -> bool {
+        return cProtocol::Payload::EmptyObj == tag || cProtocol::Payload::EmptyArray == tag;
+    }
+
+    [[nodiscard]] auto get_empty_array_or_obj(encoded_tag_t tag) -> nlohmann::json {
+        if (tag == cProtocol::Payload::EmptyArray) {
+            return nlohmann::json::array();
+        } else if (tag == cProtocol::Payload::EmptyObj) {
+            return nlohmann::json::object();
+        }
+        return nullptr;
     }
 
     /**
@@ -154,13 +168,13 @@ namespace {
      * @param obj The json object to insert the key value pair.
      */
     template <typename ValueType>
-    [[nodiscard]] auto insert_key_value_pair(
+    auto insert_key_value_pair(
             size_t decoded_id,
             ValueType const& value,
             SchemaTree const& schema_tree,
             std::vector<std::string_view>& keys_to_root,
             nlohmann::json& obj
-    ) -> IRErrorCode {
+    ) -> void {
         keys_to_root.clear();
         size_t curr_id{decoded_id};
         nlohmann::json* obj_ptr{&obj};
@@ -229,6 +243,7 @@ namespace {
             if (auto const error{deserialize_key_id(tag, reader, id)};
                 IRErrorCode::IRErrorCode_Success != error)
             {
+                std::cerr << "Failed to decode key id\n";
                 return error;
             }
             if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
@@ -239,16 +254,26 @@ namespace {
                 if (auto const error{deserialize_array(tag, reader, schema_tree, sub_array)};
                     IRErrorCode::IRErrorCode_Success != error)
                 {
+                    std::cerr << "Failed to deserialize array from obj.\n";
                     return error;
                 }
                 if (schema_tree.get_node_with_id(id).get_type() != SchemaTreeNodeValueType::Obj) {
                     return IRErrorCode::IRErrorCode_Decode_Error;
                 }
                 insert_key_value_pair(id, sub_array, schema_tree, keys_to_root, obj);
+            } else if (is_empty_tag(tag)) {
+                insert_key_value_pair(
+                        id,
+                        get_empty_array_or_obj(tag),
+                        schema_tree,
+                        keys_to_root,
+                        obj
+                );
             } else {
                 if (auto const error{deserialize_value(tag, reader, schema_tree, id, value)};
                     IRErrorCode::IRErrorCode_Success != error)
                 {
+                    std::cerr << "Failed to deserialize value.\n";
                     return error;
                 }
                 switch (schema_tree.get_node_with_id(id).get_type()) {
@@ -295,10 +320,12 @@ namespace {
                         insert_key_value_pair(id, nullptr, schema_tree, keys_to_root, obj);
                         break;
                     default:
+                        std::cerr << "Decoding error... Unknown tag.\n";
                         return IRErrorCode::IRErrorCode_Decode_Error;
                 }
             }
             if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                std::cerr << "Incomplete IR decoding\n";
                 return IRErrorCode_Incomplete_IR;
             }
         }
@@ -317,6 +344,7 @@ namespace {
         array = nlohmann::json::array();
         while (true) {
             if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                std::cerr << "Failed to decode the tag.\n";
                 return IRErrorCode_Incomplete_IR;
             }
             if (cProtocol::Payload::ArrayEnd == tag) {
@@ -328,9 +356,12 @@ namespace {
                 if (auto const err{deserialize_array(tag, reader, schema_tree, sub_array)};
                     IRErrorCode::IRErrorCode_Success != err)
                 {
+                    std::cerr << "Failed to decode the subarray.\n";
                     return err;
                 }
                 array.push_back(sub_array);
+            } else if (is_empty_tag(tag)) {
+                array.push_back(get_empty_array_or_obj(tag));
             } else if (is_encoded_key_value_pair_tag(tag)) {
                 nlohmann::json key_value_pair_record;
                 if (auto const err{deserialize_key_value_pair_record(
@@ -341,6 +372,7 @@ namespace {
                     )};
                     IRErrorCode::IRErrorCode_Success != err)
                 {
+                    std::cerr << "Failed to decode key value pair of an array.\n";
                     return err;
                 }
                 array.push_back(key_value_pair_record);
@@ -349,6 +381,8 @@ namespace {
                 if (auto const err{val.decode_from_reader(reader, tag)};
                     IRErrorCode::IRErrorCode_Success != err)
                 {
+                    std::cerr << "Failed to decode value from the reader."
+                              << "Tag: " << std::hex << static_cast<int32_t>(tag) << "\n";
                     return err;
                 }
                 if (val.is_empty()) {
@@ -362,6 +396,8 @@ namespace {
                 } else if (val.is_type<value_str_t>()) {
                     array.push_back(val.get<value_str_t>());
                 } else {
+                    std::cerr << "Failed to decode single value of an array."
+                              << "Tag: " << std::hex << static_cast<int32_t>(tag) << "\n";
                     return IRErrorCode::IRErrorCode_Corrupted_IR;
                 }
             }
@@ -390,8 +426,14 @@ auto decode_json_object(ReaderInterface& reader, SchemaTree& schema_tree, nlohma
         if (auto const error{schema_tree_growth(encoded_tag, reader, schema_tree)};
             IRErrorCode::IRErrorCode_Success != error)
         {
+            std::cerr << "Failed to decode schema tree.\n";
             return error;
         }
+    }
+
+    if (is_empty_tag(encoded_tag)) {
+        obj = get_empty_array_or_obj(encoded_tag);
+        return IRErrorCode_Success;
     }
 
     if (is_encoded_key_value_pair_tag(encoded_tag)) {

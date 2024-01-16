@@ -207,6 +207,15 @@ public:
     }
 
     /**
+     * Cleans the tree.
+     */
+    auto clear() -> void {
+        m_snapshot_size = 0;
+        m_tree_nodes.clear();
+        m_tree_nodes.emplace_back(cRootId, cRootId, "", SchemaTreeNodeValueType::Obj);
+    }
+
+    /**
      * Dumps the tree into a string.
      * @return Dumped tree.
      */
