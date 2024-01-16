@@ -34,6 +34,22 @@ namespace {
         return true;
     }
 
+    auto get_value_type_from_json(nlohmann::json const& value) -> SchemaTreeNodeValueType {
+        auto type{SchemaTreeNodeValueType::Unknown};
+        if (value.is_number_integer()) {
+            type = SchemaTreeNodeValueType::Int;
+        } else if (value.is_number_float()) {
+            type = SchemaTreeNodeValueType::Float;
+        } else if (value.is_boolean()) {
+            type = SchemaTreeNodeValueType::Bool;
+        } else if (value.is_string()) {
+            type = SchemaTreeNodeValueType::Str;
+        } else if (value.is_null()) {
+            type = SchemaTreeNodeValueType::Obj;
+        }
+        return type;
+    }
+
     auto serialize_json_array(
             nlohmann::json const& json_array,
             SchemaTree& schema_tree,
@@ -69,15 +85,26 @@ namespace {
             std::vector<int8_t>& ir_buf,
             std::vector<size_t>& inserted_schema_tree_node_ids
     ) -> bool {
-        ir_buf.push_back(cProtocol::Payload::ArrayBegin);
-
         if (false == json_array.is_array()) {
             return false;
         }
+        if (json_array.empty()) {
+            ir_buf.push_back(cProtocol::Payload::EmptyArray);
+            return true;
+        }
+        ir_buf.push_back(cProtocol::Payload::ArrayBegin);
         for (auto const& item : json_array) {
             if (false == item.is_object() && false == item.is_array()) {
-                // TODO: currently, we don't support raw values in an array.
-                return false;
+                // Single value encoding.
+                auto const type{get_value_type_from_json(item)};
+                if (type == SchemaTreeNodeValueType::Unknown) {
+                    return false;
+                }
+                auto const value_from_json{Value::convert_from_json(type, item)};
+                if (false == value_from_json.encode(ir_buf)) {
+                    return false;
+                }
+                continue;
             }
             if (false
                 == serialize_json_object(item, schema_tree, ir_buf, inserted_schema_tree_node_ids))
@@ -85,7 +112,6 @@ namespace {
                 return false;
             }
         }
-
         ir_buf.push_back(cProtocol::Payload::ArrayEnd);
         return true;
     }
@@ -101,6 +127,10 @@ namespace {
         }
         if (false == root.is_object()) {
             return false;
+        }
+        if (root.empty()) {
+            ir_buf.push_back(cProtocol::Payload::EmptyObj);
+            return true;
         }
         std::vector<DfsStackNode> working_stack;
         working_stack.emplace_back(root.items().begin(), root.items().end(), SchemaTree::cRootId);
@@ -136,30 +166,34 @@ namespace {
                     return false;
                 }
                 continue;
-            } else if (value.is_object()) {
-                auto const node_id{get_schema_node_id(
-                        schema_tree,
-                        parent_id,
-                        SchemaTreeNodeValueType::Obj,
-                        key,
-                        inserted_schema_tree_node_ids
-                )};
-                working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
+            }
+            if (value.is_object()) {
+                if (value.empty()) {
+                    auto const node_id{get_schema_node_id(
+                            schema_tree,
+                            parent_id,
+                            SchemaTreeNodeValueType::Obj,
+                            key,
+                            inserted_schema_tree_node_ids
+                    )};
+                    if (false == encode_schema_id(node_id, ir_buf)) {
+                        return false;
+                    }
+                    ir_buf.push_back(cProtocol::Payload::EmptyObj);
+                } else {
+                    auto const node_id{get_schema_node_id(
+                            schema_tree,
+                            parent_id,
+                            SchemaTreeNodeValueType::Obj,
+                            key,
+                            inserted_schema_tree_node_ids
+                    )};
+                    working_stack.emplace_back(value.items().begin(), value.items().end(), node_id);
+                }
                 continue;
             }
 
-            auto type{SchemaTreeNodeValueType::Unknown};
-            if (value.is_number_integer()) {
-                type = SchemaTreeNodeValueType::Int;
-            } else if (value.is_number_float()) {
-                type = SchemaTreeNodeValueType::Float;
-            } else if (value.is_boolean()) {
-                type = SchemaTreeNodeValueType::Bool;
-            } else if (value.is_string()) {
-                type = SchemaTreeNodeValueType::Str;
-            } else if (value.is_null()) {
-                type = SchemaTreeNodeValueType::Obj;
-            }
+            auto const type{get_value_type_from_json(value)};
             if (type == SchemaTreeNodeValueType::Unknown) {
                 return false;
             }
@@ -189,11 +223,12 @@ auto encode_json_object(
         SchemaTree& schema_tree,
         std::vector<int8_t>& ir_buf
 ) -> bool {
-    ir_buf.clear();
     std::vector<int8_t> encoded_json_record;
     std::vector<size_t> inserted_tree_node_ids;
     schema_tree.snapshot();
-    if (false == serialize_json_object(json, schema_tree, ir_buf, inserted_tree_node_ids)) {
+    if (false
+        == serialize_json_object(json, schema_tree, encoded_json_record, inserted_tree_node_ids))
+    {
         schema_tree.revert();
         return false;
     }

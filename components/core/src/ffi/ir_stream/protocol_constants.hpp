@@ -68,10 +68,19 @@ namespace Payload {
     constexpr int8_t ArrayBegin = 0x62;
     constexpr int8_t ArrayEnd = 0x63;
     constexpr int8_t KeyValuePairRecordDeliminator = 0x64;
-    constexpr int8_t NewSchemaNodeIdByte = 0x65;
-    constexpr int8_t NewSchemaNodeIdShort = 0x66;
-    constexpr int8_t NewSchemaNodeNameLenByte = 0x69;
-    constexpr int8_t NewSchemaNodeNameLenShort = 0x6a;
+    constexpr int8_t SchemaNodeParentIdByte = 0x65;
+    constexpr int8_t SchemaNodeParentIdShort = 0x66;
+    constexpr int8_t SchemaNodeNameLenByte = 0x69;
+    constexpr int8_t SchemaNodeNameLenShort = 0x6a;
+    constexpr int8_t EmptyArray = 0x6e;
+    constexpr int8_t EmptyObj = 0x6f;
+
+    constexpr int8_t SchemaNodeUnknown = 0x70;
+    constexpr int8_t SchemaNodeInt = 0x71;
+    constexpr int8_t SchemaNodeFloat = 0x72;
+    constexpr int8_t SchemaNodeBool = 0x73;
+    constexpr int8_t SchemaNodeStr = 0x74;
+    constexpr int8_t SchemaNodeObj = 0x75;
 }  // namespace Payload
 
 constexpr int8_t FourByteEncodingMagicNumber[]

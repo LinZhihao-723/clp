@@ -8,8 +8,28 @@
 #include <vector>
 
 #include "../../TraceableException.hpp"
+#include "decoding_methods.hpp"
 
 namespace ffi::ir_stream {
+enum class SchemaTreeNodeValueType : uint8_t {
+    Unknown = 0,
+    Int,
+    Float,
+    Bool,
+    Str,
+    Obj
+};
+
+/**
+ * Converts the encoded tag to the corresponded tree node value type.
+ * @param encoded_tag
+ * @param type The converted tree node value type.
+ * @return true on success, false otherwise.
+ *
+ */
+[[nodiscard]] auto
+encoded_tag_to_tree_node_type(encoded_tag_t encoded_tag, SchemaTreeNodeValueType& type) -> bool;
+
 class SchemaTreeException : public TraceableException {
 public:
     SchemaTreeException(
@@ -25,15 +45,6 @@ public:
 
 private:
     std::string m_message;
-};
-
-enum class SchemaTreeNodeValueType : uint8_t {
-    Unknown = 0,
-    Int,
-    Float,
-    Bool,
-    Str,
-    Obj
 };
 
 class SchemaTreeNode {
@@ -110,6 +121,14 @@ public:
         node += "\n";
         return node;
     }
+
+    /**
+     * Gets the encoded type tag of the current tree.
+     * @return The encoded type tag.
+     */
+    [[nodiscard]] auto get_encoded_value_type_tag() const -> encoded_tag_t;
+
+    [[nodiscard]] auto operator==(SchemaTreeNode const& tree_node) const -> bool;
 
 private:
     size_t m_id;
@@ -188,10 +207,21 @@ public:
     }
 
     /**
+     * Cleans the tree.
+     */
+    auto clear() -> void {
+        m_snapshot_size = 0;
+        m_tree_nodes.clear();
+        m_tree_nodes.emplace_back(cRootId, cRootId, "", SchemaTreeNodeValueType::Obj);
+    }
+
+    /**
      * Dumps the tree into a string.
      * @return Dumped tree.
      */
     [[nodiscard]] auto dump() const -> std::string;
+
+    [[nodiscard]] auto operator==(SchemaTree const& tree) const -> bool;
 
 private:
     size_t m_snapshot_size{0};

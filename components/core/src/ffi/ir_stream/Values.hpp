@@ -102,6 +102,11 @@ public:
         std::string m_message;
     };
 
+    static constexpr bool cEnableStrongIntCompression{false};
+
+    [[nodiscard]] static auto
+    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& json_val) -> Value;
+
     /**
      * Constructs a value with a given typed value.
      * @param value
@@ -187,12 +192,22 @@ public:
     /**
      * Decodes the next value from the given reader.
      * @param reader
-     * @param value
      * @return IRErrorCode_Success on success
      * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
      * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
      */
     [[nodiscard]] auto decode_from_reader(ReaderInterface& reader) -> IRErrorCode;
+
+    /**
+     * Decodes the next value from the given reader.
+     * @param reader
+     * @param tag
+     * @return IRErrorCode_Success on success
+     * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+     */
+    [[nodiscard]] auto decode_from_reader(ReaderInterface& reader, encoded_tag_t tag)
+            -> IRErrorCode;
 
     /**
      * @return SchemaTreeNodeValueType based on the underlying value type.
@@ -205,8 +220,7 @@ public:
         return (false == operator==(rhs));
     }
 
-    [[nodiscard]] static auto
-    convert_from_json(SchemaTreeNodeValueType type, nlohmann::json const& value) -> Value;
+    [[nodiscard]] auto dump() const -> std::string;
 
 private:
     value_t m_value{std::monostate{}};

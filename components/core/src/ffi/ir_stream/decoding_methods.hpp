@@ -141,6 +141,19 @@ void generic_decode_message(
 );
 
 /**
+ * Decodes the CLP IR encoded string from the reader.
+ * @tparam encoded_variable_t
+ * @param reader
+ * @param clp_str
+ * @return IRErrorCode_Success on success
+ * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+ * @return IRErrorCode_Eof on reaching the end of the stream
+ */
+template <typename encoded_variable_t>
+auto decode_clp_string(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode;
+
+/**
  * Decodes the preamble for an IR stream.
  * @param reader
  * @param metadata_type Returns the type of the metadata found in the IR
@@ -204,6 +217,20 @@ namespace eight_byte_encoding {
      */
     IRErrorCode
     decode_next_message(ReaderInterface& reader, std::string& message, epoch_time_ms_t& timestamp);
+
+    /**
+     * Decodes the CLP IR encoded string from the reader.
+     * @param reader
+     * @param clp_str
+     * @return ErrorCode_Success on success
+     * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return ErrorCode_Decode_Error if the encoded message cannot be properly
+     * decoded
+     * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to
+     * decode
+     * @return ErrorCode_End_of_IR if the IR ends
+     */
+    auto decode_clp_str(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode;
 }  // namespace eight_byte_encoding
 
 namespace four_byte_encoding {
@@ -225,6 +252,20 @@ namespace four_byte_encoding {
             std::string& message,
             epoch_time_ms_t& timestamp_delta
     );
+
+    /**
+     * Decodes the CLP IR encoded string from the reader.
+     * @param reader
+     * @param clp_str
+     * @return ErrorCode_Success on success
+     * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+     * @return ErrorCode_Decode_Error if the encoded message cannot be properly
+     * decoded
+     * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to
+     * decode
+     * @return ErrorCode_End_of_IR if the IR ends
+     */
+    auto decode_clp_str(ReaderInterface& reader, std::string& clp_str) -> IRErrorCode;
 }  // namespace four_byte_encoding
 }  // namespace ffi::ir_stream
 
