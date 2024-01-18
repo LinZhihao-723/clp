@@ -29,16 +29,8 @@ auto encoded_tag_to_tree_node_type(encoded_tag_t encoded_tag, SchemaTreeNodeValu
 }
 
 auto SchemaTreeNode::encode_as_new_node(std::vector<int8_t>& ir_buf) const -> bool {
-    if (m_id < UINT8_MAX) {
-        ir_buf.push_back(cProtocol::Payload::SchemaNodeParentIdByte);
-        ir_buf.push_back(static_cast<uint8_t>(m_parent_id));
-    } else if (m_id < UINT16_MAX) {
-        ir_buf.push_back(cProtocol::Payload::SchemaNodeParentIdShort);
-        encode_int(static_cast<uint16_t>(m_parent_id), ir_buf);
-    } else {
-        return false;
-    }
     ir_buf.push_back(get_encoded_value_type_tag());
+    encode_int(static_cast<uint16_t>(m_parent_id), ir_buf);
     auto const& name_length{m_key_name.length()};
     if (name_length < UINT8_MAX) {
         ir_buf.push_back(cProtocol::Payload::SchemaNodeNameLenByte);

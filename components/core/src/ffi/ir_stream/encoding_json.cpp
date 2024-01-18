@@ -22,10 +22,7 @@ namespace {
     };
 
     auto encode_schema_id(size_t id, std::vector<int8_t>& ir_buf) -> bool {
-        if (id < UINT8_MAX) {
-            ir_buf.push_back(cProtocol::Payload::SchemaNodeIdByte);
-            ir_buf.push_back(static_cast<uint8_t>(id));
-        } else if (id < UINT16_MAX) {
+        if (id < UINT16_MAX) {
             ir_buf.push_back(cProtocol::Payload::SchemaNodeIdShort);
             encode_int(static_cast<uint16_t>(id), ir_buf);
         } else {
