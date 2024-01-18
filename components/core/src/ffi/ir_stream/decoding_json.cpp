@@ -33,6 +33,10 @@ namespace {
         return nullptr;
     }
 
+    [[nodiscard]] auto is_new_schema_tree_node_tag(encoded_tag_t tag) -> bool {
+        return 0x70 <= tag && tag <= 0x75;
+    }
+
     /**
      * Growths the schema tree.
      * @param encoded_tag
@@ -43,31 +47,17 @@ namespace {
     [[nodiscard]] auto
     schema_tree_growth(encoded_tag_t encoded_tag, ReaderInterface& reader, SchemaTree& schema_tree)
             -> IRErrorCode {
-        size_t parent_id{};
-        if (cProtocol::Payload::SchemaNodeParentIdByte == encoded_tag) {
-            uint8_t decoded_id{};
-            if (false == decode_int(reader, decoded_id)) {
-                return IRErrorCode::IRErrorCode_Incomplete_IR;
-            }
-            parent_id = static_cast<size_t>(decoded_id);
-        } else if (cProtocol::Payload::SchemaNodeParentIdShort == encoded_tag) {
-            uint16_t decoded_id{};
-            if (false == decode_int(reader, decoded_id)) {
-                return IRErrorCode::IRErrorCode_Incomplete_IR;
-            }
-            parent_id = static_cast<size_t>(decoded_id);
-        } else {
+        SchemaTreeNodeValueType type{SchemaTreeNodeValueType::Unknown};
+        if (false == encoded_tag_to_tree_node_type(encoded_tag, type)) {
             return IRErrorCode::IRErrorCode_Corrupted_IR;
         }
 
-        encoded_tag_t type_tag;
-        if (ErrorCode_Success != reader.try_read_numeric_value(type_tag)) {
-            return IRErrorCode_Incomplete_IR;
+        size_t parent_id{};
+        uint16_t decoded_id{};
+        if (false == decode_int(reader, decoded_id)) {
+            return IRErrorCode::IRErrorCode_Incomplete_IR;
         }
-        SchemaTreeNodeValueType type{SchemaTreeNodeValueType::Unknown};
-        if (false == encoded_tag_to_tree_node_type(type_tag, type)) {
-            return IRErrorCode::IRErrorCode_Corrupted_IR;
-        }
+        parent_id = static_cast<size_t>(decoded_id);
 
         encoded_tag_t len_tag;
         if (ErrorCode_Success != reader.try_read_numeric_value(len_tag)) {
@@ -418,9 +408,7 @@ auto decode_json_object(ReaderInterface& reader, SchemaTree& schema_tree, nlohma
         if (cProtocol::Eof == encoded_tag) {
             return IRErrorCode_Eof;
         }
-        if (cProtocol::Payload::SchemaNodeParentIdByte != encoded_tag
-            && cProtocol::Payload::SchemaNodeParentIdShort != encoded_tag)
-        {
+        if (false == is_new_schema_tree_node_tag(encoded_tag)) {
             break;
         }
         if (auto const error{schema_tree_growth(encoded_tag, reader, schema_tree)};
