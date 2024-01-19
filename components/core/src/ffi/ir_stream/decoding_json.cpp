@@ -115,7 +115,7 @@ namespace {
             }
             key_id = static_cast<size_t>(tree_node_id);
         } else {
-            return IRErrorCode::IRErrorCode_Corrupted_IR;
+            return IRErrorCode::IRErrorCode_Mismatching_Tag;
         }
         return IRErrorCode::IRErrorCode_Success;
     }
@@ -322,6 +322,131 @@ namespace {
         return IRErrorCode_Success;
     }
 
+    [[nodiscard]] auto deserialize_key_value_pairs(
+            encoded_tag_t tag,
+            ReaderInterface& reader,
+            SchemaTree const& schema_tree,
+            nlohmann::json& obj
+    ) -> IRErrorCode {
+        std::vector<size_t> ids;
+        while (true) {
+            size_t key_id;
+            if (auto const err{deserialize_key_id(tag, reader, key_id)}; IRErrorCode_Success != err)
+            {
+                if (IRErrorCode_Mismatching_Tag == err) {
+                    break;
+                }
+                return err;
+            }
+            ids.push_back(key_id);
+            if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+        }
+
+        if (ids.empty()) {
+            return IRErrorCode_Corrupted_IR;
+        }
+        auto const num_keys{ids.size()};
+        size_t num_decoded_value{0};
+        Value value;
+        std::vector<std::string_view> keys_to_root;
+        obj = nlohmann::json::object();
+        while (true) {
+            auto const id{ids[num_decoded_value]};
+            auto const type{schema_tree.get_node_with_id(id).get_type()};
+            if (is_empty_tag(tag)) {
+                if (SchemaTreeNodeValueType::Obj != type) {
+                    std::cerr << "Mismatching empty object types.\n";
+                    return IRErrorCode_Corrupted_IR;
+                }
+                insert_key_value_pair(
+                        id,
+                        get_empty_array_or_obj(tag),
+                        schema_tree,
+                        keys_to_root,
+                        obj
+                );
+            } else if (is_array_tag(tag)) {
+                nlohmann::json sub_array;
+                if (schema_tree.get_node_with_id(id).get_type() != SchemaTreeNodeValueType::Obj) {
+                    std::cerr << "Mismatching array type.\n";
+                    return IRErrorCode::IRErrorCode_Corrupted_IR;
+                }
+                if (auto const error{deserialize_array(tag, reader, schema_tree, sub_array)};
+                    IRErrorCode::IRErrorCode_Success != error)
+                {
+                    std::cerr << "Failed to deserialize array from obj.\n";
+                    return error;
+                }
+                insert_key_value_pair(id, sub_array, schema_tree, keys_to_root, obj);
+            } else {
+                if (auto const error{deserialize_value(tag, reader, schema_tree, id, value)};
+                    IRErrorCode::IRErrorCode_Success != error)
+                {
+                    std::cerr << "Failed to deserialize value.\n";
+                    return error;
+                }
+                switch (schema_tree.get_node_with_id(id).get_type()) {
+                    case SchemaTreeNodeValueType::Int:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_int_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Float:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_float_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Bool:
+                        insert_key_value_pair(
+                                id,
+                                value.get<value_bool_t>(),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Str:
+                        insert_key_value_pair(
+                                id,
+                                static_cast<std::string>(value.get<value_str_t>()),
+                                schema_tree,
+                                keys_to_root,
+                                obj
+                        );
+                        break;
+                    case SchemaTreeNodeValueType::Obj:
+                        if (false == value.is_empty()) {
+                            return IRErrorCode::IRErrorCode_Decode_Error;
+                        }
+                        insert_key_value_pair(id, nullptr, schema_tree, keys_to_root, obj);
+                        break;
+                    default:
+                        std::cerr << "Decoding error... Unknown tag.\n";
+                        return IRErrorCode::IRErrorCode_Decode_Error;
+                }
+            }
+
+            ++num_decoded_value;
+            if (num_decoded_value == num_keys) {
+                break;
+            }
+            if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+        }
+        return IRErrorCode_Success;
+    }
+
     [[nodiscard]] auto deserialize_array(
             encoded_tag_t tag,
             ReaderInterface& reader,
@@ -331,66 +456,25 @@ namespace {
         if (false == is_array_tag(tag)) {
             return IRErrorCode_Corrupted_IR;
         }
-        array = nlohmann::json::array();
-        while (true) {
-            if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
-                std::cerr << "Failed to decode the tag.\n";
-                return IRErrorCode_Incomplete_IR;
-            }
-            if (cProtocol::Payload::ArrayEnd == tag) {
-                break;
-            }
-
-            if (is_array_tag(tag)) {
-                nlohmann::json sub_array;
-                if (auto const err{deserialize_array(tag, reader, schema_tree, sub_array)};
-                    IRErrorCode::IRErrorCode_Success != err)
-                {
-                    std::cerr << "Failed to decode the subarray.\n";
-                    return err;
-                }
-                array.push_back(sub_array);
-            } else if (is_empty_tag(tag)) {
-                array.push_back(get_empty_array_or_obj(tag));
-            } else if (is_encoded_key_value_pair_tag(tag)) {
-                nlohmann::json key_value_pair_record;
-                if (auto const err{deserialize_key_value_pair_record(
-                            tag,
-                            reader,
-                            schema_tree,
-                            key_value_pair_record
-                    )};
-                    IRErrorCode::IRErrorCode_Success != err)
-                {
-                    std::cerr << "Failed to decode key value pair of an array.\n";
-                    return err;
-                }
-                array.push_back(key_value_pair_record);
-            } else {
-                Value val;
-                if (auto const err{val.decode_from_reader(reader, tag)};
-                    IRErrorCode::IRErrorCode_Success != err)
-                {
-                    std::cerr << "Failed to decode value from the reader."
-                              << "Tag: " << std::hex << static_cast<int32_t>(tag) << "\n";
-                    return err;
-                }
-                if (val.is_empty()) {
-                    array.push_back(nullptr);
-                } else if (val.is_type<value_int_t>()) {
-                    array.push_back(val.get<value_int_t>());
-                } else if (val.is_type<value_float_t>()) {
-                    array.push_back(val.get<value_float_t>());
-                } else if (val.is_type<value_bool_t>()) {
-                    array.push_back(val.get<value_bool_t>());
-                } else if (val.is_type<value_str_t>()) {
-                    array.push_back(val.get<value_str_t>());
-                } else {
-                    std::cerr << "Failed to decode single value of an array."
-                              << "Tag: " << std::hex << static_cast<int32_t>(tag) << "\n";
-                    return IRErrorCode::IRErrorCode_Corrupted_IR;
-                }
-            }
+        std::string array_str;
+        if (auto const err{decode_clp_string<four_byte_encoded_variable_t>(reader, array_str)};
+            IRErrorCode_Success != err)
+        {
+            std::cerr << "Failed to decode the clp str.\n";
+            return err;
+        }
+        array = nlohmann::json::parse(array_str);
+        if (false == array.is_array()) {
+            std::cerr << "The deserialized object is not an array.\n";
+            return IRErrorCode_Decode_Error;
+        }
+        if (ErrorCode_Success != reader.try_read_numeric_value(tag)) {
+            std::cerr << "Failed to decode the tag.\n";
+            return IRErrorCode_Incomplete_IR;
+        }
+        if (cProtocol::Payload::ArrayEnd != tag) {
+            std::cerr << "The end tag is not Array end.\n";
+            return IRErrorCode_Corrupted_IR;
         }
         return IRErrorCode_Success;
     }
@@ -425,10 +509,11 @@ auto decode_json_object(ReaderInterface& reader, SchemaTree& schema_tree, nlohma
     }
 
     if (is_encoded_key_value_pair_tag(encoded_tag)) {
-        return deserialize_key_value_pair_record(encoded_tag, reader, schema_tree, obj);
+        return deserialize_key_value_pairs(encoded_tag, reader, schema_tree, obj);
     }
 
     if (is_array_tag(encoded_tag)) {
+        std::cerr << "Array as the top level data is not supported.";
         return deserialize_array(encoded_tag, reader, schema_tree, obj);
     }
 
