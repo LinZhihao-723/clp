@@ -325,7 +325,7 @@ namespace {
     [[nodiscard]] auto deserialize_key_value_pairs(
             encoded_tag_t tag,
             ReaderInterface& reader,
-            SchemaTree const& schema_tree,
+            SchemaTree& schema_tree,
             nlohmann::json& obj
     ) -> IRErrorCode {
         std::vector<size_t> ids;
@@ -387,15 +387,16 @@ namespace {
                     std::cerr << "Failed to deserialize value.\n";
                     return error;
                 }
-                switch (schema_tree.get_node_with_id(id).get_type()) {
+                auto& node{schema_tree.get_node_with_id(id)};
+                auto deserialize_int_pair{[&]() {
+                    auto const delta{value.get<value_int_t>()};
+                    auto const curr_val{node.get_prev_val() + delta};
+                    insert_key_value_pair(id, curr_val, schema_tree, keys_to_root, obj);
+                    node.set_prev_val(curr_val);
+                }};
+                switch (node.get_type()) {
                     case SchemaTreeNodeValueType::Int:
-                        insert_key_value_pair(
-                                id,
-                                value.get<value_int_t>(),
-                                schema_tree,
-                                keys_to_root,
-                                obj
-                        );
+                        deserialize_int_pair();
                         break;
                     case SchemaTreeNodeValueType::Float:
                         insert_key_value_pair(

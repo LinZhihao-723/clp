@@ -258,10 +258,9 @@ namespace {
             }
 
             auto const type{get_value_type_from_json(value)};
-            if (type == SchemaTreeNodeValueType::Unknown) {
+            if (SchemaTreeNodeValueType::Unknown == type) {
                 return false;
             }
-            auto const value_from_json{Value::convert_from_json(type, value)};
             auto const node_id{get_schema_node_id(
                     schema_tree,
                     parent_id,
@@ -272,8 +271,20 @@ namespace {
             if (false == encode_schema_id(node_id, key_buf)) {
                 return false;
             }
-            if (false == value_from_json.encode(value_buf)) {
-                return false;
+            if (SchemaTreeNodeValueType::Int == type) {
+                auto& node{schema_tree.get_node_with_id(node_id)};
+                auto const prev_val{node.get_prev_val()};
+                auto const curr_val{value.get<value_int_t>()};
+                Value delta{curr_val - prev_val};
+                if (false == delta.encode(value_buf)) {
+                    return false;
+                }
+                node.set_prev_val(curr_val);
+            } else {
+                auto const value_from_json{Value::convert_from_json(type, value)};
+                if (false == value_from_json.encode(value_buf)) {
+                    return false;
+                }
             }
         }
 
