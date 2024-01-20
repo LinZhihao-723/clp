@@ -91,6 +91,18 @@ auto SchemaTree::get_node_with_id(size_t id) const -> SchemaTreeNode const& {
     return m_tree_nodes[id];
 }
 
+auto SchemaTree::get_node_with_id(size_t id) -> SchemaTreeNode& {
+    if (m_tree_nodes.size() <= id) {
+        throw SchemaTreeException(
+                ErrorCode_OutOfBounds,
+                __FILENAME__,
+                __LINE__,
+                "Schema tree id access out of bound."
+        );
+    }
+    return m_tree_nodes[id];
+}
+
 auto SchemaTree::has_node(
         size_t parent_id,
         std::string_view key_name,

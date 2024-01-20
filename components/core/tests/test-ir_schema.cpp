@@ -7,7 +7,9 @@
 
 #include "../src/BufferReader.hpp"
 #include "../src/ffi/ir_stream/decoding_json.hpp"
+#include "../src/ffi/ir_stream/decoding_methods.hpp"
 #include "../src/ffi/ir_stream/encoding_json.hpp"
+#include "../src/ffi/ir_stream/encoding_methods.hpp"
 #include "../src/ffi/ir_stream/SchemaTree.hpp"
 #include "../src/ffi/ir_stream/Values.hpp"
 #include "../src/FileReader.hpp"
@@ -240,31 +242,26 @@ TEST_CASE("encoding_method_array_basic", "[ffi][encoding]") {
 
     SchemaTree schema_tree;
     std::vector<int8_t> ir_buf;
-    std::vector<int8_t> encoded_ir_bytes;
 
     REQUIRE(encode_json_object(j1, schema_tree, ir_buf));
-    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
     REQUIRE(encode_json_object(j2, schema_tree, ir_buf));
-    encoded_ir_bytes.insert(encoded_ir_bytes.cend(), ir_buf.cbegin(), ir_buf.cend());
 
     SchemaTree decoded_schema_tree;
     nlohmann::json decoded_json_array;
-    BufferReader reader{
-            size_checked_pointer_cast<char const>(encoded_ir_bytes.data()),
-            encoded_ir_bytes.size()};
+    BufferReader reader{size_checked_pointer_cast<char const>(ir_buf.data()), ir_buf.size()};
     REQUIRE(IRErrorCode::IRErrorCode_Success
             == decode_json_object(reader, decoded_schema_tree, decoded_json_array));
     REQUIRE(j1 == decoded_json_array);
     REQUIRE(IRErrorCode::IRErrorCode_Success
             == decode_json_object(reader, decoded_schema_tree, decoded_json_array));
     REQUIRE(j2 == decoded_json_array);
-    std::cerr << j2 << "\n";
 
     REQUIRE(decoded_schema_tree == schema_tree);
 }
 
 TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
     std::string const file_path{"data/rider-product-cored.json"};
+    // std::string const file_path{"data/wmt1.json"};
     std::string const output_path{"./test.clp"};
     std::ifstream fin;
 
@@ -281,10 +278,7 @@ TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
             std::cerr << "Failed to encode json: " << item << "\n";
             break;
         }
-        writer.write(
-                size_checked_pointer_cast<char const>(ir_buf.data()),
-                ir_buf.size()
-        );
+        writer.write(size_checked_pointer_cast<char const>(ir_buf.data()), ir_buf.size());
         buffer_size += ir_buf.size();
         ir_buf.clear();
     }
@@ -308,8 +302,8 @@ TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
         auto const err{decode_json_object(reader, decoded_schema_tree, decoded_json_obj)};
         if (IRErrorCode::IRErrorCode_Eof == err) {
             if (reader.get_pos() != buffer_size) {
-                std::cerr << "Early exit. Pos: " << reader.get_pos() << "; Buf Size: "
-                        << buffer_size << "\n";
+                std::cerr << "Early exit. Pos: " << reader.get_pos()
+                          << "; Buf Size: " << buffer_size << "\n";
                 failed = true;
             }
             break;
@@ -323,12 +317,12 @@ TEST_CASE("encoding_json_test_temp", "[ffi][encoding]") {
             ref_item = nlohmann::json::parse(line);
         } else {
             failed = true;
-            std::cerr << "Idx " << idx << " failed to parse.\n"; 
+            std::cerr << "Idx " << idx << " failed to parse.\n";
             break;
         }
         if (decoded_json_obj != ref_item) {
-            std::cerr << "Diff Idx: " << idx << " Decoded: " << decoded_json_obj << "\nRef: "
-                    << ref_item << "\n";
+            std::cerr << "Diff Idx: " << idx << " Decoded: " << decoded_json_obj
+                      << "\nRef: " << ref_item << "\n";
             failed = true;
             break;
         }
@@ -372,4 +366,69 @@ TEST_CASE("decoding_json_test", "[ffi][decoding]") {
         ++idx;
     }
     // std::cerr << "Tree:\n" << decoded_schema_tree.dump() << "\n";
+}
+
+TEST_CASE("msgpack_encoding", "[ffi][encoding]") {
+    std::string const file_path{"data/rider-product-cored.json"};
+    // std::string const file_path{"data/cisco.json"};
+    std::string const output_path{"./msgpack"};
+    std::ifstream fin;
+
+    fin.open(file_path);
+    FileWriter writer;
+    writer.open(output_path, FileWriter::OpenMode::CREATE_FOR_WRITING);
+    std::string line;
+    std::vector<int8_t> ir_buf;
+    size_t num_records{0};
+    while (getline(fin, line)) {
+        nlohmann::json item = nlohmann::json::parse(line);
+        auto const msgpack{nlohmann::json::to_msgpack(item)};
+        auto const msgpack_size{static_cast<uint32_t>(msgpack.size())};
+        ir_buf.clear();
+        ffi::ir_stream::encode_int(msgpack_size, ir_buf);
+        writer.write(size_checked_pointer_cast<char const>(ir_buf.data()), ir_buf.size());
+        writer.write(size_checked_pointer_cast<char const>(msgpack.data()), msgpack.size());
+        ++num_records;
+    }
+    writer.close();
+    fin.close();
+    std::cerr << "Encoding complete.\n";
+
+    SchemaTree decoded_schema_tree;
+    nlohmann::json decoded_json_obj;
+
+    bool failed{false};
+    fin.open(file_path);
+    FileReader reader;
+    reader.open(output_path);
+    nlohmann::json ref_item;
+    for (size_t i{0}; i < num_records; ++i) {
+        uint32_t size{};
+        if (false == ffi::ir_stream::decode_int(reader, size)) {
+            std::cerr << "Decoding int failed.\n";
+            failed = true;
+            break;
+        }
+        auto const buffer{std::make_unique<char[]>(size)};
+        reader.read_exact_length(buffer.get(), size, false);
+        auto* buffer_data{buffer.get()};
+        std::vector<uint8_t> msgpack_data{
+                size_checked_pointer_cast<uint8_t>(buffer_data),
+                size_checked_pointer_cast<uint8_t>(buffer_data + size)};
+        decoded_json_obj = nlohmann::json::from_msgpack(msgpack_data);
+        if (getline(fin, line)) {
+            ref_item = nlohmann::json::parse(line);
+        } else {
+            failed = true;
+            std::cerr << "Idx " << i << " failed to parse.\n";
+            break;
+        }
+        if (decoded_json_obj != ref_item) {
+            std::cerr << "Diff Idx: " << i << " Decoded: " << decoded_json_obj
+                      << "\nRef: " << ref_item << "\n";
+            failed = true;
+            break;
+        }
+    }
+    REQUIRE(false == failed);
 }

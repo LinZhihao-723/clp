@@ -16,6 +16,7 @@ typedef enum {
     IRErrorCode_Eof,
     IRErrorCode_Corrupted_IR,
     IRErrorCode_Incomplete_IR,
+    IRErrorCode_Mismatching_Tag
 } IRErrorCode;
 
 typedef enum {

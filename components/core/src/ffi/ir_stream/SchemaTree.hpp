@@ -130,9 +130,14 @@ public:
 
     [[nodiscard]] auto operator==(SchemaTreeNode const& tree_node) const -> bool;
 
+    [[nodiscard]] auto get_prev_val() const -> int64_t { return m_prev_val; }
+
+    auto set_prev_val(int64_t val) -> void { m_prev_val = val; }
+
 private:
     size_t m_id;
     size_t m_parent_id;
+    int64_t m_prev_val{0};
     std::vector<size_t> m_children_ids;
     std::string m_key_name;
     SchemaTreeNodeValueType m_type;
@@ -147,6 +152,7 @@ public:
     static constexpr size_t cRootId{0};
 
     [[nodiscard]] auto get_node_with_id(size_t id) const -> SchemaTreeNode const&;
+    [[nodiscard]] auto get_node_with_id(size_t id) -> SchemaTreeNode&;
 
     /**
      * Checks if a node exists with the given parent id, key name, and type.
