@@ -40,6 +40,7 @@ jobs:
           # name to lowercase here.
           echo "REPOSITORY=$(echo '${{github.repository}}' | tr '[:upper:]' '[:lower:]')" \
             >> "$GITHUB_OUTPUT"
+          cat $GITHUB_OUTPUT
 
       - id: "meta"
         uses: "docker/metadata-action@v5"
