@@ -45,7 +45,7 @@ jobs:
       - id: "meta"
         uses: "docker/metadata-action@v5"
         with:
-          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/${{steps.sanitization.REPOSITORY}}\
+          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/whatever\
             /clp-execution-x86-ubuntu-focal"
 
       - if: success()
