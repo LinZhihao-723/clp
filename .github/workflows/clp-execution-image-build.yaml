@@ -38,14 +38,13 @@ jobs:
         run: |
           # Docker doesn't support repository names with uppercase characters, so we convert the
           # name to lowercase here.
-          echo "REPOSITORY=$(echo '${{github.repository}}' | tr '[:upper:]' '[:lower:]')" \
-            >> "$GITHUB_OUTPUT"
-          cat $GITHUB_OUTPUT
+          echo "CLP_REPOSITORY=$(echo '${{github.repository}}' | tr '[:upper:]' '[:lower:]')" \
+            >> $GITHUB_ENV
 
       - id: "meta"
         uses: "docker/metadata-action@v5"
         with:
-          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/whatever\
+          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/${{env.CLP_REPOSITORY}}\
             /clp-execution-x86-ubuntu-focal"
 
       - if: success()
