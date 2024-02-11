@@ -33,7 +33,7 @@ jobs:
           username: "${{github.actor}}"
           password: "${{secrets.GITHUB_TOKEN}}"
 
-      - name: "sanitization"
+      - id: "sanitization"
         shell: "bash"
         run: |
           # Docker doesn't support repository names with uppercase characters, so we convert the
