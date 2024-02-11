@@ -33,7 +33,7 @@ jobs:
           username: "${{github.actor}}"
           password: "${{secrets.GITHUB_TOKEN}}"
 
-      - name: "sanitization"
+      - id: "sanitization"
         shell: "bash"
         run: |
           # Docker doesn't support repository names with uppercase characters, so we convert the
@@ -45,7 +45,7 @@ jobs:
       - id: "meta"
         uses: "docker/metadata-action@v5"
         with:
-          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/${{steps.sanitization.REPOSITORY}}\
+          images: "${{env.CONTAINER_IMAGE_REGISTRY}}/${{steps.sanitization.outputs.REPOSITORY}}\
             /clp-execution-x86-ubuntu-focal"
 
       - if: success()
