@@ -365,12 +365,25 @@ set(SOURCE_FILES_unitTest
         src/clp/version.hpp
         src/clp/WriterInterface.cpp
         src/clp/WriterInterface.hpp
+        src/clp_s/ffi/ir_stream/byteswap.hpp
+        src/clp_s/ffi/ir_stream/deserialization_methods.cpp
+        src/clp_s/ffi/ir_stream/deserialization_methods.hpp
+        src/clp_s/ffi/ir_stream/protocol_constants.hpp
+        src/clp_s/ffi/ir_stream/serialization_methods.cpp
+        src/clp_s/ffi/ir_stream/serialization_methods.hpp
+        src/clp_s/ffi/ir_stream/SerializationBuffer.hpp
+        src/clp_s/ffi/ir_stream/utils.cpp
+        src/clp_s/ffi/ir_stream/utils.hpp
+        src/clp_s/ffi/ir_stream/Value.hpp
+        src/clp_s/ffi/SchemaTree.hpp
+        src/clp_s/ffi/SchemaTreeNode.hpp
         submodules/sqlite3/sqlite3.c
         submodules/sqlite3/sqlite3.h
         submodules/sqlite3/sqlite3ext.h
         tests/test-BufferedFileReader.cpp
         tests/test-EncodedVariableInterpreter.cpp
         tests/test-encoding_methods.cpp
+        tests/test-ffi_Structured.cpp
         tests/test-Grep.cpp
         tests/test-ir_encoding_methods.cpp
         tests/test-ir_parsing.cpp
@@ -406,4 +419,9 @@ target_link_libraries(unitTest
         )
 target_compile_features(unitTest
         PRIVATE cxx_std_17
+        )
+target_compile_options(unitTest PRIVATE
+        $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:GNU>:-g>>
+        $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:Clang>:-g>>
+        $<$<CONFIG:Debug>:$<$<CXX_COMPILER_ID:MSVC>:/Zi>>
         )

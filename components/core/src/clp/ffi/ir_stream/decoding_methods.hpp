@@ -179,6 +179,54 @@ IRErrorCode deserialize_log_event(
         std::string& message,
         ir::epoch_time_ms_t& timestamp
 );
+
+/**
+ * Deserializes the CLP str.
+ * @param reader
+ * @param clp_str Outputs the deserialized clp string.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to deserialize
+ * @return ErrorCode_End_of_IR if the IR ends
+ */
+[[nodiscard]] auto deserialize_clp_str(ReaderInterface& reader, std::string& clp_str)
+        -> IRErrorCode;
+
+/**
+ * Deserializes the CLP str.
+ * @param reader
+ * @param logtype Outputs the deserialized logtype.
+ * @param encoded_vars Outputs the deserialized encoded_var.
+ * @param dict_vars Outputs the deserialized dict_var.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to deserialize
+ * @return ErrorCode_End_of_IR if the IR ends
+ */
+[[nodiscard]] auto deserialize_clp_str(
+        ReaderInterface& reader,
+        std::string& logtype,
+        std::vector<ir::eight_byte_encoded_variable_t>& encoded_vars,
+        std::vector<std::string>& dict_vars
+) -> IRErrorCode;
+
+/**
+ * Decodes the CLP string from the logtype and variables.
+ * @param logtype
+ * @param encoded_vars
+ * @param dict_vars
+ * @param clp_str Outputs the decoded CLP string.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ */
+[[nodiscard]] auto decode_clp_str(
+        std::string const& logtype,
+        std::vector<ir::eight_byte_encoded_variable_t> const& encoded_vars,
+        std::vector<std::string> const& dict_vars,
+        std::string& clp_str
+) -> IRErrorCode;
 }  // namespace eight_byte_encoding
 
 namespace four_byte_encoding {
@@ -198,6 +246,54 @@ IRErrorCode deserialize_log_event(
         std::string& message,
         ir::epoch_time_ms_t& timestamp_delta
 );
+
+/**
+ * Deserializes the CLP str.
+ * @param reader
+ * @param clp_str Outputs the deserialized CLP string.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to deserialize
+ * @return ErrorCode_End_of_IR if the IR ends
+ */
+[[nodiscard]] auto deserialize_clp_str(ReaderInterface& reader, std::string& clp_str)
+        -> IRErrorCode;
+
+/**
+ * Deserializes the CLP str.
+ * @param reader
+ * @param logtype Outputs the deserialized logtype.
+ * @param encoded_vars Outputs the deserialized encoded_var.
+ * @param dict_vars Outputs the deserialized dict_var.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ * @return ErrorCode_Incomplete_IR if reader doesn't contain enough data to deserialize
+ * @return ErrorCode_End_of_IR if the IR ends
+ */
+[[nodiscard]] auto deserialize_clp_str(
+        ReaderInterface& reader,
+        std::string& logtype,
+        std::vector<ir::four_byte_encoded_variable_t>& encoded_vars,
+        std::vector<std::string>& dict_vars
+) -> IRErrorCode;
+
+/**
+ * Decodes the CLP string from the logtype and variables.
+ * @param logtype
+ * @param encoded_vars
+ * @param dict_vars
+ * @param clp_str Outputs the decoded CLP string.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ */
+[[nodiscard]] auto decode_clp_str(
+        std::string const& logtype,
+        std::vector<ir::four_byte_encoded_variable_t> const& encoded_vars,
+        std::vector<std::string> const& dict_vars,
+        std::string& clp_str
+) -> IRErrorCode;
 }  // namespace four_byte_encoding
 }  // namespace clp::ffi::ir_stream
 

@@ -23,3 +23,6 @@
 [submodule "components/core/submodules/abseil-cpp"]
 	path = components/core/submodules/abseil-cpp
 	url = https://github.com/abseil/abseil-cpp.git
+[submodule "components/core/submodules/GSL"]
+	path = components/core/submodules/GSL
+	url = https://github.com/microsoft/GSL.git

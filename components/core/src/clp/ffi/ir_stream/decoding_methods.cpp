@@ -59,6 +59,57 @@ static IRErrorCode
 deserialize_dict_var(ReaderInterface& reader, encoded_tag_t encoded_tag, string& dict_var);
 
 /**
+ * Deserializes a CLP encoded string (log event) from the given reader.
+ * @tparam encoded_variable_t
+ * @param reader
+ * @param logtype Returns the logtype
+ * @param encoded_vars Returns the encoded variables
+ * @param dict_vars Returns the dictionary variables
+ * @return IRErrorCode_Success on success
+ * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+ * @return IRErrorCode_Eof on reaching the end of the stream
+ */
+template <typename encoded_variable_t>
+[[nodiscard]] static auto deserialize_clp_string_generic(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars
+) -> IRErrorCode;
+
+/**
+ * Decodes the CLP string from the logtype and variables.
+ * @param logtype
+ * @param encoded_vars
+ * @param dict_vars
+ * @param clp_str Outputs the decoded CLP string.
+ * @return ErrorCode_Success on success
+ * @return ErrorCode_Decode_Error if the log event cannot be properly deserialized
+ */
+template <typename encoded_variable_t>
+[[nodiscard]] static auto decode_clp_string_generic(
+        string const& logtype,
+        vector<encoded_variable_t> const& encoded_vars,
+        vector<string> const& dict_vars,
+        string& clp_str
+) -> IRErrorCode;
+
+/**
+ * Deserializes and decodes a CLP encoded string from the given reader.
+ * @tparam encoded_variable_t
+ * @param reader
+ * @param clp_str Outputs the decoded CLP string.
+ * @return IRErrorCode_Success on success
+ * @return IRErrorCode_Corrupted_IR if reader contains invalid IR
+ * @return IRErrorCode_Incomplete_IR if reader doesn't contain enough data
+ * @return IRErrorCode_Eof on reaching the end of the stream
+ */
+template <typename encoded_variable_t>
+[[nodiscard]] static auto
+deserialize_and_decode_clp_string(ReaderInterface& reader, string& clp_str) -> IRErrorCode;
+
+/**
  * Deserializes a timestamp from the given reader
  * @tparam encoded_variable_t Type of the encoded variable
  * @param reader
@@ -349,12 +400,11 @@ static IRErrorCode deserialize_metadata(
 }
 
 template <typename encoded_variable_t>
-auto deserialize_log_event(
+static auto deserialize_clp_string_generic(
         ReaderInterface& reader,
         string& logtype,
         vector<encoded_variable_t>& encoded_vars,
-        vector<string>& dict_vars,
-        epoch_time_ms_t& timestamp_or_timestamp_delta
+        vector<string>& dict_vars
 ) -> IRErrorCode {
     encoded_tag_t encoded_tag{cProtocol::Eof};
     if (ErrorCode_Success != reader.try_read_numeric_value(encoded_tag)) {
@@ -389,6 +439,29 @@ auto deserialize_log_event(
 
     // Handle logtype
     if (auto error_code = deserialize_logtype(reader, encoded_tag, logtype);
+        IRErrorCode_Success != error_code)
+    {
+        return error_code;
+    }
+
+    return IRErrorCode::IRErrorCode_Success;
+}
+
+template <typename encoded_variable_t>
+auto deserialize_log_event(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars,
+        epoch_time_ms_t& timestamp_or_timestamp_delta
+) -> IRErrorCode {
+    encoded_tag_t encoded_tag{cProtocol::Eof};
+    if (auto const error_code = deserialize_clp_string_generic<encoded_variable_t>(
+                reader,
+                logtype,
+                encoded_vars,
+                dict_vars
+        );
         IRErrorCode_Success != error_code)
     {
         return error_code;
@@ -474,6 +547,59 @@ IRErrorCode deserialize_preamble(
     return IRErrorCode_Success;
 }
 
+template <typename encoded_variable_t>
+static auto deserialize_and_decode_clp_string(ReaderInterface& reader, std::string& clp_str)
+        -> IRErrorCode {
+    clp_str.clear();
+
+    vector<encoded_variable_t> encoded_vars;
+    vector<string> dict_vars;
+    string logtype;
+    if (auto error_code = deserialize_clp_string_generic(reader, logtype, encoded_vars, dict_vars);
+        IRErrorCode_Success != error_code)
+    {
+        return error_code;
+    }
+
+    return decode_clp_string_generic(logtype, encoded_vars, dict_vars, clp_str);
+}
+
+template <typename encoded_variable_t>
+[[nodiscard]] static auto decode_clp_string_generic(
+        std::string const& logtype,
+        std::vector<encoded_variable_t> const& encoded_vars,
+        std::vector<std::string> const& dict_vars,
+        std::string& clp_str
+) -> IRErrorCode {
+    auto constant_handler = [&](string const& value, size_t begin_pos, size_t length) {
+        clp_str.append(value, begin_pos, length);
+    };
+
+    auto encoded_int_handler
+            = [&](encoded_variable_t value) { clp_str.append(decode_integer_var(value)); };
+
+    auto encoded_float_handler = [&](encoded_variable_t encoded_float) {
+        clp_str.append(decode_float_var(encoded_float));
+    };
+
+    auto dict_var_handler = [&](string const& dict_var) { clp_str.append(dict_var); };
+
+    try {
+        generic_decode_message<true>(
+                logtype,
+                encoded_vars,
+                dict_vars,
+                constant_handler,
+                encoded_int_handler,
+                encoded_float_handler,
+                dict_var_handler
+        );
+    } catch (DecodingException const& e) {
+        return IRErrorCode_Decode_Error;
+    }
+    return IRErrorCode_Success;
+}
+
 IRProtocolErrorCode validate_protocol_version(std::string_view protocol_version) {
     if ("v0.0.0" == protocol_version) {
         // This version is hardcoded to support the oldest IR protocol version. When this version is
@@ -491,9 +617,8 @@ IRProtocolErrorCode validate_protocol_version(std::string_view protocol_version)
         return IRProtocolErrorCode_Invalid;
     }
     std::string_view current_build_protocol_version{cProtocol::Metadata::VersionValue};
-    auto get_major_version{[](std::string_view version) {
-        return version.substr(0, version.find('.'));
-    }};
+    auto get_major_version{
+            [](std::string_view version) { return version.substr(0, version.find('.')); }};
     if (current_build_protocol_version < protocol_version) {
         return IRProtocolErrorCode_Too_New;
     }
@@ -512,12 +637,56 @@ deserialize_log_event(ReaderInterface& reader, string& message, epoch_time_ms_t&
             timestamp_delta
     );
 }
+
+auto deserialize_clp_str(ReaderInterface& reader, string& clp_str) -> IRErrorCode {
+    return deserialize_and_decode_clp_string<four_byte_encoded_variable_t>(reader, clp_str);
+}
+
+auto deserialize_clp_str(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<four_byte_encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars
+) -> IRErrorCode {
+    return deserialize_clp_string_generic(reader, logtype, encoded_vars, dict_vars);
+}
+
+auto decode_clp_str(
+        string const& logtype,
+        vector<four_byte_encoded_variable_t> const& encoded_vars,
+        vector<string> const& dict_vars,
+        string& clp_str
+) -> IRErrorCode {
+    return decode_clp_string_generic(logtype, encoded_vars, dict_vars, clp_str);
+}
 }  // namespace four_byte_encoding
 
 namespace eight_byte_encoding {
 IRErrorCode
 deserialize_log_event(ReaderInterface& reader, string& message, epoch_time_ms_t& timestamp) {
     return generic_deserialize_log_event<eight_byte_encoded_variable_t>(reader, message, timestamp);
+}
+
+auto deserialize_clp_str(ReaderInterface& reader, string& clp_str) -> IRErrorCode {
+    return deserialize_and_decode_clp_string<eight_byte_encoded_variable_t>(reader, clp_str);
+}
+
+auto deserialize_clp_str(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<eight_byte_encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars
+) -> IRErrorCode {
+    return deserialize_clp_string_generic(reader, logtype, encoded_vars, dict_vars);
+}
+
+auto decode_clp_str(
+        string const& logtype,
+        vector<eight_byte_encoded_variable_t> const& encoded_vars,
+        vector<string> const& dict_vars,
+        string& clp_str
+) -> IRErrorCode {
+    return decode_clp_string_generic(logtype, encoded_vars, dict_vars, clp_str);
 }
 }  // namespace eight_byte_encoding
 
@@ -536,5 +705,43 @@ template auto deserialize_log_event<eight_byte_encoded_variable_t>(
         vector<eight_byte_encoded_variable_t>& encoded_vars,
         vector<string>& dict_vars,
         epoch_time_ms_t& timestamp_or_timestamp_delta
+) -> IRErrorCode;
+
+template auto deserialize_and_decode_clp_string<four_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        string& clp_str
+) -> IRErrorCode;
+
+template auto deserialize_and_decode_clp_string<eight_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        string& clp_str
+) -> IRErrorCode;
+
+template auto deserialize_clp_string_generic<four_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<four_byte_encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars
+) -> IRErrorCode;
+
+template auto deserialize_clp_string_generic<eight_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        string& logtype,
+        vector<eight_byte_encoded_variable_t>& encoded_vars,
+        vector<string>& dict_vars
+) -> IRErrorCode;
+
+template auto decode_clp_string_generic<four_byte_encoded_variable_t>(
+        string const& logtype,
+        vector<four_byte_encoded_variable_t> const& encoded_vars,
+        vector<string> const& dict_vars,
+        string& clp_str
+) -> IRErrorCode;
+
+template auto decode_clp_string_generic<eight_byte_encoded_variable_t>(
+        string const& logtype,
+        vector<eight_byte_encoded_variable_t> const& encoded_vars,
+        vector<string> const& dict_vars,
+        string& clp_str
 ) -> IRErrorCode;
 }  // namespace clp::ffi::ir_stream
