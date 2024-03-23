@@ -2,12 +2,10 @@
 
 #include <iostream>
 #include <string_view>
+#include <span>
 #include <vector>
 
-#include <span>
-
 #include "../../../clp/ffi/ir_stream/encoding_methods.hpp"
-#include "../../Utils.hpp"
 #include "byteswap.hpp"
 #include "protocol_constants.hpp"
 #include "utils.hpp"
@@ -160,7 +158,7 @@ auto serialize_integer_generic(integer_t value, vector<int8_t>& buf) -> void {
  */
 auto serialize_double(double value, vector<int8_t>& buf) -> void {
     buf.push_back(cProtocol::Tag::ValueDouble);
-    serialize_integer_generic(bit_cast<uint64_t>(value), buf);
+    serialize_integer_generic(std::bit_cast<uint64_t>(value), buf);
 }
 
 /**
