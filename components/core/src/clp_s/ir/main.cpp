@@ -6,6 +6,7 @@
 #include <Catch2/single_include/catch2/catch.hpp>
 #include <json/single_include/nlohmann/json.hpp>
 
+#include "../../clp/streaming_compression/zstd/Compressor.hpp"
 #include "../../clp/BufferReader.hpp"
 #include "../ffi/ir_stream/deserialization_methods.hpp"
 #include "../ffi/ir_stream/serialization_methods.hpp"
@@ -20,6 +21,7 @@ using clp_s::ffi::ir_stream::serialize_key_value_pair_record;
 using clp_s::ffi::ir_stream::Value;
 using clp_s::ffi::SchemaTree;
 using clp_s::ffi::SchemaTreeNode;
+using clp::streaming_compression::zstd::Compressor;
 
 namespace {
 class Timer {
@@ -44,9 +46,8 @@ size_t level_map[]{
         100 * 1024 * 1024,
         1024 * 1024 * 1024,
         10L * 1024 * 1024 * 1024};
-}  // namespace
 
-auto main(int argc, char const* argv[]) -> int {
+auto eva_main(int argc, char const* argv[]) -> int {
     if (1 >= argc) {
         std::cerr << "Error: Incorrect Args.\n";
     }
@@ -150,5 +151,55 @@ auto main(int argc, char const* argv[]) -> int {
     if (buffer.get_schema_tree().get_size() != deserialized_schema_tree.get_size()) {
         std::cerr << "The deserialized tree's size doesn't match.\n";
     }
+    return 0;
+}
+}  // namespace
+
+auto main(int argc, char const* argv[]) -> int {
+    if (2 >= argc) {
+        std::cerr << "Error: Incorrect Args.\n";
+    }
+    std::string_view input_path{argv[1]};
+    std::string_view output_path{argv[2]};
+
+    std::ifstream fin;
+    fin.open(std::string(input_path));
+    SerializationBuffer buffer;
+    std::string line;
+    size_t idx{0};
+    long long map_to_ir_time{0};
+    clp::FileWriter writer;
+    Compressor zstd_compressor;
+
+    writer.open(std::string{output_path}, clp::FileWriter::OpenMode::CREATE_FOR_WRITING);
+    zstd_compressor.open(writer);
+
+    while (getline(fin, line)) {
+        ++idx;
+        nlohmann::json item = nlohmann::json::parse(line);
+        auto const msgpack_data{nlohmann::json::to_msgpack(item)};
+
+        msgpack::object_handle oh;
+        msgpack::unpack(
+                oh,
+                reinterpret_cast<char const*>(msgpack_data.data()),
+                msgpack_data.size()
+        );
+
+        Timer map_to_ir_timer;
+        if (false == serialize_key_value_pair_record(oh.get(), buffer)) {
+            std::cerr << "Failed to serialize: (#" << idx << ")" << line << "\n";
+            return -1;
+        }
+        auto const ir_buf{buffer.get_ir_buf()};
+        zstd_compressor.write(ir_buf.data(), ir_buf.size());
+        buffer.flush_ir_buf();
+        map_to_ir_time += map_to_ir_timer.get_time_used_in_microsecond();
+    }
+    std::cerr << "Compression time: " << static_cast<double>(map_to_ir_time) / 1000000.0 << "\n";
+    zstd_compressor.write("\0", 1);
+    zstd_compressor.close();
+    writer.close();
+
     return 0;
 }
