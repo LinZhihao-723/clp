@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../../../clp/ffi/ir_stream/encoding_methods.hpp"
+#include "../../../clp/type_utils.hpp"
 #include "byteswap.hpp"
 #include "protocol_constants.hpp"
 #include "utils.hpp"
@@ -158,7 +159,7 @@ auto serialize_integer_generic(integer_t value, vector<int8_t>& buf) -> void {
  */
 auto serialize_double(double value, vector<int8_t>& buf) -> void {
     buf.push_back(cProtocol::Tag::ValueDouble);
-    serialize_integer_generic(std::bit_cast<uint64_t>(value), buf);
+    serialize_integer_generic(clp::bit_cast<uint64_t>(value), buf);
 }
 
 /**
