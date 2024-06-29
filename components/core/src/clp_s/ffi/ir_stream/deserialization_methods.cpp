@@ -390,7 +390,7 @@ deserialize_and_append_clp_str_value(ReaderInterface& reader, vector<std::option
             values.emplace_back(Value{});
             break;
         default:
-            std::cerr << "Unknown tag value\n";
+            std::cerr << "Unknown tag value: " << static_cast<int>(tag) << "\n";
             err = IRErrorCode::UnknownTag;
             break;
     }
