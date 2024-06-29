@@ -7,6 +7,7 @@
 
 #include "../../../clp/ErrorCode.hpp"
 #include "../../../clp/ffi/ir_stream/decoding_methods.hpp"
+#include "../../../clp/type_utils.hpp"
 #include "../../Utils.hpp"
 #include "byteswap.hpp"
 #include "ClpString.hpp"
@@ -518,10 +519,17 @@ auto deserialize_next_key_value_pair_record(
 
     // Deserialize values
     size_t idx{0};
+    encoded_tag_t last_tag{tag};
     while (true) {
         if (auto const err{deserialize_and_append_value(reader, tag, values)};
             IRErrorCode::Success != err)
         {
+            auto const& node{schema_tree.get_node_with_id(schema[idx])};
+            std::cerr << "Key type: "
+                      << static_cast<int>(node.get_type()) << "\n";
+            std::cerr << "Key: "
+                      << node.get_key_name() << "\n";
+            std::cerr << "Last tag: " << static_cast<int>(last_tag) << "\n";
             return err;
         }
         if (false
@@ -535,6 +543,7 @@ auto deserialize_next_key_value_pair_record(
         if (values.size() == num_leaves) {
             break;
         }
+        last_tag = tag;
         if (auto const err{read_next_tag(reader, tag)}; IRErrorCode::Success != err) {
             return err;
         }
