@@ -478,7 +478,11 @@ set(SOURCE_FILES_unitTest
         tests/test-TimestampPattern.cpp
         tests/test-utf8_utils.cpp
         tests/test-Utils.cpp
-        )
+        src/clp/GenericErrorCode.hpp
+        src/clp/RegexErrorCode.cpp
+        src/clp/RegexErrorCode.hpp
+        tests/test-error_code.cpp
+)
 add_executable(unitTest ${SOURCE_FILES_unitTest} ${SOURCE_FILES_clp_s_unitTest})
 target_include_directories(unitTest
         PRIVATE
