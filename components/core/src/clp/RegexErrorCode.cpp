@@ -1,7 +1,3 @@
-//
-// Created by pleia on 7/17/2024.
-//
-
 #include "RegexErrorCode.hpp"
 
 #include <string>
@@ -9,14 +5,12 @@
 #include "GenericErrorCode.hpp"
 
 namespace clp {
-namespace {
-RegexErrorCategory const cRegexErrorCategory{};
-}  // namespace
-
+template <>
 auto RegexErrorCategory::name() const noexcept -> char const* {
     return "regex utility";
 }
 
+template <>
 auto RegexErrorCategory::message(int ev) const -> std::string {
     switch (static_cast<RegexErrorEnum>(ev)) {
         case RegexErrorEnum::Success:
@@ -53,10 +47,6 @@ auto RegexErrorCategory::message(int ev) const -> std::string {
     }
 }
 
-template <>
-auto RegexErrorCode::get_category() -> RegexErrorCategory const& {
-    return cRegexErrorCategory;
-}
-
-template class ErrorCode<RegexErrorEnum, RegexErrorCategory>;
+template class ErrorCategory<RegexErrorEnum>;
+template class ErrorCode<RegexErrorEnum>;
 }  // namespace clp
