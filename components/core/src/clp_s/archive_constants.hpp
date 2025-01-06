@@ -4,6 +4,9 @@
 #include <cstdint>
 
 namespace clp_s::constants {
+// Single file archive
+constexpr char cTmpPostfix[] = ".tmp";
+
 // Schema files
 constexpr char cArchiveSchemaMapFile[] = "/schema_ids";
 constexpr char cArchiveSchemaTreeFile[] = "/schema_tree";
@@ -26,10 +29,10 @@ constexpr char cLogEventIdxName[] = "log_event_idx";
 
 namespace results_cache::decompression {
 constexpr char cPath[]{"path"};
-constexpr char cOrigFileId[]{"orig_file_id"};
+constexpr char cStreamId[]{"stream_id"};
 constexpr char cBeginMsgIx[]{"begin_msg_ix"};
 constexpr char cEndMsgIx[]{"end_msg_ix"};
-constexpr char cIsLastIrChunk[]{"is_last_ir_chunk"};
+constexpr char cIsLastChunk[]{"is_last_chunk"};
 }  // namespace results_cache::decompression
 
 namespace results_cache::search {
