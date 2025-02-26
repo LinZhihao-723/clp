@@ -4,11 +4,11 @@
 #include <string_view>
 #include <utility>
 
-#include <boost/filesystem.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
 #include "../clp/GlobalMySQLMetadataDB.hpp"
+#include "archive_constants.hpp"
 #include "DictionaryWriter.hpp"
 #include "Schema.hpp"
 #include "SchemaMap.hpp"
@@ -25,6 +25,7 @@ struct ArchiveWriterOption {
     bool print_archive_stats;
     bool single_file_archive;
     size_t min_table_size;
+    std::vector<std::string> authoritative_timestamp;
 };
 
 class ArchiveWriter {
@@ -90,15 +91,22 @@ public:
     void append_message(int32_t schema_id, Schema const& schema, ParsedMessage& message);
 
     /**
-     * Adds a node to the schema tree
+     * Adds a node to the schema tree and attempts to resolve the node against the authoritative
+     * timestamp key.
      * @param parent_node_id
      * @param type
      * @param key
      * @return the node id
      */
-    int32_t add_node(int parent_node_id, NodeType type, std::string_view const key) {
-        return m_schema_tree.add_node(parent_node_id, type, key);
-    }
+    int32_t add_node(int parent_node_id, NodeType type, std::string_view key);
+
+    /**
+     * Checks if a leaf key with a given parent node id matches the authoritative timestamp column.
+     * @param parent_node_id
+     * @param key
+     * @return true if this leaf node would match the authoritative timestamp and false otherwise
+     */
+    bool matches_timestamp(int parent_node_id, std::string_view key);
 
     /**
      * @return The Id that will be assigned to the next log event when appended to the archive.
@@ -181,7 +189,7 @@ private:
     void write_single_file_archive(std::vector<ArchiveFileInfo> const& files);
 
     /**
-     * Writes the metadata section of the single file archive
+     * Writes the metadata section of an archive.
      * @param archive_writer
      * @param files
      */
@@ -212,15 +220,6 @@ private:
      */
     void print_archive_stats();
 
-    /**
-     * Write the timestamp dictionary as a dedicated file for multi-file archives.
-     *
-     * Note: the timestamp dictionary will be moved into the metadata region of multi-file archives
-     * in a follow-up PR.
-     * @return the compressed size of the Timestamp Dictionary in bytes
-     */
-    size_t write_timestamp_dict();
-
     static constexpr size_t cReadBlockSize = 4 * 1024;
 
     size_t m_encoded_message_size{};
@@ -243,6 +242,10 @@ private:
     bool m_print_archive_stats{};
     bool m_single_file_archive{};
     size_t m_min_table_size{};
+
+    std::vector<std::string> m_authoritative_timestamp;
+    size_t m_matched_timestamp_prefix_length{0ULL};
+    int32_t m_matched_timestamp_prefix_node_id{constants::cRootNodeId};
 
     SchemaMap m_schema_map;
     SchemaTree m_schema_tree;

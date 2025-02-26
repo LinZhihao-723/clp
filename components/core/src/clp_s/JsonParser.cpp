@@ -2,12 +2,14 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stack>
 #include <utility>
 #include <vector>
 
 #include <absl/container/flat_hash_map.h>
+#include <curl/curl.h>
 #include <simdjson.h>
 #include <spdlog/spdlog.h>
 
@@ -16,14 +18,16 @@
 #include "../clp/ffi/ir_stream/IrUnitType.hpp"
 #include "../clp/ffi/KeyValuePairLogEvent.hpp"
 #include "../clp/ffi/SchemaTree.hpp"
-#include "../clp/ffi/utils.hpp"
 #include "../clp/ffi/Value.hpp"
 #include "../clp/ir/EncodedTextAst.hpp"
+#include "../clp/NetworkReader.hpp"
+#include "../clp/ReaderInterface.hpp"
 #include "../clp/streaming_compression/zstd/Decompressor.hpp"
 #include "../clp/time_types.hpp"
 #include "archive_constants.hpp"
 #include "ErrorCode.hpp"
 #include "JsonFileIterator.hpp"
+#include "JsonParser.hpp"
 
 using clp::ffi::ir_stream::Deserializer;
 using clp::ffi::ir_stream::IRErrorCode;
@@ -49,7 +53,9 @@ public:
     }
 
     [[nodiscard]] auto handle_schema_tree_node_insertion(
-            [[maybe_unused]] clp::ffi::SchemaTree::NodeLocator schema_tree_node_locator
+            [[maybe_unused]] bool is_auto_generated,
+            [[maybe_unused]] clp::ffi::SchemaTree::NodeLocator schema_tree_node_locator,
+            [[maybe_unused]] std::shared_ptr<clp::ffi::SchemaTree const> const& schema_tree
     ) -> IRErrorCode {
         return IRErrorCode::IRErrorCode_Success;
     }
@@ -59,8 +65,8 @@ public:
         return IRErrorCode::IRErrorCode_Success;
     }
 
-    [[nodiscard]] auto get_deserialized_log_event(
-    ) const -> std::optional<KeyValuePairLogEvent> const& {
+    [[nodiscard]] auto get_deserialized_log_event() const
+            -> std::optional<KeyValuePairLogEvent> const& {
         return m_deserialized_log_event;
     }
 
@@ -79,11 +85,9 @@ JsonParser::JsonParser(JsonParserOption const& option)
           m_max_document_size(option.max_document_size),
           m_timestamp_key(option.timestamp_key),
           m_structurize_arrays(option.structurize_arrays),
-          m_record_log_order(option.record_log_order) {
-    if (false == FileUtils::validate_path(option.file_paths)) {
-        exit(1);
-    }
-
+          m_record_log_order(option.record_log_order),
+          m_input_paths(option.input_paths),
+          m_network_auth(option.network_auth) {
     if (false == m_timestamp_key.empty()) {
         if (false
             == clp_s::StringUtils::tokenize_column_descriptor(m_timestamp_key, m_timestamp_column))
@@ -93,16 +97,13 @@ JsonParser::JsonParser(JsonParserOption const& option)
         }
     }
 
-    for (auto& file_path : option.file_paths) {
-        FileUtils::find_all_files(file_path, m_file_paths);
-    }
-
     m_archive_options.archives_dir = option.archives_dir;
     m_archive_options.compression_level = option.compression_level;
     m_archive_options.print_archive_stats = option.print_archive_stats;
     m_archive_options.single_file_archive = option.single_file_archive;
     m_archive_options.min_table_size = option.min_table_size;
     m_archive_options.id = m_generator();
+    m_archive_options.authoritative_timestamp = m_timestamp_column;
 
     m_archive_writer = std::make_unique<ArchiveWriter>(option.metadata_db);
     m_archive_writer->open(m_archive_options);
@@ -126,7 +127,7 @@ void JsonParser::parse_obj_in_array(ondemand::object line, int32_t parent_node_i
     size_t object_start = m_current_schema.start_unordered_object(NodeType::Object);
     ondemand::field cur_field;
     ondemand::value cur_value;
-    std::string cur_key;
+    std::string_view cur_key;
     int32_t node_id;
     while (true) {
         while (false == object_stack.empty() && object_it_stack.top() == object_stack.top().end()) {
@@ -144,7 +145,7 @@ void JsonParser::parse_obj_in_array(ondemand::object line, int32_t parent_node_i
         }
 
         cur_field = *object_it_stack.top();
-        cur_key = std::string_view(cur_field.unescaped_key(true));
+        cur_key = cur_field.unescaped_key(true);
         cur_value = cur_field.value();
 
         switch (cur_value.type()) {
@@ -194,9 +195,7 @@ void JsonParser::parse_obj_in_array(ondemand::object line, int32_t parent_node_i
                 break;
             }
             case ondemand::json_type::string: {
-                std::string value = std::string(
-                        cur_value.raw_json_token().substr(1, cur_value.raw_json_token().size() - 2)
-                );
+                std::string_view value = cur_value.get_string(true);
                 if (value.find(' ') != std::string::npos) {
                     node_id = m_archive_writer
                                       ->add_node(node_id_stack.top(), NodeType::ClpString, cur_key);
@@ -272,9 +271,7 @@ void JsonParser::parse_array(ondemand::array array, int32_t parent_node_id) {
                 break;
             }
             case ondemand::json_type::string: {
-                std::string value = std::string(
-                        cur_value.raw_json_token().substr(1, cur_value.raw_json_token().size() - 2)
-                );
+                std::string_view value = cur_value.get_string(true);
                 if (value.find(' ') != std::string::npos) {
                     node_id = m_archive_writer->add_node(parent_node_id, NodeType::ClpString, "");
                 } else {
@@ -309,34 +306,14 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
 
     ondemand::field cur_field;
 
-    std::string cur_key = key;
+    std::string_view cur_key = key;
     node_id_stack.push(parent_node_id);
-
-    bool can_match_timestamp = !m_timestamp_column.empty();
-    bool may_match_timestamp = can_match_timestamp;
-    int longest_matching_timestamp_prefix = 0;
-    bool matches_timestamp = false;
 
     do {
         if (false == object_stack.empty()) {
             cur_field = *object_it_stack.top();
-            cur_key = std::string(std::string_view(cur_field.unescaped_key(true)));
+            cur_key = cur_field.unescaped_key(true);
             line = cur_field.value();
-            if (may_match_timestamp) {
-                if (object_stack.size() <= m_timestamp_column.size()
-                    && cur_key == m_timestamp_column[object_stack.size() - 1])
-                {
-                    if (object_stack.size() == m_timestamp_column.size()) {
-                        // FIXME: technically need to handle the case where this
-                        // isn't a string or number column by resetting matches_timestamp
-                        // to false
-                        matches_timestamp = true;
-                    }
-                } else {
-                    longest_matching_timestamp_prefix = object_stack.size() - 1;
-                    may_match_timestamp = false;
-                }
-            }
         }
 
         switch (line.type()) {
@@ -380,6 +357,8 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
             case ondemand::json_type::number: {
                 NodeType type;
                 ondemand::number number_value = line.get_number();
+                auto const matches_timestamp
+                        = m_archive_writer->matches_timestamp(node_id_stack.top(), cur_key);
                 if (false == number_value.is_double()) {
                     // FIXME: should have separate integer and unsigned
                     // integer types to handle values greater than max int64
@@ -401,7 +380,6 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
                     if (matches_timestamp) {
                         m_archive_writer
                                 ->ingest_timestamp_entry(m_timestamp_key, node_id, i64_value);
-                        matches_timestamp = may_match_timestamp = can_match_timestamp = false;
                     }
                 } else {
                     double double_value = line.get_double();
@@ -409,17 +387,15 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
                     if (matches_timestamp) {
                         m_archive_writer
                                 ->ingest_timestamp_entry(m_timestamp_key, node_id, double_value);
-                        matches_timestamp = may_match_timestamp = can_match_timestamp = false;
                     }
                 }
                 m_current_schema.insert_ordered(node_id);
                 break;
             }
             case ondemand::json_type::string: {
-                auto raw_json_token = line.raw_json_token();
-                std::string value
-                        = std::string(raw_json_token.substr(1, raw_json_token.rfind('"') - 1));
-
+                std::string_view value = line.get_string(true);
+                auto const matches_timestamp
+                        = m_archive_writer->matches_timestamp(node_id_stack.top(), cur_key);
                 if (matches_timestamp) {
                     node_id = m_archive_writer->add_node(
                             node_id_stack.top(),
@@ -434,7 +410,6 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
                             encoding_id
                     );
                     m_current_parsed_message.add_value(node_id, encoding_id, timestamp);
-                    matches_timestamp = may_match_timestamp = can_match_timestamp = false;
                 } else if (value.find(' ') != std::string::npos) {
                     node_id = m_archive_writer
                                       ->add_node(node_id_stack.top(), NodeType::ClpString, cur_key);
@@ -478,30 +453,26 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
                 node_id_stack.pop();
                 hit_end = true;
             }
-            if (can_match_timestamp
-                && (object_it_stack.size() - 1) <= longest_matching_timestamp_prefix)
-            {
-                may_match_timestamp = true;
-            }
-        } while (!object_it_stack.empty() && hit_end);
+        } while (false == object_it_stack.empty() && hit_end);
     }
 
-    while (!object_stack.empty());
+    while (false == object_stack.empty());
 }
 
 bool JsonParser::parse() {
-    for (auto& file_path : m_file_paths) {
-        JsonFileIterator json_file_iterator(file_path, m_max_document_size);
-        if (false == json_file_iterator.is_open()) {
+    for (auto const& path : m_input_paths) {
+        auto reader{ReaderUtils::try_create_reader(path, m_network_auth)};
+        if (nullptr == reader) {
             m_archive_writer->close();
             return false;
         }
 
+        JsonFileIterator json_file_iterator(*reader, m_max_document_size);
         if (simdjson::error_code::SUCCESS != json_file_iterator.get_error()) {
             SPDLOG_ERROR(
                     "Encountered error - {} - while trying to parse {} after parsing 0 bytes",
                     simdjson::error_message(json_file_iterator.get_error()),
-                    file_path
+                    path.path
             );
             m_archive_writer->close();
             return false;
@@ -535,7 +506,7 @@ bool JsonParser::parse() {
                 SPDLOG_ERROR(
                         "Encountered non-json-object while trying to parse {} after parsing {} "
                         "bytes",
-                        file_path,
+                        path.path,
                         bytes_consumed_up_to_prev_record
                 );
                 m_archive_writer->close();
@@ -560,7 +531,7 @@ bool JsonParser::parse() {
                 SPDLOG_ERROR(
                         "Encountered error - {} - while trying to parse {} after parsing {} bytes",
                         error.what(),
-                        file_path,
+                        path.path,
                         bytes_consumed_up_to_prev_record
                 );
                 m_archive_writer->close();
@@ -594,7 +565,7 @@ bool JsonParser::parse() {
             SPDLOG_ERROR(
                     "Encountered error - {} - while trying to parse {} after parsing {} bytes",
                     simdjson::error_message(json_file_iterator.get_error()),
-                    file_path,
+                    path.path,
                     bytes_consumed_up_to_prev_record
             );
             m_archive_writer->close();
@@ -604,8 +575,13 @@ bool JsonParser::parse() {
             SPDLOG_WARN(
                     "Truncated JSON  ({} bytes) at end of file {}",
                     json_file_iterator.truncated_bytes(),
-                    file_path.c_str()
+                    path.path
             );
+        }
+
+        if (check_and_log_curl_error(path, reader)) {
+            m_archive_writer->close();
+            return false;
         }
     }
     return true;
@@ -655,36 +631,47 @@ auto JsonParser::get_archive_node_type(
     }
 }
 
+auto JsonParser::adjust_archive_node_type_for_timestamp(NodeType node_type, bool matches_timestamp)
+        -> NodeType {
+    if (false == matches_timestamp) {
+        return node_type;
+    }
+
+    switch (node_type) {
+        case NodeType::ClpString:
+        case NodeType::VarString:
+            return NodeType::DateString;
+        default:
+            return node_type;
+    }
+}
+
 auto JsonParser::add_node_to_archive_and_translations(
         uint32_t ir_node_id,
         clp::ffi::SchemaTree::Node const& ir_node_to_add,
         NodeType archive_node_type,
-        int32_t parent_node_id
+        int32_t parent_node_id,
+        bool matches_timestamp
 ) -> int {
-    auto validated_escaped_key
-            = clp::ffi::validate_and_escape_utf8_string(ir_node_to_add.get_key_name());
-    std::string node_key;
-    if (validated_escaped_key.has_value()) {
-        node_key = validated_escaped_key.value();
-    } else {
-        SPDLOG_ERROR("Key is not UTF-8 compliant: \"{}\"", ir_node_to_add.get_key_name());
-        throw OperationFailed(ErrorCodeFailure, __FILENAME__, __LINE__);
-    }
-    int const curr_node_archive_id
-            = m_archive_writer->add_node(parent_node_id, archive_node_type, node_key);
-
+    auto const adjusted_archive_node_type
+            = adjust_archive_node_type_for_timestamp(archive_node_type, matches_timestamp);
+    int const curr_node_archive_id = m_archive_writer->add_node(
+            parent_node_id,
+            adjusted_archive_node_type,
+            ir_node_to_add.get_key_name()
+    );
     m_ir_node_to_archive_node_id_mapping.emplace(
             std::make_pair(ir_node_id, archive_node_type),
-            curr_node_archive_id
+            std::make_pair(curr_node_archive_id, matches_timestamp)
     );
     return curr_node_archive_id;
 }
 
-auto JsonParser::get_archive_node_id(
+auto JsonParser::get_archive_node_id_and_check_timestamp(
         uint32_t ir_node_id,
         NodeType archive_node_type,
         clp::ffi::SchemaTree const& ir_tree
-) -> int {
+) -> std::pair<int32_t, bool> {
     int curr_node_archive_id{constants::cRootNodeId};
     auto flat_map_location
             = m_ir_node_to_archive_node_id_mapping.find(std::pair{ir_node_id, archive_node_type});
@@ -713,52 +700,64 @@ auto JsonParser::get_archive_node_id(
                 std::pair{ir_id_stack.back(), next_node_type}
         );
         if (m_ir_node_to_archive_node_id_mapping.end() != flat_map_location) {
-            curr_node_archive_id = flat_map_location->second;
-            next_parent_archive_id = flat_map_location->second;
+            curr_node_archive_id = next_parent_archive_id = flat_map_location->second.first;
             ir_id_stack.pop_back();
             break;
         }
     }
 
+    bool matches_timestamp{false};
     while (false == ir_id_stack.empty()) {
         auto const& curr_node = ir_tree.get_node(ir_id_stack.back());
         if (1 == ir_id_stack.size()) {
+            matches_timestamp = m_archive_writer->matches_timestamp(
+                    next_parent_archive_id,
+                    curr_node.get_key_name()
+            );
             curr_node_archive_id = add_node_to_archive_and_translations(
                     ir_id_stack.back(),
                     curr_node,
                     archive_node_type,
-                    next_parent_archive_id
+                    next_parent_archive_id,
+                    matches_timestamp
             );
         } else {
             curr_node_archive_id = add_node_to_archive_and_translations(
                     ir_id_stack.back(),
                     curr_node,
                     NodeType::Object,
-                    next_parent_archive_id
+                    next_parent_archive_id,
+                    false
             );
         }
         next_parent_archive_id = curr_node_archive_id;
         ir_id_stack.pop_back();
     }
-    return curr_node_archive_id;
+    return {curr_node_archive_id, matches_timestamp};
 }
 
 void JsonParser::parse_kv_log_event(KeyValuePairLogEvent const& kv) {
     clp::ffi::SchemaTree const& tree = kv.get_user_gen_keys_schema_tree();
     for (auto const& pair : kv.get_user_gen_node_id_value_pairs()) {
-        NodeType const archive_node_type = get_archive_node_type(tree, pair);
-        auto const node_id = get_archive_node_id(pair.first, archive_node_type, tree);
-
+        auto const archive_node_type = get_archive_node_type(tree, pair);
+        auto const [node_id, matches_timestamp]
+                = get_archive_node_id_and_check_timestamp(pair.first, archive_node_type, tree);
         switch (archive_node_type) {
             case NodeType::Integer: {
                 auto const i64_value
                         = pair.second.value().get_immutable_view<clp::ffi::value_int_t>();
                 m_current_parsed_message.add_value(node_id, i64_value);
+                if (matches_timestamp) {
+                    m_archive_writer->ingest_timestamp_entry(m_timestamp_key, node_id, i64_value);
+                }
             } break;
             case NodeType::Float: {
                 auto const d_value
                         = pair.second.value().get_immutable_view<clp::ffi::value_float_t>();
                 m_current_parsed_message.add_value(node_id, d_value);
+                if (matches_timestamp) {
+                    m_archive_writer->ingest_timestamp_entry(m_timestamp_key, node_id, d_value);
+                }
             } break;
             case NodeType::Boolean: {
                 auto const b_value
@@ -766,23 +765,21 @@ void JsonParser::parse_kv_log_event(KeyValuePairLogEvent const& kv) {
                 m_current_parsed_message.add_value(node_id, b_value);
             } break;
             case NodeType::VarString: {
-                auto const validated_escaped_string = clp::ffi::validate_and_escape_utf8_string(
-                        pair.second.value().get_immutable_view<std::string>()
-                );
-                std::string str;
-                if (validated_escaped_string.has_value()) {
-                    str = validated_escaped_string.value();
-                } else {
-                    SPDLOG_ERROR(
-                            "String is not utf8 compliant: \"{}\"",
-                            pair.second.value().get_immutable_view<std::string>()
+                auto const var_value{pair.second.value().get_immutable_view<std::string>()};
+                if (matches_timestamp) {
+                    uint64_t encoding_id{};
+                    auto const timestamp = m_archive_writer->ingest_timestamp_entry(
+                            m_timestamp_key,
+                            node_id,
+                            var_value,
+                            encoding_id
                     );
-                    throw OperationFailed(ErrorCodeFailure, __FILENAME__, __LINE__);
+                    m_current_parsed_message.add_value(node_id, encoding_id, timestamp);
+                } else {
+                    m_current_parsed_message.add_value(node_id, var_value);
                 }
-                m_current_parsed_message.add_value(node_id, str);
             } break;
             case NodeType::ClpString: {
-                std::string encoded_str;
                 std::string decoded_value;
                 if (pair.second.value().is<clp::ir::EightByteEncodedTextAst>()) {
                     decoded_value = pair.second.value()
@@ -796,15 +793,18 @@ void JsonParser::parse_kv_log_event(KeyValuePairLogEvent const& kv) {
                                             .decode_and_unparse()
                                             .value();
                 }
-                auto const validated_escaped_encoded_string
-                        = clp::ffi::validate_and_escape_utf8_string(decoded_value.c_str());
-                if (validated_escaped_encoded_string.has_value()) {
-                    encoded_str = validated_escaped_encoded_string.value();
+                if (matches_timestamp) {
+                    uint64_t encoding_id{};
+                    auto const timestamp = m_archive_writer->ingest_timestamp_entry(
+                            m_timestamp_key,
+                            node_id,
+                            decoded_value,
+                            encoding_id
+                    );
+                    m_current_parsed_message.add_value(node_id, encoding_id, timestamp);
                 } else {
-                    SPDLOG_ERROR("Encoded string is not utf8 compliant: \"{}\"", decoded_value);
-                    throw OperationFailed(ErrorCodeFailure, __FILENAME__, __LINE__);
+                    m_current_parsed_message.add_value(node_id, decoded_value);
                 }
-                m_current_parsed_message.add_value(node_id, encoded_str);
             } break;
             case NodeType::UnstructuredArray: {
                 std::string array_str;
@@ -835,16 +835,30 @@ void JsonParser::parse_kv_log_event(KeyValuePairLogEvent const& kv) {
 }
 
 auto JsonParser::parse_from_ir() -> bool {
-    for (auto& file_path : m_file_paths) {
+    constexpr size_t cDecompressorReadBufferCapacity{64 * 1024};  // 64 KB
+    for (auto const& path : m_input_paths) {
+        auto reader{ReaderUtils::try_create_reader(path, m_network_auth)};
+        if (nullptr == reader) {
+            m_archive_writer->close();
+            return false;
+        }
+
         clp::streaming_compression::zstd::Decompressor decompressor;
         size_t curr_pos{};
         size_t last_pos{};
-        decompressor.open(file_path);
+        decompressor.open(*reader, cDecompressorReadBufferCapacity);
 
         auto deserializer_result{Deserializer<IrUnitHandler>::create(decompressor, IrUnitHandler{})
         };
         if (deserializer_result.has_error()) {
+            auto err = deserializer_result.error();
+            SPDLOG_ERROR(
+                    "Encountered error while creating kv-ir deserializer: ({}) - {}",
+                    err.value(),
+                    err.message()
+            );
             decompressor.close();
+            check_and_log_curl_error(path, reader);
             m_archive_writer->close();
             return false;
         }
@@ -863,8 +877,15 @@ auto JsonParser::parse_from_ir() -> bool {
             auto const kv_log_event_result{deserializer.deserialize_next_ir_unit(decompressor)};
 
             if (kv_log_event_result.has_error()) {
+                auto err = kv_log_event_result.error();
+                SPDLOG_ERROR(
+                        "Encountered error while deserializing kv-ir log event: ({}) - {}",
+                        err.value(),
+                        err.message()
+                );
                 m_archive_writer->close();
                 decompressor.close();
+                check_and_log_curl_error(path, reader);
                 return false;
             }
             if (kv_log_event_result.value() == clp::ffi::ir_stream::IrUnitType::EndOfStream) {
@@ -895,7 +916,7 @@ auto JsonParser::parse_from_ir() -> bool {
 
                 if (m_archive_writer->get_data_size() >= m_target_encoded_size) {
                     m_ir_node_to_archive_node_id_mapping.clear();
-                    decompressor.try_get_pos(curr_pos);
+                    curr_pos = decompressor.get_pos();
                     m_archive_writer->increment_uncompressed_size(curr_pos - last_pos);
                     last_pos = curr_pos;
                     split_archive();
@@ -910,13 +931,17 @@ auto JsonParser::parse_from_ir() -> bool {
             {
                 continue;
             } else {
+                SPDLOG_ERROR(
+                        "Encountered unkown IR unit type ({}) during deserialization.",
+                        static_cast<uint8_t>(kv_log_event_result.value())
+                );
                 m_archive_writer->close();
                 decompressor.close();
                 return false;
             }
         }
         m_ir_node_to_archive_node_id_mapping.clear();
-        decompressor.try_get_pos(curr_pos);
+        curr_pos = decompressor.get_pos();
         m_archive_writer->increment_uncompressed_size(curr_pos - last_pos);
         decompressor.close();
     }
@@ -933,4 +958,26 @@ void JsonParser::split_archive() {
     m_archive_writer->open(m_archive_options);
 }
 
+bool JsonParser::check_and_log_curl_error(
+        Path const& path,
+        std::shared_ptr<clp::ReaderInterface> reader
+) {
+    if (auto network_reader = std::dynamic_pointer_cast<clp::NetworkReader>(reader);
+        nullptr != network_reader)
+    {
+        if (auto const rc = network_reader->get_curl_ret_code();
+            rc.has_value() && CURLcode::CURLE_OK != rc.value())
+        {
+            auto const curl_error_message = network_reader->get_curl_error_msg();
+            SPDLOG_ERROR(
+                    "Encountered curl error while ingesting {} - Code: {} - Message: {}",
+                    path.path,
+                    static_cast<int64_t>(rc.value()),
+                    curl_error_message.value_or("Unknown error")
+            );
+            return true;
+        }
+    }
+    return false;
+}
 }  // namespace clp_s
