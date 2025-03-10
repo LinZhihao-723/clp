@@ -196,10 +196,8 @@ void GlobalMySQLMetadataDB::add_archive(
             uncompressed_size
     );
     auto compressed_size = metadata.get_compressed_size_bytes();
-    statement_bindings.bind_uint64(
-            enum_to_underlying_type(ArchivesTableFieldIndexes::Size),
-            compressed_size
-    );
+    statement_bindings
+            .bind_uint64(enum_to_underlying_type(ArchivesTableFieldIndexes::Size), compressed_size);
     auto const& creator_id = metadata.get_creator_id();
     statement_bindings.bind_varchar(
             enum_to_underlying_type(ArchivesTableFieldIndexes::CreatorId),
@@ -297,10 +295,8 @@ void GlobalMySQLMetadataDB::update_metadata_for_files(
         );
 
         auto end_ts = file->get_end_ts();
-        statement_bindings.bind_int64(
-                enum_to_underlying_type(FilesTableFieldIndexes::EndTimestamp),
-                end_ts
-        );
+        statement_bindings
+                .bind_int64(enum_to_underlying_type(FilesTableFieldIndexes::EndTimestamp), end_ts);
 
         auto num_uncompressed_bytes = file->get_num_uncompressed_bytes();
         statement_bindings.bind_uint64(

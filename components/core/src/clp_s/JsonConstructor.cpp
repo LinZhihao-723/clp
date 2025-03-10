@@ -40,17 +40,18 @@ void JsonConstructor::store() {
     m_archive_reader->read_dictionaries_and_metadata();
 
     if (m_option.ordered && false == m_archive_reader->has_log_order()) {
-        SPDLOG_WARN("This archive is missing ordering information and can not be decompressed in "
-                    "log order. Falling back to out of order decompression.");
+        SPDLOG_WARN(
+                "This archive is missing ordering information and can not be decompressed in "
+                "log order. Falling back to out of order decompression."
+        );
     }
 
     m_archive_reader->open_packed_streams();
     if (false == m_option.ordered || false == m_archive_reader->has_log_order()) {
         FileWriter writer;
-        writer.open(
-                m_option.output_dir + "/original",
-                FileWriter::OpenMode::CreateIfNonexistentForAppending
-        );
+        writer
+                .open(m_option.output_dir + "/original",
+                      FileWriter::OpenMode::CreateIfNonexistentForAppending);
         m_archive_reader->store(writer);
 
         writer.close();
@@ -107,28 +108,32 @@ void JsonConstructor::construct_in_order() {
         }
 
         if (m_option.metadata_db.has_value()) {
-            results.emplace_back(std::move(bsoncxx::builder::basic::make_document(
-                    bsoncxx::builder::basic::kvp(
-                            constants::results_cache::decompression::cPath,
-                            new_file_path.filename()
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            constants::results_cache::decompression::cStreamId,
-                            std::string{m_archive_reader->get_archive_id()}
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            constants::results_cache::decompression::cBeginMsgIx,
-                            first_idx
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            constants::results_cache::decompression::cEndMsgIx,
-                            last_idx
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            constants::results_cache::decompression::cIsLastChunk,
-                            false == open_new_writer
+            results.emplace_back(
+                    std::move(
+                            bsoncxx::builder::basic::make_document(
+                                    bsoncxx::builder::basic::kvp(
+                                            constants::results_cache::decompression::cPath,
+                                            new_file_path.filename()
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            constants::results_cache::decompression::cStreamId,
+                                            std::string{m_archive_reader->get_archive_id()}
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            constants::results_cache::decompression::cBeginMsgIx,
+                                            first_idx
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            constants::results_cache::decompression::cEndMsgIx,
+                                            last_idx
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            constants::results_cache::decompression::cIsLastChunk,
+                                            false == open_new_writer
+                                    )
+                            )
                     )
-            )));
+            );
         }
 
         if (m_option.print_ordered_chunk_stats) {

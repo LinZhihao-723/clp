@@ -151,10 +151,8 @@ void DateStringColumnReader::load(BufferViewReader& reader, uint64_t num_message
 std::variant<int64_t, double, std::string, uint8_t> DateStringColumnReader::extract_value(
         uint64_t cur_message
 ) {
-    return m_timestamp_dict->get_string_encoding(
-            m_timestamps[cur_message],
-            m_timestamp_encodings[cur_message]
-    );
+    return m_timestamp_dict
+            ->get_string_encoding(m_timestamps[cur_message], m_timestamp_encodings[cur_message]);
 }
 
 void DateStringColumnReader::extract_string_value_into_buffer(

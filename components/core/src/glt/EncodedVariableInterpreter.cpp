@@ -326,11 +326,9 @@ bool EncodedVariableInterpreter::decode_variables_into_message(
                 = logtype_dict_entry.get_placeholder_info(placeholder_ix, var_placeholder);
 
         // Add the constant that's between the last placeholder and this one
-        decompressed_msg.append(
-                logtype_value,
-                constant_begin_pos,
-                placeholder_position - constant_begin_pos
-        );
+        decompressed_msg
+                .append(logtype_value, constant_begin_pos, placeholder_position - constant_begin_pos
+                );
         switch (var_placeholder) {
             case VariablePlaceholder::Integer:
                 decompressed_msg += std::to_string(encoded_vars[var_ix++]);
@@ -386,11 +384,9 @@ bool EncodedVariableInterpreter::decode_variables_into_message_with_offset(
         size_t placeholder_position
                 = logtype_dict_entry.get_placeholder_info(placeholder_ix, var_placeholder);
         // Add the constant that's between the last variable and this one
-        decompressed_msg.append(
-                logtype_value,
-                constant_begin_pos,
-                placeholder_position - constant_begin_pos
-        );
+        decompressed_msg
+                .append(logtype_value, constant_begin_pos, placeholder_position - constant_begin_pos
+                );
 
         // The real var_index is offseted by var_ix
         size_t var_index = offset + var_ix;

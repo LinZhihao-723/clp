@@ -82,10 +82,8 @@ EvaluatedValue EvaluateTimestampIndex::run(std::shared_ptr<Expression> const& ex
                         std::get<int64_t>(literal)
                 );
             } else {
-                ret = range_it->second->evaluate_filter(
-                        filter->get_operation(),
-                        std::get<double>(literal)
-                );
+                ret = range_it->second
+                              ->evaluate_filter(filter->get_operation(), std::get<double>(literal));
             }
 
             if (ret == EvaluatedValue::True) {

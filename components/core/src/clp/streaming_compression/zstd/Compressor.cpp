@@ -86,10 +86,9 @@ auto Compressor::write(char const* data, size_t data_length) -> void {
         if (m_compressed_stream_block.pos > 0) {
             // Write to disk only if there is data in the compressed stream
             // block buffer
-            m_compressed_stream_writer->write(
-                    static_cast<char const*>(m_compressed_stream_block.dst),
-                    m_compressed_stream_block.pos
-            );
+            m_compressed_stream_writer
+                    ->write(static_cast<char const*>(m_compressed_stream_block.dst),
+                            m_compressed_stream_block.pos);
         }
     }
 
@@ -113,10 +112,9 @@ auto Compressor::flush() -> void {
         );
         throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
     }
-    m_compressed_stream_writer->write(
-            static_cast<char const*>(m_compressed_stream_block.dst),
-            m_compressed_stream_block.pos
-    );
+    m_compressed_stream_writer
+            ->write(static_cast<char const*>(m_compressed_stream_block.dst),
+                    m_compressed_stream_block.pos);
 
     m_compression_stream_contains_data = false;
 }
@@ -146,10 +144,9 @@ auto Compressor::flush_without_ending_frame() -> void {
             throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
         }
         if (m_compressed_stream_block.pos > 0) {
-            m_compressed_stream_writer->write(
-                    static_cast<char const*>(m_compressed_stream_block.dst),
-                    m_compressed_stream_block.pos
-            );
+            m_compressed_stream_writer
+                    ->write(static_cast<char const*>(m_compressed_stream_block.dst),
+                            m_compressed_stream_block.pos);
         }
         if (0 == flush_result) {
             break;

@@ -141,10 +141,9 @@ void Archive::open(UserConfig const& user_config) {
     // Save metadata to disk
     auto metadata_file_path = archive_path / cMetadataFileName;
     try {
-        m_metadata_file_writer.open(
-                metadata_file_path.string(),
-                FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING
-        );
+        m_metadata_file_writer
+                .open(metadata_file_path.string(),
+                      FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING);
         m_local_metadata->write_to_file(m_metadata_file_writer);
         m_metadata_file_writer.flush();
     } catch (FileWriter::OperationFailed& e) {
@@ -524,12 +523,10 @@ void Archive::append_file_to_segment() {
     }
 
     if (m_file->has_ts_pattern()) {
-        m_logtype_ids_in_segment_for_files_with_timestamps.insert_all(
-                m_logtype_ids_for_file_with_unassigned_segment
-        );
-        m_var_ids_in_segment_for_files_with_timestamps.insert_all(
-                m_var_ids_for_file_with_unassigned_segment
-        );
+        m_logtype_ids_in_segment_for_files_with_timestamps
+                .insert_all(m_logtype_ids_for_file_with_unassigned_segment);
+        m_var_ids_in_segment_for_files_with_timestamps
+                .insert_all(m_var_ids_for_file_with_unassigned_segment);
         append_file_contents_to_segment(
                 m_segment_for_files_with_timestamps,
                 m_logtype_ids_in_segment_for_files_with_timestamps,
@@ -537,12 +534,10 @@ void Archive::append_file_to_segment() {
                 m_files_with_timestamps_in_segment
         );
     } else {
-        m_logtype_ids_in_segment_for_files_without_timestamps.insert_all(
-                m_logtype_ids_for_file_with_unassigned_segment
-        );
-        m_var_ids_in_segment_for_files_without_timestamps.insert_all(
-                m_var_ids_for_file_with_unassigned_segment
-        );
+        m_logtype_ids_in_segment_for_files_without_timestamps
+                .insert_all(m_logtype_ids_for_file_with_unassigned_segment);
+        m_var_ids_in_segment_for_files_without_timestamps
+                .insert_all(m_var_ids_for_file_with_unassigned_segment);
         append_file_contents_to_segment(
                 m_segment_for_files_without_timestamps,
                 m_logtype_ids_in_segment_for_files_without_timestamps,
@@ -650,10 +645,8 @@ auto Archive::update_global_metadata() -> void {
         throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
     }
     m_global_metadata_db->add_archive(m_id_as_string, m_local_metadata.value());
-    m_global_metadata_db->update_metadata_for_files(
-            m_id_as_string,
-            m_file_metadata_for_global_update
-    );
+    m_global_metadata_db
+            ->update_metadata_for_files(m_id_as_string, m_file_metadata_for_global_update);
     m_global_metadata_db->close();
 }
 

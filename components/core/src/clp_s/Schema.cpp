@@ -4,15 +4,14 @@
 
 namespace clp_s {
 void Schema::insert_ordered(int32_t mst_node_id) {
-    m_schema.insert(
-            std::upper_bound(
-                    m_schema.begin(),
-                    m_schema.begin()
-                            + static_cast<decltype(m_schema)::difference_type>(m_num_ordered),
-                    mst_node_id
-            ),
-            mst_node_id
-    );
+    m_schema
+            .insert(std::upper_bound(
+                            m_schema.begin(),
+                            m_schema.begin(
+                            ) + static_cast<decltype(m_schema)::difference_type>(m_num_ordered),
+                            mst_node_id
+                    ),
+                    mst_node_id);
     ++m_num_ordered;
 }
 

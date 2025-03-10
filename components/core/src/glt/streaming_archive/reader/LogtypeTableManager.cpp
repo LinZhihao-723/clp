@@ -154,16 +154,12 @@ void LogtypeTableManager::load_metadata() {
             metadata_decompressor.exact_read((char*)&logtype_id, sizeof(logtype_dictionary_id_t));
             // combined table id
             size_t combined_table_ix;
-            metadata_decompressor.exact_read(
-                    (char*)&combined_table_ix,
-                    sizeof(combined_table_id_t)
-            );
+            metadata_decompressor
+                    .exact_read((char*)&combined_table_ix, sizeof(combined_table_id_t));
             // row and columns
             metadata_decompressor.exact_read((char*)&combined_table_obj.num_rows, sizeof(size_t));
-            metadata_decompressor.exact_read(
-                    (char*)&combined_table_obj.num_columns,
-                    sizeof(size_t)
-            );
+            metadata_decompressor
+                    .exact_read((char*)&combined_table_obj.num_columns, sizeof(size_t));
             // beginning offset
             size_t begin_offset;
             metadata_decompressor.exact_read((char*)&begin_offset, sizeof(size_t));

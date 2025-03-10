@@ -143,10 +143,8 @@ void DictionaryReader<DictionaryIdType, EntryType>::open(
 
     // Skip header and then open the decompressor
     m_segment_index_file_reader->seek_from_begin(sizeof(uint64_t));
-    m_segment_index_decompressor.open(
-            *m_segment_index_file_reader,
-            cDecompressorFileReadBufferCapacity
-    );
+    m_segment_index_decompressor
+            .open(*m_segment_index_file_reader, cDecompressorFileReadBufferCapacity);
 
     m_is_open = true;
 }
@@ -211,8 +209,8 @@ void DictionaryReader<DictionaryIdType, EntryType>::read_new_entries() {
 }
 
 template <typename DictionaryIdType, typename EntryType>
-EntryType const& DictionaryReader<DictionaryIdType, EntryType>::get_entry(DictionaryIdType id
-) const {
+EntryType const&
+DictionaryReader<DictionaryIdType, EntryType>::get_entry(DictionaryIdType id) const {
     if (false == m_is_open) {
         throw OperationFailed(ErrorCode_NotInit, __FILENAME__, __LINE__);
     }
@@ -224,8 +222,8 @@ EntryType const& DictionaryReader<DictionaryIdType, EntryType>::get_entry(Dictio
 }
 
 template <typename DictionaryIdType, typename EntryType>
-std::string const& DictionaryReader<DictionaryIdType, EntryType>::get_value(DictionaryIdType id
-) const {
+std::string const&
+DictionaryReader<DictionaryIdType, EntryType>::get_value(DictionaryIdType id) const {
     if (id >= m_entries.size()) {
         throw OperationFailed(ErrorCode_Corrupt, __FILENAME__, __LINE__);
     }

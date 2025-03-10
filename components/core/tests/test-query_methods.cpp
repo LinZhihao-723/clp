@@ -226,10 +226,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f?\i?"
@@ -241,10 +239,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d?\i?"
@@ -256,10 +252,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // All wildcards treated as delimiters, "*abc*" as a dictionary variable
@@ -275,10 +269,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f?\i?"
@@ -293,10 +285,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d?\i?"
@@ -311,10 +301,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' treated as a non-delimiter
@@ -327,10 +315,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(true, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' treated as delim, first '?' as non-delim, "*abc*" as static text
@@ -340,10 +326,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += '?';
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f?"
@@ -352,10 +336,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += '?';
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d?"
@@ -364,10 +346,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += '?';
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' treated as delim, first '?' as non-delim, "*abc*" as a dictionary variable
@@ -380,10 +360,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f?"
@@ -395,10 +373,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d?"
@@ -410,10 +386,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as non-delim, first '?' as non-delim
@@ -423,10 +397,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += '?';
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as delim, first '?' as delim, second '?' as non-delim, "*abc*" as static text
@@ -438,10 +410,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f?\i"
@@ -452,10 +422,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d?\i"
@@ -466,10 +434,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\i?\f"
@@ -480,10 +446,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f?\f"
@@ -494,10 +458,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d?\f"
@@ -508,10 +470,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\i?\d"
@@ -522,10 +482,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f?\d"
@@ -536,10 +494,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d?\d"
@@ -550,10 +506,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as delim, first '?' as delim, second '?' as non-delim, "*abc*" as a dictionary
@@ -569,10 +523,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f?\i"
@@ -586,10 +538,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d?\i"
@@ -603,10 +553,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\i?\f"
@@ -620,10 +568,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f?\f"
@@ -637,10 +583,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d?\f"
@@ -654,10 +598,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\i?\d"
@@ -671,10 +613,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f?\d"
@@ -688,10 +628,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d?\d"
@@ -705,10 +643,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as non-delim, first '?' as delim, second '?' as non-delim
@@ -720,10 +656,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d?\f"
@@ -734,10 +668,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d?\d"
@@ -748,10 +680,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as delim, first '?' as non-delim, second '?' as non-delim, "*abc*" as static
@@ -761,10 +691,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Integer);
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\f"
@@ -772,10 +700,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Float);
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*abc*\d"
@@ -783,10 +709,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Dictionary);
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as delim, first '?' as non-delim, second '?' as non-delim, "*abc*" as a
@@ -799,10 +723,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Integer);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\f"
@@ -813,10 +735,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Float);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected logtype: "*\d*\d"
@@ -827,10 +747,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Second '*' as non-delim, first '?' as non-delim, second '?' as non-delim "*abc*" as a
@@ -840,10 +758,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += enum_to_underlying_type(VariablePlaceholder::Dictionary);
         expected_subquery.logtype_query_contains_wildcards = true;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         test_generating_subqueries<TestType>("*abc*123?456?", logtype_query_to_expected_subquery);
@@ -880,10 +796,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += escaped_inner_static_text;
         expected_subquery.logtype_query += postfix;
         expected_subquery.logtype_query_contains_wildcards = true;
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected log type: "*\d \\^Q placeholders \\^R in \\? \\* subqueries*"
@@ -893,10 +807,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += postfix;
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.logtype_query_contains_wildcards = true;
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected log type: "*escape \\^Q placeholders \\^R in \\? \\* \d*"
@@ -906,10 +818,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.logtype_query += "*";
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.logtype_query_contains_wildcards = true;
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         // Expected log type: "*\d \\^Q placeholders \\^R in \\? \\* \d*"
@@ -921,10 +831,8 @@ TEMPLATE_TEST_CASE(
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.query_var_types.emplace_back(false, VariablePlaceholder::Dictionary);
         expected_subquery.logtype_query_contains_wildcards = true;
-        logtype_query_to_expected_subquery.emplace(
-                expected_subquery.logtype_query,
-                expected_subquery
-        );
+        logtype_query_to_expected_subquery
+                .emplace(expected_subquery.logtype_query, expected_subquery);
         expected_subquery.clear();
 
         wildcard_query = prefix + inner_static_text + postfix;

@@ -20,10 +20,8 @@ void open_dictionary_for_reading(
     // Skip header
     segment_index_file_reader.seek_from_begin(sizeof(uint64_t));
     // Open decompressor
-    segment_index_decompressor.open(
-            segment_index_file_reader,
-            decompressor_file_read_buffer_capacity
-    );
+    segment_index_decompressor
+            .open(segment_index_file_reader, decompressor_file_read_buffer_capacity);
 }
 
 uint64_t read_dictionary_header(FileReader& file_reader) {

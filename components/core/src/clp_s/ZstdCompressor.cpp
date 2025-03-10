@@ -82,10 +82,9 @@ void ZstdCompressor::write(char const* data, size_t data_length) {
         }
         if (m_compressed_stream_block.pos) {
             // Write to disk only if there is data in the compressed stream block buffer
-            m_compressed_stream_file_writer->write(
-                    reinterpret_cast<char const*>(m_compressed_stream_block.dst),
-                    m_compressed_stream_block.pos
-            );
+            m_compressed_stream_file_writer
+                    ->write(reinterpret_cast<char const*>(m_compressed_stream_block.dst),
+                            m_compressed_stream_block.pos);
         }
     }
 
@@ -109,10 +108,9 @@ void ZstdCompressor::flush() {
         );
         throw OperationFailed(ErrorCodeFailure, __FILENAME__, __LINE__);
     }
-    m_compressed_stream_file_writer->write(
-            reinterpret_cast<char const*>(m_compressed_stream_block.dst),
-            m_compressed_stream_block.pos
-    );
+    m_compressed_stream_file_writer
+            ->write(reinterpret_cast<char const*>(m_compressed_stream_block.dst),
+                    m_compressed_stream_block.pos);
 
     m_compression_stream_contains_data = false;
 }

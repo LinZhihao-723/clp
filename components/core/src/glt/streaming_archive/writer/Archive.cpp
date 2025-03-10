@@ -118,10 +118,9 @@ void Archive::open(UserConfig const& user_config) {
     // Save metadata to disk
     auto metadata_file_path = archive_path / cMetadataFileName;
     try {
-        m_metadata_file_writer.open(
-                metadata_file_path.string(),
-                FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING
-        );
+        m_metadata_file_writer
+                .open(metadata_file_path.string(),
+                      FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING);
         m_local_metadata->write_to_file(m_metadata_file_writer);
         m_metadata_file_writer.flush();
     } catch (FileWriter::OperationFailed& e) {
@@ -175,10 +174,9 @@ void Archive::open(UserConfig const& user_config) {
     // Save file_id to file name mapping to disk
     std::string file_id_file_path = m_path + '/' + cFileNameDictFilename;
     try {
-        m_filename_dict_writer.open(
-                file_id_file_path,
-                FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING
-        );
+        m_filename_dict_writer
+                .open(file_id_file_path,
+                      FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING);
     } catch (FileWriter::OperationFailed& e) {
         SPDLOG_CRITICAL("Failed to create file: {}", file_id_file_path.c_str());
         throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
@@ -352,12 +350,11 @@ void Archive::append_file_to_segment() {
     // because the open happens after file content gets appended
     // to m_glt_segment.
     if (!m_message_order_table.is_open()) {
-        m_glt_segment.open(
-                m_segments_dir_path,
-                m_next_segment_id,
-                m_compression_level,
-                m_combine_threshold
-        );
+        m_glt_segment
+                .open(m_segments_dir_path,
+                      m_next_segment_id,
+                      m_compression_level,
+                      m_combine_threshold);
         m_message_order_table.open(m_segments_dir_path, m_next_segment_id, m_compression_level);
         m_next_segment_id++;
     }

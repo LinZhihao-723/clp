@@ -908,9 +908,8 @@ Grep::get_converted_logtype_query(Query const& query, size_t segment_id) {
                 if (converted_logtype_based_queries.find(possible_logtype_id)
                     == converted_logtype_based_queries.end())
                 {
-                    converted_logtype_based_queries[possible_logtype_id].set_logtype_id(
-                            possible_logtype_id
-                    );
+                    converted_logtype_based_queries[possible_logtype_id]
+                            .set_logtype_id(possible_logtype_id);
                 }
                 converted_logtype_based_queries[possible_logtype_id].add_query(query_info);
             }
@@ -1275,5 +1274,4 @@ size_t Grep::search_segment_optimized_and_output(
 
     return num_matches;
 }
-
 }  // namespace glt

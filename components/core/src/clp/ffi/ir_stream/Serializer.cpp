@@ -525,10 +525,10 @@ template <typename encoded_variable_t>
 auto Serializer<encoded_variable_t>::create(
         std::optional<nlohmann::json> optional_user_defined_metadata
 ) -> OUTCOME_V2_NAMESPACE::std_result<Serializer<encoded_variable_t>> {
-    static_assert(
-            (std::is_same_v<encoded_variable_t, eight_byte_encoded_variable_t>
-             || std::is_same_v<encoded_variable_t, four_byte_encoded_variable_t>)
-    );
+    static_assert((
+            std::is_same_v<encoded_variable_t, eight_byte_encoded_variable_t>
+            || std::is_same_v<encoded_variable_t, four_byte_encoded_variable_t>
+    ));
 
     Serializer<encoded_variable_t> serializer;
     auto& ir_buf{serializer.m_ir_buf};
@@ -727,21 +727,17 @@ auto Serializer<encoded_variable_t>::serialize_msgpack_map(
     }
 
     // Copy serialized results into `m_ir_buf`
-    m_ir_buf.insert(
-            m_ir_buf.cend(),
-            m_schema_tree_node_buf.cbegin(),
-            m_schema_tree_node_buf.cend()
-    );
-    m_ir_buf.insert(
-            m_ir_buf.cend(),
-            m_sequential_serialization_buf.cbegin(),
-            m_sequential_serialization_buf.cend()
-    );
-    m_ir_buf.insert(
-            m_ir_buf.cend(),
-            m_user_gen_val_group_buf.cbegin(),
-            m_user_gen_val_group_buf.cend()
-    );
+    m_ir_buf
+            .insert(m_ir_buf.cend(), m_schema_tree_node_buf.cbegin(), m_schema_tree_node_buf.cend()
+            );
+    m_ir_buf
+            .insert(m_ir_buf.cend(),
+                    m_sequential_serialization_buf.cbegin(),
+                    m_sequential_serialization_buf.cend());
+    m_ir_buf
+            .insert(m_ir_buf.cend(),
+                    m_user_gen_val_group_buf.cbegin(),
+                    m_user_gen_val_group_buf.cend());
 
     revert_manager.mark_success();
     return true;

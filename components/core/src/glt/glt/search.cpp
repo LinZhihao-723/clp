@@ -37,7 +37,6 @@ using std::string;
 using std::vector;
 
 namespace glt::glt {
-
 /**
  * Opens the archive and reads the dictionaries
  * @param archive_path
@@ -230,10 +229,9 @@ static bool search(
                 // Add query's matching segments to segments to search
                 for (auto& sub_query : query.get_sub_queries()) {
                     auto& ids_of_matching_segments = sub_query.get_ids_of_matching_segments();
-                    ids_of_segments_to_search.insert(
-                            ids_of_matching_segments.cbegin(),
-                            ids_of_matching_segments.cend()
-                    );
+                    ids_of_segments_to_search
+                            .insert(ids_of_matching_segments.cbegin(),
+                                    ids_of_matching_segments.cend());
                 }
             }
         }

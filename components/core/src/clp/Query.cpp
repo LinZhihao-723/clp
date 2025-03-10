@@ -79,10 +79,9 @@ void QueryVar::remove_segments_that_dont_contain_dict_var(set<segment_id_t>& seg
         set<segment_id_t> ids_of_segments_containing_query_var;
         for (auto entry : m_possible_var_dict_entries) {
             auto& ids_of_segments_containing_var = entry->get_ids_of_segments_containing_entry();
-            ids_of_segments_containing_query_var.insert(
-                    ids_of_segments_containing_var.cbegin(),
-                    ids_of_segments_containing_var.cend()
-            );
+            ids_of_segments_containing_query_var
+                    .insert(ids_of_segments_containing_var.cbegin(),
+                            ids_of_segments_containing_var.cend());
         }
         inplace_set_intersection(ids_of_segments_containing_query_var, segment_ids);
     }
@@ -125,10 +124,9 @@ void SubQuery::calculate_ids_of_matching_segments() {
     m_ids_of_matching_segments.clear();
     for (auto entry : m_possible_logtype_entries) {
         auto& ids_of_segments_containing_logtype = entry->get_ids_of_segments_containing_entry();
-        m_ids_of_matching_segments.insert(
-                ids_of_segments_containing_logtype.cbegin(),
-                ids_of_segments_containing_logtype.cend()
-        );
+        m_ids_of_matching_segments
+                .insert(ids_of_segments_containing_logtype.cbegin(),
+                        ids_of_segments_containing_logtype.cend());
     }
 
     // Intersect with IDs of segments containing variables

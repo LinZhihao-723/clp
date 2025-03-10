@@ -174,10 +174,10 @@ template <typename encoded_variable_t>
 [[nodiscard]] auto
 serialize_clp_string(std::string_view str, std::string& logtype, std::vector<int8_t>& output_buf)
         -> bool {
-    static_assert(
-            (std::is_same_v<encoded_variable_t, clp::ir::eight_byte_encoded_variable_t>
-             || std::is_same_v<encoded_variable_t, clp::ir::four_byte_encoded_variable_t>)
-    );
+    static_assert((
+            std::is_same_v<encoded_variable_t, clp::ir::eight_byte_encoded_variable_t>
+            || std::is_same_v<encoded_variable_t, clp::ir::four_byte_encoded_variable_t>
+    ));
     bool succeeded{};
     if constexpr (std::is_same_v<encoded_variable_t, clp::ir::four_byte_encoded_variable_t>) {
         output_buf.push_back(cProtocol::Payload::ValueFourByteEncodingClpStr);
@@ -216,14 +216,14 @@ auto encode_and_serialize_schema_tree_node_id(
     };
 
     if (node_id <= static_cast<SchemaTree::Node::id_t>(INT8_MAX)) {
-        size_dependent_encode_and_serialize_schema_tree_node_id.template operator(
-        )<int8_t>(one_byte_length_indicator_tag);
+        size_dependent_encode_and_serialize_schema_tree_node_id
+                .template operator()<int8_t>(one_byte_length_indicator_tag);
     } else if (node_id <= static_cast<SchemaTree::Node::id_t>(INT16_MAX)) {
-        size_dependent_encode_and_serialize_schema_tree_node_id.template operator(
-        )<int16_t>(two_byte_length_indicator_tag);
+        size_dependent_encode_and_serialize_schema_tree_node_id
+                .template operator()<int16_t>(two_byte_length_indicator_tag);
     } else if (node_id <= static_cast<SchemaTree::Node::id_t>(INT32_MAX)) {
-        size_dependent_encode_and_serialize_schema_tree_node_id.template operator(
-        )<int32_t>(four_byte_length_indicator_tag);
+        size_dependent_encode_and_serialize_schema_tree_node_id
+                .template operator()<int32_t>(four_byte_length_indicator_tag);
     } else {
         return false;
     }
@@ -246,23 +246,23 @@ auto deserialize_and_decode_schema_tree_node_id(
             return std::errc::result_out_of_range;
         }
         if (0 > encoded_node_id) {
-            return {true, static_cast<SchemaTree::Node::id_t>(get_ones_complement(encoded_node_id))
-            };
+            return {true,
+                    static_cast<SchemaTree::Node::id_t>(get_ones_complement(encoded_node_id))};
         }
         return {false, static_cast<SchemaTree::Node::id_t>(encoded_node_id)};
     };
 
     if (one_byte_length_indicator_tag == length_indicator_tag) {
-        return size_dependent_deserialize_and_decode_schema_tree_node_id.template operator(
-        )<int8_t>();
+        return size_dependent_deserialize_and_decode_schema_tree_node_id
+                .template operator()<int8_t>();
     }
     if (two_byte_length_indicator_tag == length_indicator_tag) {
-        return size_dependent_deserialize_and_decode_schema_tree_node_id.template operator(
-        )<int16_t>();
+        return size_dependent_deserialize_and_decode_schema_tree_node_id
+                .template operator()<int16_t>();
     }
     if (four_byte_length_indicator_tag == length_indicator_tag) {
-        return size_dependent_deserialize_and_decode_schema_tree_node_id.template operator(
-        )<int32_t>();
+        return size_dependent_deserialize_and_decode_schema_tree_node_id
+                .template operator()<int32_t>();
     }
     return std::errc::protocol_error;
 }

@@ -55,10 +55,9 @@ bool send_pipeline_results(int reducer_socket_fd, std::unique_ptr<RecordGroupIte
 
         // Send size
         if (false
-            == buffered_writer.write(
-                    reinterpret_cast<char const*>(&serialized_result_size),
-                    sizeof(serialized_result_size)
-            ))
+            == buffered_writer
+                       .write(reinterpret_cast<char const*>(&serialized_result_size),
+                              sizeof(serialized_result_size)))
         {
             return false;
         }

@@ -7,7 +7,6 @@
 using glt::streaming_archive::LogtypeSizeTracker;
 
 namespace glt::streaming_archive::reader {
-
 void MultiLogtypeTablesManager::open(std::string const& segment_path) {
     LogtypeTableManager::open(segment_path);
 }
@@ -48,10 +47,8 @@ void MultiLogtypeTablesManager::load_variable_columns(logtype_dictionary_id_t lo
             throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
         }
         auto const& logtype_metadata = m_logtype_table_metadata.at(logtype_id);
-        m_logtype_tables[logtype_id].open_and_load_all(
-                m_memory_mapped_segment_file.data(),
-                logtype_metadata
-        );
+        m_logtype_tables[logtype_id]
+                .open_and_load_all(m_memory_mapped_segment_file.data(), logtype_metadata);
 
     } else if (m_combined_tables_metadata.find(logtype_id) != m_combined_tables_metadata.end()) {
         if (m_combined_tables.find(logtype_id) != m_combined_tables.end()) {

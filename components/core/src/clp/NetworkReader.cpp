@@ -257,10 +257,8 @@ auto NetworkReader::acquire_empty_buffer() -> void {
         }
         m_downloader_cv.wait(buffer_resource_lock);
     }
-    m_curr_downloader_buf.emplace(
-            m_buffer_pool.at(m_curr_downloader_buf_idx).data(),
-            m_buffer_size
-    );
+    m_curr_downloader_buf
+            .emplace(m_buffer_pool.at(m_curr_downloader_buf_idx).data(), m_buffer_size);
 }
 
 auto NetworkReader::release_empty_buffer() -> void {

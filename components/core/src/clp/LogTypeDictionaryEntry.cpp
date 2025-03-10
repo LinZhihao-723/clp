@@ -81,10 +81,8 @@ bool LogTypeDictionaryEntry::parse_next_var(
     // clang-format on
     if (ir::get_bounds_of_next_var(msg, var_begin_pos, var_end_pos)) {
         // Append to log type: from end of last variable to start of current variable
-        auto constant = static_cast<string_view>(msg).substr(
-                last_var_end_pos,
-                var_begin_pos - last_var_end_pos
-        );
+        auto constant = static_cast<string_view>(msg)
+                                .substr(last_var_end_pos, var_begin_pos - last_var_end_pos);
         ir::append_constant_to_logtype(constant, escape_handler, m_value);
 
         var.assign(msg, var_begin_pos, var_end_pos - var_begin_pos);
@@ -92,10 +90,8 @@ bool LogTypeDictionaryEntry::parse_next_var(
     }
     if (last_var_end_pos < msg.length()) {
         // Append to log type: from end of last variable to end
-        auto constant = static_cast<string_view>(msg).substr(
-                last_var_end_pos,
-                msg.length() - last_var_end_pos
-        );
+        auto constant = static_cast<string_view>(msg)
+                                .substr(last_var_end_pos, msg.length() - last_var_end_pos);
         ir::append_constant_to_logtype(constant, escape_handler, m_value);
     }
 

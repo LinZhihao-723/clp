@@ -281,14 +281,11 @@ auto create_db(TestTableSchema const& table_schema, vector<Row> const& rows) -> 
 
         auto const seg_id_param_id_it{column_name_to_param_id.find(TestTableSchema::cSegmentId)};
         REQUIRE((column_name_to_param_id.cend() != seg_id_param_id_it));
-        insert_stmt.bind_int64(
-                seg_id_param_id_it->second,
-                static_cast<int64_t>(row.get_segment_id())
-        );
+        insert_stmt
+                .bind_int64(seg_id_param_id_it->second, static_cast<int64_t>(row.get_segment_id()));
 
-        auto const seg_ts_pos_param_id_it{
-                column_name_to_param_id.find(TestTableSchema::cSegmentTsPos)
-        };
+        auto const seg_ts_pos_param_id_it{column_name_to_param_id
+                                                  .find(TestTableSchema::cSegmentTsPos)};
         REQUIRE((column_name_to_param_id.cend() != seg_ts_pos_param_id_it));
         insert_stmt.bind_int64(
                 seg_ts_pos_param_id_it->second,
@@ -297,9 +294,8 @@ auto create_db(TestTableSchema const& table_schema, vector<Row> const& rows) -> 
 
         // We don't need to bind segment_var_pos explicitly since it has the same
         // parameter ID as segment_ts_pos
-        auto const seg_var_pos_param_id_it{
-                column_name_to_param_id.find(TestTableSchema::cSegmentVarPos)
-        };
+        auto const seg_var_pos_param_id_it{column_name_to_param_id
+                                                   .find(TestTableSchema::cSegmentVarPos)};
         REQUIRE((column_name_to_param_id.cend() != seg_var_pos_param_id_it));
         REQUIRE((seg_ts_pos_param_id_it->second == seg_var_pos_param_id_it->second));
         REQUIRE((row.get_segment_ts_pos() == row.get_segment_var_pos()));

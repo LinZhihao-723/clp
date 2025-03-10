@@ -224,10 +224,9 @@ Archive::decompress_message(File& file, Message const& compressed_msg, string& d
             }
             file.increment_current_ts_pattern_ix();
         }
-        timestamp_patterns[file.get_current_ts_pattern_ix()].second.insert_formatted_timestamp(
-                compressed_msg.get_ts_in_milli(),
-                decompressed_msg
-        );
+        timestamp_patterns[file.get_current_ts_pattern_ix()]
+                .second
+                .insert_formatted_timestamp(compressed_msg.get_ts_in_milli(), decompressed_msg);
     }
 
     return true;

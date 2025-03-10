@@ -190,28 +190,32 @@ bool extract_ir(CommandLineArguments const& command_line_args) {
                 );
                 return false;
             }
-            results.emplace_back(std::move(bsoncxx::builder::basic::make_document(
-                    bsoncxx::builder::basic::kvp(
-                            clp::clo::cResultsCacheKeys::IrOutput::Path,
-                            dest_ir_file_name
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            clp::clo::cResultsCacheKeys::IrOutput::StreamId,
-                            orig_file_id
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            clp::clo::cResultsCacheKeys::IrOutput::BeginMsgIx,
-                            static_cast<int64_t>(begin_message_ix)
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            clp::clo::cResultsCacheKeys::IrOutput::EndMsgIx,
-                            static_cast<int64_t>(end_message_ix)
-                    ),
-                    bsoncxx::builder::basic::kvp(
-                            clp::clo::cResultsCacheKeys::IrOutput::IsLastChunk,
-                            is_last_chunk
+            results.emplace_back(
+                    std::move(
+                            bsoncxx::builder::basic::make_document(
+                                    bsoncxx::builder::basic::kvp(
+                                            clp::clo::cResultsCacheKeys::IrOutput::Path,
+                                            dest_ir_file_name
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            clp::clo::cResultsCacheKeys::IrOutput::StreamId,
+                                            orig_file_id
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            clp::clo::cResultsCacheKeys::IrOutput::BeginMsgIx,
+                                            static_cast<int64_t>(begin_message_ix)
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            clp::clo::cResultsCacheKeys::IrOutput::EndMsgIx,
+                                            static_cast<int64_t>(end_message_ix)
+                                    ),
+                                    bsoncxx::builder::basic::kvp(
+                                            clp::clo::cResultsCacheKeys::IrOutput::IsLastChunk,
+                                            is_last_chunk
+                                    )
+                            )
                     )
-            )));
+            );
 
             if (command_line_args.print_ir_stats()) {
                 nlohmann::json json_msg;
@@ -511,10 +515,8 @@ static bool search_archive(
     std::set<clp::segment_id_t> ids_of_segments_to_search;
     for (auto& sub_query : query.get_sub_queries()) {
         auto& ids_of_matching_segments = sub_query.get_ids_of_matching_segments();
-        ids_of_segments_to_search.insert(
-                ids_of_matching_segments.cbegin(),
-                ids_of_matching_segments.cend()
-        );
+        ids_of_segments_to_search
+                .insert(ids_of_matching_segments.cbegin(), ids_of_matching_segments.cend());
     }
 
     auto file_metadata_ix_ptr = archive_reader.get_file_iterator(

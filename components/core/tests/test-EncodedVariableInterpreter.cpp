@@ -383,11 +383,10 @@ TEST_CASE("EncodedVariableInterpreter", "[EncodedVariableInterpreter]") {
                 = {"python2.7.3", "Python2.7.3", "PyThOn2.7.3", "PYTHON2.7.3"};
         clp::VariableDictionaryWriter var_dict_writer;
 
-        var_dict_writer.open(
-                std::string{cVarDictPath},
-                std::string{cVarSegmentIndexPath},
-                cVariableDictionaryIdMax
-        );
+        var_dict_writer
+                .open(std::string{cVarDictPath},
+                      std::string{cVarSegmentIndexPath},
+                      cVariableDictionaryIdMax);
 
         std::vector<encoded_variable_t> encoded_vars;
         std::vector<clp::variable_dictionary_id_t> var_ids;

@@ -24,17 +24,15 @@ void File::append_to_segment(LogTypeDictionaryWriter const& logtype_dict, Segmen
 
     // Append files to segment
     uint64_t segment_logtypes_uncompressed_pos;
-    segment.append(
-            reinterpret_cast<char const*>(m_logtypes->data()),
-            m_logtypes->size_in_bytes(),
-            segment_logtypes_uncompressed_pos
-    );
+    segment
+            .append(reinterpret_cast<char const*>(m_logtypes->data()),
+                    m_logtypes->size_in_bytes(),
+                    segment_logtypes_uncompressed_pos);
     uint64_t segment_offset_uncompressed_pos;
-    segment.append(
-            reinterpret_cast<char const*>(m_offset->data()),
-            m_offset->size_in_bytes(),
-            segment_offset_uncompressed_pos
-    );
+    segment
+            .append(reinterpret_cast<char const*>(m_offset->data()),
+                    m_offset->size_in_bytes(),
+                    segment_offset_uncompressed_pos);
     set_segment_metadata(
             segment.get_id(),
             segment_logtypes_uncompressed_pos,

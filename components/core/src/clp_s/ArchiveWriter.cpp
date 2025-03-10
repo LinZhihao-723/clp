@@ -84,10 +84,9 @@ void ArchiveWriter::close() {
         write_single_file_archive(files);
     } else {
         FileWriter header_and_metadata_writer;
-        header_and_metadata_writer.open(
-                m_archive_path + constants::cArchiveHeaderFile,
-                FileWriter::OpenMode::CreateForWriting
-        );
+        header_and_metadata_writer
+                .open(m_archive_path + constants::cArchiveHeaderFile,
+                      FileWriter::OpenMode::CreateForWriting);
         write_archive_metadata(header_and_metadata_writer, files);
         size_t metadata_size = header_and_metadata_writer.get_pos() - sizeof(ArchiveHeader);
 
@@ -311,14 +310,12 @@ void ArchiveWriter::initialize_schema_writer(SchemaWriter* writer, Schema const&
 }
 
 std::pair<size_t, size_t> ArchiveWriter::store_tables() {
-    m_tables_file_writer.open(
-            m_archive_path + constants::cArchiveTablesFile,
-            FileWriter::OpenMode::CreateForWriting
-    );
-    m_table_metadata_file_writer.open(
-            m_archive_path + constants::cArchiveTableMetadataFile,
-            FileWriter::OpenMode::CreateForWriting
-    );
+    m_tables_file_writer
+            .open(m_archive_path + constants::cArchiveTablesFile,
+                  FileWriter::OpenMode::CreateForWriting);
+    m_table_metadata_file_writer
+            .open(m_archive_path + constants::cArchiveTableMetadataFile,
+                  FileWriter::OpenMode::CreateForWriting);
     m_table_metadata_compressor.open(m_table_metadata_file_writer, m_compression_level);
 
     /**

@@ -932,10 +932,9 @@ void Output::populate_string_queries(std::shared_ptr<Expression> const& expr) {
                     }
                 }
 
-                auto const entries = m_var_dict->get_entry_matching_value(
-                        unescaped_query_string,
-                        m_ignore_case
-                );
+                auto const entries
+                        = m_var_dict
+                                  ->get_entry_matching_value(unescaped_query_string, m_ignore_case);
 
                 for (auto const& entry : entries) {
                     matching_vars.insert(entry->get_id());
@@ -1094,9 +1093,8 @@ Output::constant_propagate(std::shared_ptr<Expression> const& expr, int32_t sche
             // FIXME: have an edgecase to handle with NEXISTS on pure wildcard columns
             return EvaluatedValue::True;
         } else if (filter->get_column()->is_pure_wildcard()
-                   && filter->get_column()->matches_any(
-                           LiteralType::ClpStringT | LiteralType::VarStringT
-                   ))
+                   && filter->get_column()
+                              ->matches_any(LiteralType::ClpStringT | LiteralType::VarStringT))
         {
             auto wildcard = filter->get_column().get();
             bool has_var_string = false;
@@ -1110,10 +1108,8 @@ Output::constant_propagate(std::shared_ptr<Expression> const& expr, int32_t sche
             std::string filter_string;
             bool valid
                     = filter->get_operand()->as_var_string(filter_string, filter->get_operation())
-                      || filter->get_operand()->as_clp_string(
-                              filter_string,
-                              filter->get_operation()
-                      );
+                      || filter->get_operand()
+                                 ->as_clp_string(filter_string, filter->get_operation());
             if (false == valid) {
                 // FIXME: throw
                 return EvaluatedValue::False;

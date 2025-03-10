@@ -19,8 +19,10 @@ namespace clp::ir {
 template <typename encoded_variable_t>
 LogEventSerializer<encoded_variable_t>::~LogEventSerializer() {
     if (m_is_open) {
-        SPDLOG_ERROR("clp::ir::LogEventSerializer not closed before being destroyed - output maybe "
-                     "corrupted.");
+        SPDLOG_ERROR(
+                "clp::ir::LogEventSerializer not closed before being destroyed - output maybe "
+                "corrupted."
+        );
     }
 }
 
@@ -74,10 +76,8 @@ auto LogEventSerializer<encoded_variable_t>::flush() -> void {
     if (false == m_is_open) {
         throw OperationFailed(ErrorCode_NotInit, __FILENAME__, __LINE__);
     }
-    m_zstd_compressor.write(
-            size_checked_pointer_cast<char const>(m_ir_buf.data()),
-            m_ir_buf.size()
-    );
+    m_zstd_compressor
+            .write(size_checked_pointer_cast<char const>(m_ir_buf.data()), m_ir_buf.size());
     m_ir_buf.clear();
 }
 

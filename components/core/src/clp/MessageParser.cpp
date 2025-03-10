@@ -121,38 +121,35 @@ bool MessageParser::parse_line(ParsedMessage& message) {
         // A timestamp was parsed
         if (m_buffered_msg.is_empty()) {
             // Fill message with line
-            m_buffered_msg.set(
-                    timestamp_pattern,
-                    timestamp,
-                    m_line,
-                    timestamp_begin_pos,
-                    timestamp_end_pos
-            );
+            m_buffered_msg
+                    .set(timestamp_pattern,
+                         timestamp,
+                         m_line,
+                         timestamp_begin_pos,
+                         timestamp_end_pos);
         } else {
             // Move buffered message to message
             message.consume(m_buffered_msg);
 
             // Save line for next message
-            m_buffered_msg.set(
-                    timestamp_pattern,
-                    timestamp,
-                    m_line,
-                    timestamp_begin_pos,
-                    timestamp_end_pos
-            );
+            m_buffered_msg
+                    .set(timestamp_pattern,
+                         timestamp,
+                         m_line,
+                         timestamp_begin_pos,
+                         timestamp_end_pos);
             message_completed = true;
         }
     } else {
         // No timestamp was parsed
         if (m_buffered_msg.is_empty()) {
             // Fill message with line
-            message.set(
-                    timestamp_pattern,
-                    timestamp,
-                    m_line,
-                    timestamp_begin_pos,
-                    timestamp_end_pos
-            );
+            message
+                    .set(timestamp_pattern,
+                         timestamp,
+                         m_line,
+                         timestamp_begin_pos,
+                         timestamp_end_pos);
             message_completed = true;
         } else {
             // Append line to message

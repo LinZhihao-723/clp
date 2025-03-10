@@ -119,20 +119,15 @@ void GLTSegment::compress_logtype_tables_to_disk() {
 
     // store info of combined_tables
     size_t combined_table_id_count = combined_tables_info.size();
-    m_metadata_compressor.write(
-            reinterpret_cast<char const*>(&combined_table_id_count),
-            sizeof(size_t)
-    );
+    m_metadata_compressor
+            .write(reinterpret_cast<char const*>(&combined_table_id_count), sizeof(size_t));
 
     for (auto const& iter : combined_tables_info) {
-        m_metadata_compressor.write(
-                reinterpret_cast<char const*>(&iter.second.m_begin_offset),
-                sizeof(combined_table_id_t)
-        );
-        m_metadata_compressor.write(
-                reinterpret_cast<char const*>(&iter.second.m_size),
-                sizeof(size_t)
-        );
+        m_metadata_compressor
+                .write(reinterpret_cast<char const*>(&iter.second.m_begin_offset),
+                       sizeof(combined_table_id_t));
+        m_metadata_compressor
+                .write(reinterpret_cast<char const*>(&iter.second.m_size), sizeof(size_t));
     }
 
     m_logtype_table_writer.flush();
@@ -164,17 +159,14 @@ void GLTSegment::write_combined_logtype(
         // [type], [logtype_id], [combined_table_id], [num_column], [num_row], [uncompressed offset]
 
         // write the compression type
-        m_metadata_compressor.write(
-                reinterpret_cast<char const*>(&compression_type),
-                sizeof(size_t)
-        );
+        m_metadata_compressor
+                .write(reinterpret_cast<char const*>(&compression_type), sizeof(size_t));
         // write the logtype id
         m_metadata_compressor.write(reinterpret_cast<char const*>(&logtype_id), sizeof(size_t));
         // write the combined table id
-        m_metadata_compressor.write(
-                reinterpret_cast<char const*>(&combined_table_id),
-                sizeof(combined_table_id_t)
-        );
+        m_metadata_compressor
+                .write(reinterpret_cast<char const*>(&combined_table_id),
+                       sizeof(combined_table_id_t));
 
         // write the number of rows and columns
         size_t num_row = logtype_table.get_num_rows();
@@ -184,18 +176,14 @@ void GLTSegment::write_combined_logtype(
 
         // write the offset(uncompressed)
         size_t logtype_beginning_offset = m_combined_compressor.get_pos();
-        m_metadata_compressor.write(
-                reinterpret_cast<char const*>(&logtype_beginning_offset),
-                sizeof(size_t)
-        );
+        m_metadata_compressor
+                .write(reinterpret_cast<char const*>(&logtype_beginning_offset), sizeof(size_t));
 
         // Write actual data
         auto const& timestamps_data = logtype_table.get_timestamps();
         uint64_t const timestamp_size = timestamps_data.size() * sizeof(epochtime_t);
-        m_combined_compressor.write(
-                reinterpret_cast<char const*>(timestamps_data.data()),
-                timestamp_size
-        );
+        m_combined_compressor
+                .write(reinterpret_cast<char const*>(timestamps_data.data()), timestamp_size);
 
         auto const& file_ids = logtype_table.get_file_ids();
         uint64_t const file_id_size = file_ids.size() * sizeof(file_id_t);
@@ -205,10 +193,8 @@ void GLTSegment::write_combined_logtype(
         for (size_t column_ix = 0; column_ix < columns.size(); column_ix++) {
             auto const& column_data = columns[column_ix];
             uint64_t const column_data_size = column_data.size() * sizeof(encoded_variable_t);
-            m_combined_compressor.write(
-                    reinterpret_cast<char const*>(column_data.data()),
-                    column_data_size
-            );
+            m_combined_compressor
+                    .write(reinterpret_cast<char const*>(column_data.data()), column_data_size);
         }
     }
     m_combined_compressor.close();
@@ -232,10 +218,8 @@ void GLTSegment::write_single_logtype(logtype_dictionary_id_t logtype_id) {
     // compression type and logtype ID
     size_t compression_type = streaming_archive::LogtypeTableType::NonCombined;
     m_metadata_compressor.write(reinterpret_cast<char const*>(&compression_type), sizeof(size_t));
-    m_metadata_compressor.write(
-            reinterpret_cast<char const*>(&logtype_id),
-            sizeof(logtype_dictionary_id_t)
-    );
+    m_metadata_compressor
+            .write(reinterpret_cast<char const*>(&logtype_id), sizeof(logtype_dictionary_id_t));
 
     // Write number of rows.
     size_t num_row = logtype_table.get_num_rows();
@@ -251,10 +235,8 @@ void GLTSegment::write_single_logtype(logtype_dictionary_id_t logtype_id) {
     open_single_table_compressor();
     auto const& timestamps_data = logtype_table.get_timestamps();
     uint64_t const timestamp_size = timestamps_data.size() * sizeof(epochtime_t);
-    m_single_compressor.write(
-            reinterpret_cast<char const*>(timestamps_data.data()),
-            timestamp_size
-    );
+    m_single_compressor
+            .write(reinterpret_cast<char const*>(timestamps_data.data()), timestamp_size);
     m_single_compressor.close();
 
     // write file_id_offset
@@ -280,10 +262,8 @@ void GLTSegment::write_single_logtype(logtype_dictionary_id_t logtype_id) {
 
         // write variable column data
         open_single_table_compressor();
-        m_single_compressor.write(
-                reinterpret_cast<char const*>(column_data.data()),
-                column_data_size
-        );
+        m_single_compressor
+                .write(reinterpret_cast<char const*>(column_data.data()), column_data_size);
         m_single_compressor.close();
     }
     // write end offset
@@ -342,8 +322,10 @@ uint64_t GLTSegment::get_uncompressed_size() {
 
 size_t GLTSegment::get_compressed_size() {
     if (!m_segment_path.empty()) {
-        SPDLOG_ERROR("streaming_archive::writer::GLTSegment: get_compressed_size called before "
-                     "closing the segment");
+        SPDLOG_ERROR(
+                "streaming_archive::writer::GLTSegment: get_compressed_size called before "
+                "closing the segment"
+        );
         throw OperationFailed(ErrorCode_NotReady, __FILENAME__, __LINE__);
     }
     return m_compressed_size;

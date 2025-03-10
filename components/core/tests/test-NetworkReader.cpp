@@ -198,10 +198,8 @@ TEST_CASE("network_reader_with_valid_http_header_kv_pairs", "[NetworkReader]") {
     // supposed to respond all the user-specified headers as key-value pairs in JSON form.
     constexpr size_t cNumHttpHeaderKeyValuePairs{10};
     for (size_t i{0}; i < cNumHttpHeaderKeyValuePairs; ++i) {
-        valid_http_header_kv_pairs.emplace(
-                fmt::format("Unit-Test-Key{}", i),
-                fmt::format("Unit-Test-Value{}", i)
-        );
+        valid_http_header_kv_pairs
+                .emplace(fmt::format("Unit-Test-Key{}", i), fmt::format("Unit-Test-Value{}", i));
     }
     std::optional<std::vector<char>> optional_content;
     // Retry the unit test a limited number of times to handle transient server-side HTTP errors.

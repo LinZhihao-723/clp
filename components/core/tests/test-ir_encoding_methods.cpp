@@ -387,10 +387,8 @@ auto unpack_and_serialize_msgpack_bytes(
         return false;
     }
 
-    return serializer.serialize_msgpack_map(
-            auto_gen_msgpack_obj.via.map,
-            user_gen_msgpack_obj.via.map
-    );
+    return serializer
+            .serialize_msgpack_map(auto_gen_msgpack_obj.via.map, user_gen_msgpack_obj.via.map);
 }
 
 auto create_msgpack_empty_map_obj_handle() -> msgpack::object_handle {
@@ -1361,22 +1359,19 @@ TEMPLATE_TEST_CASE(
         auto const& deserialized_log_event{deserialized_log_events.at(idx)};
 
         auto const num_leaves_in_auto_gen_json_obj{count_num_leaves(expected_auto_gen_json_obj)};
-        auto const num_auto_gen_kv_pairs{
-                deserialized_log_event.get_auto_gen_node_id_value_pairs().size()
-        };
+        auto const num_auto_gen_kv_pairs{deserialized_log_event.get_auto_gen_node_id_value_pairs()
+                                                 .size()};
         REQUIRE((num_leaves_in_auto_gen_json_obj == num_auto_gen_kv_pairs));
 
         auto const num_leaves_in_user_gen_json_obj{count_num_leaves(expected_user_gen_json_obj)};
-        auto const num_user_gen_kv_pairs{
-                deserialized_log_event.get_user_gen_node_id_value_pairs().size()
-        };
+        auto const num_user_gen_kv_pairs{deserialized_log_event.get_user_gen_node_id_value_pairs()
+                                                 .size()};
         REQUIRE((num_leaves_in_user_gen_json_obj == num_user_gen_kv_pairs));
 
         auto const serialized_json_result{deserialized_log_event.serialize_to_json()};
         REQUIRE_FALSE(serialized_json_result.has_error());
-        auto const& [actual_auto_gen_json_obj, actual_user_gen_json_obj]{
-                serialized_json_result.value()
-        };
+        auto const& [actual_auto_gen_json_obj, actual_user_gen_json_obj]{serialized_json_result
+                                                                                 .value()};
         REQUIRE((expected_auto_gen_json_obj == actual_auto_gen_json_obj));
         REQUIRE((expected_user_gen_json_obj == actual_user_gen_json_obj));
     }

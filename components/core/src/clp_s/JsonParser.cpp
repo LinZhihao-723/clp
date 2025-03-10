@@ -475,9 +475,7 @@ void JsonParser::parse_line(ondemand::value line, int32_t parent_node_id, std::s
                 hit_end = true;
             }
         } while (false == object_it_stack.empty() && hit_end);
-    }
-
-    while (false == object_stack.empty());
+    } while (false == object_stack.empty());
 }
 
 bool JsonParser::parse() {
@@ -729,9 +727,8 @@ auto JsonParser::get_archive_node_id_and_check_timestamp(
             break;
         }
 
-        flat_map_location = ir_node_to_archive_node_id_mapping.find(
-                std::pair{ir_id_stack.back(), next_node_type}
-        );
+        flat_map_location = ir_node_to_archive_node_id_mapping
+                                    .find(std::pair{ir_id_stack.back(), next_node_type});
         if (ir_node_to_archive_node_id_mapping.end() != flat_map_location) {
             curr_node_archive_id = next_parent_archive_id = flat_map_location->second.first;
             ir_id_stack.pop_back();
@@ -743,10 +740,9 @@ auto JsonParser::get_archive_node_id_and_check_timestamp(
     while (false == ir_id_stack.empty()) {
         auto const& curr_node = ir_tree.get_node(ir_id_stack.back());
         if (1 == ir_id_stack.size()) {
-            matches_timestamp = m_archive_writer->matches_timestamp(
-                    next_parent_archive_id,
-                    curr_node.get_key_name()
-            );
+            matches_timestamp
+                    = m_archive_writer
+                              ->matches_timestamp(next_parent_archive_id, curr_node.get_key_name());
             curr_node_archive_id = add_node_to_archive_and_translations<autogen>(
                     ir_id_stack.back(),
                     curr_node,
@@ -900,7 +896,8 @@ auto JsonParser::parse_from_ir() -> bool {
         size_t last_pos{};
         decompressor.open(*reader, cDecompressorReadBufferCapacity);
 
-        auto deserializer_result{Deserializer<IrUnitHandler>::create(decompressor, IrUnitHandler{})
+        auto deserializer_result{
+                Deserializer<IrUnitHandler>::create(decompressor, IrUnitHandler{})
         };
         if (deserializer_result.has_error()) {
             auto err = deserializer_result.error();

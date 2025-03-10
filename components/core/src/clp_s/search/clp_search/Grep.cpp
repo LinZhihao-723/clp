@@ -345,11 +345,10 @@ SubQueryMatchabilityResult generate_logtypes_and_vars_for_subquery(
     string logtype;
     for (auto const& query_token : query_tokens) {
         // Append from end of last token to beginning of this token, to logtype
-        logtype.append(
-                processed_search_string,
-                last_token_end_pos,
-                query_token.get_begin_pos() - last_token_end_pos
-        );
+        logtype
+                .append(processed_search_string,
+                        last_token_end_pos,
+                        query_token.get_begin_pos() - last_token_end_pos);
         last_token_end_pos = query_token.get_end_pos();
 
         if (query_token.is_wildcard()) {

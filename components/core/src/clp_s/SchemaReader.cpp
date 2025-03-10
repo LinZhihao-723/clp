@@ -154,9 +154,8 @@ void SchemaReader::generate_json_string() {
             }
             case JsonSerializer::Op::AddArrayField: {
                 column = m_reordered_columns[column_id_index++];
-                m_json_serializer.append_key(
-                        m_global_schema_tree->get_node(column->get_id()).get_key_name()
-                );
+                m_json_serializer.append_key(m_global_schema_tree->get_node(column->get_id())
+                                                     .get_key_name());
                 m_json_serializer.append_value_from_column(column, m_cur_message);
                 break;
             }
@@ -295,10 +294,8 @@ void SchemaReader::mark_unordered_object(
         int32_t mst_subtree_root,
         std::span<int32_t> schema
 ) {
-    m_global_id_to_unordered_object.emplace(
-            mst_subtree_root,
-            std::make_pair(column_reader_start, schema)
-    );
+    m_global_id_to_unordered_object
+            .emplace(mst_subtree_root, std::make_pair(column_reader_start, schema));
 }
 
 int32_t SchemaReader::get_first_column_in_span(std::span<int32_t> schema) {
@@ -352,14 +349,13 @@ void SchemaReader::find_intersection_and_fix_brackets(
             no_name = false;
         }
         if (NodeType::Object == node.get_type()) {
-            m_json_serializer.add_op(
-                    no_name ? JsonSerializer::Op::BeginUnnamedObject
-                            : JsonSerializer::Op::BeginObject
-            );
+            m_json_serializer
+                    .add_op(no_name ? JsonSerializer::Op::BeginUnnamedObject
+                                    : JsonSerializer::Op::BeginObject);
         } else if (NodeType::StructuredArray == node.get_type()) {
-            m_json_serializer.add_op(
-                    no_name ? JsonSerializer::Op::BeginUnnamedArray : JsonSerializer::Op::BeginArray
-            );
+            m_json_serializer
+                    .add_op(no_name ? JsonSerializer::Op::BeginUnnamedArray
+                                    : JsonSerializer::Op::BeginArray);
         }
     }
     path_to_intersection.clear();
@@ -573,8 +569,8 @@ void SchemaReader::initialize_serializer() {
     // TODO: this code will have to change once we allow mixing log lines parsed by different
     // parsers and if we add support for serializing auto-generated keys in regular JSON.
     if (auto subtree_root
-        = m_local_schema_tree.get_object_subtree_node_id_for_namespace(constants::cDefaultNamespace
-        );
+        = m_local_schema_tree
+                  .get_object_subtree_node_id_for_namespace(constants::cDefaultNamespace);
         -1 != subtree_root)
     {
         generate_json_template(subtree_root);
