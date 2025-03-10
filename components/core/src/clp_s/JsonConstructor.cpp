@@ -49,9 +49,10 @@ void JsonConstructor::store() {
     m_archive_reader->open_packed_streams();
     if (false == m_option.ordered || false == m_archive_reader->has_log_order()) {
         FileWriter writer;
-        writer
-                .open(m_option.output_dir + "/original",
-                      FileWriter::OpenMode::CreateIfNonexistentForAppending);
+        writer.open(
+                m_option.output_dir + "/original",
+                FileWriter::OpenMode::CreateIfNonexistentForAppending
+        );
         m_archive_reader->store(writer);
 
         writer.close();

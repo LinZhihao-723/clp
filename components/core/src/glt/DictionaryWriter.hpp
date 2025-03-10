@@ -253,15 +253,17 @@ void DictionaryWriter<DictionaryIdType, EntryType>::open_and_preload(
     dictionary_decompressor.close();
     dictionary_file_reader.close();
 
-    m_dictionary_file_writer
-            .open(dictionary_path,
-                  FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING);
+    m_dictionary_file_writer.open(
+            dictionary_path,
+            FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING
+    );
     // Open compressor
     m_dictionary_compressor.open(m_dictionary_file_writer);
 
-    m_segment_index_file_writer
-            .open(segment_index_path,
-                  FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING);
+    m_segment_index_file_writer.open(
+            segment_index_path,
+            FileWriter::OpenMode::CREATE_IF_NONEXISTENT_FOR_SEEKABLE_WRITING
+    );
     // Open compressor
     m_segment_index_compressor.open(m_segment_index_file_writer);
 

@@ -258,8 +258,9 @@ auto Deserializer<IrUnitHandler>::deserialize_next_ir_unit(ReaderInterface& read
             }
 
             auto const new_utc_offset{result.value()};
-            if (auto const err{m_ir_unit_handler
-                                       .handle_utc_offset_change(m_utc_offset, new_utc_offset)};
+            if (auto const err{
+                        m_ir_unit_handler.handle_utc_offset_change(m_utc_offset, new_utc_offset)
+                };
                 IRErrorCode::IRErrorCode_Success != err)
             {
                 return ir_error_code_to_errc(err);

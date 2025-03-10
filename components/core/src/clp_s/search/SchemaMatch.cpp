@@ -325,8 +325,9 @@ std::shared_ptr<Expression> SchemaMatch::intersect_schemas(std::shared_ptr<Expre
 
             for (auto column : columns) {
                 if (false == column->is_pure_wildcard()) {
-                    m_schema_to_searched_columns[schema]
-                            .insert(get_column_id_for_descriptor(column, schema));
+                    m_schema_to_searched_columns[schema].insert(
+                            get_column_id_for_descriptor(column, schema)
+                    );
                 }
             }
         }
@@ -524,8 +525,9 @@ bool SchemaMatch::has_array_search(int32_t schema_id) {
 }
 
 LiteralType SchemaMatch::get_literal_type_for_column(ColumnDescriptor* column, int32_t schema) {
-    return node_to_literal_type(m_tree->get_node(get_column_id_for_descriptor(column, schema))
-                                        .get_type());
+    return node_to_literal_type(
+            m_tree->get_node(get_column_id_for_descriptor(column, schema)).get_type()
+    );
 }
 
 std::shared_ptr<Expression> SchemaMatch::get_query_for_schema(int32_t schema) {

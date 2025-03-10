@@ -66,9 +66,10 @@ int main(int argc, char const* argv[]) {
     readable_logtype_dict_path += ".hr";
     readable_logtype_segment_index_path += ".hr";
     file_writer.open(readable_logtype_dict_path.string(), FileWriter::OpenMode::CREATE_FOR_WRITING);
-    index_writer
-            .open(readable_logtype_segment_index_path.string(),
-                  FileWriter::OpenMode::CREATE_FOR_WRITING);
+    index_writer.open(
+            readable_logtype_segment_index_path.string(),
+            FileWriter::OpenMode::CREATE_FOR_WRITING
+    );
     string human_readable_value;
     for (auto const& entry : logtype_dict.get_entries()) {
         auto const& value = entry.get_value();
@@ -149,9 +150,10 @@ int main(int argc, char const* argv[]) {
     readable_var_dict_path += ".hr";
     readable_var_segment_index_path += ".hr";
     file_writer.open(readable_var_dict_path.string(), FileWriter::OpenMode::CREATE_FOR_WRITING);
-    index_writer
-            .open(readable_var_segment_index_path.string(),
-                  FileWriter::OpenMode::CREATE_FOR_WRITING);
+    index_writer.open(
+            readable_var_segment_index_path.string(),
+            FileWriter::OpenMode::CREATE_FOR_WRITING
+    );
     for (auto const& entry : var_dict.get_entries()) {
         file_writer.write_string(entry.get_value());
         file_writer.write_char('\n');

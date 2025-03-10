@@ -482,10 +482,11 @@ std::string decode_message(
                 );
             }
             auto end_pos = dictionary_var_end_offsets[dictionary_var_bounds_ix];
-            message
-                    .append(all_dictionary_vars,
-                            dictionary_var_begin_pos,
-                            end_pos - dictionary_var_begin_pos);
+            message.append(
+                    all_dictionary_vars,
+                    dictionary_var_begin_pos,
+                    end_pos - dictionary_var_begin_pos
+            );
             dictionary_var_begin_pos = end_pos;
             ++dictionary_var_bounds_ix;
         }

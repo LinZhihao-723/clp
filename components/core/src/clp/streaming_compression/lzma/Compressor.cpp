@@ -147,9 +147,10 @@ auto Compressor::flush_stream_output_block_buffer() -> void {
     if (cCompressedStreamBlockBufferSize == m_lzma_stream.avail_out()) {
         return;
     }
-    m_compressed_stream_writer
-            ->write(clp::size_checked_pointer_cast<char>(m_compressed_stream_block_buffer.data()),
-                    cCompressedStreamBlockBufferSize - m_lzma_stream.avail_out());
+    m_compressed_stream_writer->write(
+            clp::size_checked_pointer_cast<char>(m_compressed_stream_block_buffer.data()),
+            cCompressedStreamBlockBufferSize - m_lzma_stream.avail_out()
+    );
     if (false
         == m_lzma_stream.attach_output(
                 m_compressed_stream_block_buffer.data(),

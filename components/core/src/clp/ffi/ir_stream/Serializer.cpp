@@ -730,14 +730,16 @@ auto Serializer<encoded_variable_t>::serialize_msgpack_map(
     m_ir_buf
             .insert(m_ir_buf.cend(), m_schema_tree_node_buf.cbegin(), m_schema_tree_node_buf.cend()
             );
-    m_ir_buf
-            .insert(m_ir_buf.cend(),
-                    m_sequential_serialization_buf.cbegin(),
-                    m_sequential_serialization_buf.cend());
-    m_ir_buf
-            .insert(m_ir_buf.cend(),
-                    m_user_gen_val_group_buf.cbegin(),
-                    m_user_gen_val_group_buf.cend());
+    m_ir_buf.insert(
+            m_ir_buf.cend(),
+            m_sequential_serialization_buf.cbegin(),
+            m_sequential_serialization_buf.cend()
+    );
+    m_ir_buf.insert(
+            m_ir_buf.cend(),
+            m_user_gen_val_group_buf.cbegin(),
+            m_user_gen_val_group_buf.cend()
+    );
 
     revert_manager.mark_success();
     return true;

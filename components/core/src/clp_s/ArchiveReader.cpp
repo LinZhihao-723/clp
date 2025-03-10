@@ -39,9 +39,9 @@ void ArchiveReader::open(Path const& archive_path, NetworkAuthOption const& netw
 
 void ArchiveReader::read_metadata() {
     constexpr size_t cDecompressorFileReadBufferCapacity = 64 * 1024;  // 64 KB
-    auto table_metadata_reader
-            = m_archive_reader_adaptor
-                      ->checkout_reader_for_section(constants::cArchiveTableMetadataFile);
+    auto table_metadata_reader = m_archive_reader_adaptor->checkout_reader_for_section(
+            constants::cArchiveTableMetadataFile
+    );
     m_table_metadata_decompressor.open(*table_metadata_reader, cDecompressorFileReadBufferCapacity);
 
     m_stream_reader.read_metadata(m_table_metadata_decompressor);
@@ -171,10 +171,11 @@ std::vector<std::shared_ptr<SchemaReader>> ArchiveReader::read_all_tables() {
         initialize_schema_reader(*schema_reader, schema_id, true, true);
         auto& schema_metadata = m_id_to_schema_metadata[schema_id];
         auto stream_buffer = read_stream(schema_metadata.stream_id, false);
-        schema_reader
-                ->load(stream_buffer,
-                       schema_metadata.stream_offset,
-                       schema_metadata.uncompressed_size);
+        schema_reader->load(
+                stream_buffer,
+                schema_metadata.stream_offset,
+                schema_metadata.uncompressed_size
+        );
         readers.push_back(std::move(schema_reader));
     }
     return readers;
@@ -278,13 +279,14 @@ void ArchiveReader::initialize_schema_reader(
         bool should_marshal_records
 ) {
     auto& schema = (*m_schema_map)[schema_id];
-    reader
-            .reset(m_schema_tree,
-                   m_projection,
-                   schema_id,
-                   schema.get_ordered_schema_view(),
-                   m_id_to_schema_metadata[schema_id].num_messages,
-                   should_marshal_records);
+    reader.reset(
+            m_schema_tree,
+            m_projection,
+            schema_id,
+            schema.get_ordered_schema_view(),
+            m_id_to_schema_metadata[schema_id].num_messages,
+            should_marshal_records
+    );
     auto timestamp_column_ids
             = get_timestamp_dictionary()->get_authoritative_timestamp_column_ids();
     for (size_t i = 0; i < schema.size(); ++i) {

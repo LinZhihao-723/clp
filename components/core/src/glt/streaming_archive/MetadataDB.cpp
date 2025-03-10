@@ -339,8 +339,9 @@ void MetadataDB::FileIterator::get_timestamp_patterns(string& timestamp_patterns
 }
 
 size_t MetadataDB::FileIterator::get_num_uncompressed_bytes() const {
-    return m_statement
-            .column_int64(enum_to_underlying_type(FilesTableFieldIndexes::NumUncompressedBytes));
+    return m_statement.column_int64(
+            enum_to_underlying_type(FilesTableFieldIndexes::NumUncompressedBytes)
+    );
 }
 
 size_t MetadataDB::FileIterator::get_num_messages() const {
@@ -364,13 +365,15 @@ segment_id_t MetadataDB::FileIterator::get_segment_id() const {
 }
 
 size_t MetadataDB::FileIterator::get_segment_logtypes_pos() const {
-    return m_statement
-            .column_int64(enum_to_underlying_type(FilesTableFieldIndexes::SegmentLogtypesPosition));
+    return m_statement.column_int64(
+            enum_to_underlying_type(FilesTableFieldIndexes::SegmentLogtypesPosition)
+    );
 }
 
 size_t MetadataDB::FileIterator::get_segment_offset_pos() const {
-    return m_statement
-            .column_int64(enum_to_underlying_type(FilesTableFieldIndexes::SegmentOffsetPosition));
+    return m_statement.column_int64(
+            enum_to_underlying_type(FilesTableFieldIndexes::SegmentOffsetPosition)
+    );
 }
 
 void MetadataDB::open(string const& path) {

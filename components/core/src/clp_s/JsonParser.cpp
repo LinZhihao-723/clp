@@ -727,8 +727,9 @@ auto JsonParser::get_archive_node_id_and_check_timestamp(
             break;
         }
 
-        flat_map_location = ir_node_to_archive_node_id_mapping
-                                    .find(std::pair{ir_id_stack.back(), next_node_type});
+        flat_map_location = ir_node_to_archive_node_id_mapping.find(
+                std::pair{ir_id_stack.back(), next_node_type}
+        );
         if (ir_node_to_archive_node_id_mapping.end() != flat_map_location) {
             curr_node_archive_id = next_parent_archive_id = flat_map_location->second.first;
             ir_id_stack.pop_back();

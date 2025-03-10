@@ -123,9 +123,10 @@ void GLTSegment::compress_logtype_tables_to_disk() {
             .write(reinterpret_cast<char const*>(&combined_table_id_count), sizeof(size_t));
 
     for (auto const& iter : combined_tables_info) {
-        m_metadata_compressor
-                .write(reinterpret_cast<char const*>(&iter.second.m_begin_offset),
-                       sizeof(combined_table_id_t));
+        m_metadata_compressor.write(
+                reinterpret_cast<char const*>(&iter.second.m_begin_offset),
+                sizeof(combined_table_id_t)
+        );
         m_metadata_compressor
                 .write(reinterpret_cast<char const*>(&iter.second.m_size), sizeof(size_t));
     }
@@ -164,9 +165,10 @@ void GLTSegment::write_combined_logtype(
         // write the logtype id
         m_metadata_compressor.write(reinterpret_cast<char const*>(&logtype_id), sizeof(size_t));
         // write the combined table id
-        m_metadata_compressor
-                .write(reinterpret_cast<char const*>(&combined_table_id),
-                       sizeof(combined_table_id_t));
+        m_metadata_compressor.write(
+                reinterpret_cast<char const*>(&combined_table_id),
+                sizeof(combined_table_id_t)
+        );
 
         // write the number of rows and columns
         size_t num_row = logtype_table.get_num_rows();

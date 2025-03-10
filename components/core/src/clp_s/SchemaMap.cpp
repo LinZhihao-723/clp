@@ -19,9 +19,10 @@ size_t SchemaMap::store(std::string const& archives_dir, int compression_level) 
     ZstdCompressor schema_map_compressor;
 
     // TODO: rename schema_ids -> schema_map, and use int32_t for schema size
-    schema_map_writer
-            .open(archives_dir + constants::cArchiveSchemaMapFile,
-                  FileWriter::OpenMode::CreateForWriting);
+    schema_map_writer.open(
+            archives_dir + constants::cArchiveSchemaMapFile,
+            FileWriter::OpenMode::CreateForWriting
+    );
     schema_map_compressor.open(schema_map_writer, compression_level);
     schema_map_compressor.write_numeric_value(m_schema_map.size());
     for (auto const& schema_mapping : m_schema_map) {

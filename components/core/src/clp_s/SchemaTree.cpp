@@ -54,9 +54,10 @@ size_t SchemaTree::store(std::string const& archives_dir, int compression_level)
     FileWriter schema_tree_writer;
     ZstdCompressor schema_tree_compressor;
 
-    schema_tree_writer
-            .open(archives_dir + constants::cArchiveSchemaTreeFile,
-                  FileWriter::OpenMode::CreateForWriting);
+    schema_tree_writer.open(
+            archives_dir + constants::cArchiveSchemaTreeFile,
+            FileWriter::OpenMode::CreateForWriting
+    );
     schema_tree_compressor.open(schema_tree_writer, compression_level);
 
     schema_tree_compressor.write_numeric_value(m_nodes.size());
