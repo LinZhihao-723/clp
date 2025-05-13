@@ -757,8 +757,8 @@ TEST_CASE("query_handler_evaluation_kv_pair_log_event", "[ffi][ir_stream][search
     }
 
     SECTION("Matchable node-ID-value pairs on both user-generated and auto-generated namespaces") {
-        std::vector<std::string> xor_matchable_expressions;
-        constexpr std::string_view cXorExpression{"(({} AND NOT @{}) OR (NOT {} AND @{}))"};
+        std::vector<std::string> matchable_expressions;
+        constexpr std::string_view cXorExpression{"(NOT {} OR NOT @{})"};
 
         for (auto const& matchable_expression : matchable_kql_expressions) {
             if (matchable_expression.starts_with("*:")) {
@@ -766,11 +766,9 @@ TEST_CASE("query_handler_evaluation_kv_pair_log_event", "[ffi][ir_stream][search
                 // kv-pairs
                 continue;
             }
-            xor_matchable_expressions.emplace_back(
+            matchable_expressions.emplace_back(
                     fmt::format(
                             cXorExpression,
-                            matchable_expression,
-                            matchable_expression,
                             matchable_expression,
                             matchable_expression
                     )
@@ -780,7 +778,7 @@ TEST_CASE("query_handler_evaluation_kv_pair_log_event", "[ffi][ir_stream][search
         // Combine all XOR expressions into a single KQL query string joined by "OR".
         // Each XOR expression matches either the default namespace or the auto-generated namespace
         // of the same column, but not both.
-        auto const kql_query_str{fmt::format("{}", fmt::join(xor_matchable_expressions, " OR "))};
+        auto const kql_query_str{fmt::format("{}", fmt::join(matchable_expressions, " AND "))};
         CAPTURE(kql_query_str);
 
         auto query_handler_impl{create_query_handler(kql_query_str)};
@@ -848,7 +846,7 @@ TEST_CASE("query_handler_evaluation_kv_pair_log_event", "[ffi][ir_stream][search
                             query_handler_impl
                     );
                     CAPTURE(evaluation_result);
-                    REQUIRE((AstEvaluationResult::False == evaluation_result));
+                    REQUIRE((AstEvaluationResult::True == evaluation_result));
                 }
             }
         }
