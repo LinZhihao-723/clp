@@ -451,8 +451,8 @@ def main(argv):
             except KeyboardInterrupt:
                 logger.info("Gracefully shutting down")
                 return -1
-            except Exception:
-                logger.exception(f"Error in scheduling.")
+            except Exception as e:
+                logger.exception(f"Error in scheduling: {e}")
                 return -1
 
 
