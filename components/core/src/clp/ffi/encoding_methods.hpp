@@ -26,6 +26,8 @@ public:
     // Methods
     [[nodiscard]] char const* what() const noexcept override { return m_message.c_str(); }
 
+    // Hi...
+
 private:
     std::string m_message;
 };
