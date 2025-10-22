@@ -27,6 +27,7 @@ public:
     [[nodiscard]] char const* what() const noexcept override { return m_message.c_str(); }
 
     // Sth random
+    // Sth more random
 
 private:
     std::string m_message;
