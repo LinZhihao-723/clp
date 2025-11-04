@@ -242,71 +242,71 @@ auto validate_node_id_value_pairs(
         SchemaTree const& schema_tree,
         KeyValuePairLogEvent::NodeIdValuePairs const& node_id_value_pairs
 ) -> std::errc {
-    try {
-        std::unordered_map<SchemaTree::Node::id_t, std::unordered_set<std::string_view>>
-                parent_node_id_to_key_names;
-        std::vector<bool> key_duplication_checked_node_id_bitmap(schema_tree.get_size(), false);
-        for (auto const& [node_id, value] : node_id_value_pairs) {
-            auto const& node{schema_tree.get_node(node_id)};
-            if (node.is_root()) {
-                return std::errc::operation_not_permitted;
-            }
-
-            auto const node_type{node.get_type()};
-            if (false == value.has_value()) {
-                // Value is an empty object (`{}`, which is not the same as `null`)
-                if (SchemaTree::Node::Type::Obj != node_type) {
-                    return std::errc::protocol_error;
-                }
-            } else if (false == node_type_matches_value_type(node_type, value.value())) {
-                return std::errc::protocol_error;
-            }
-
-            if (SchemaTree::Node::Type::Obj == node_type
-                && false == is_leaf_node(schema_tree, node_id, node_id_value_pairs))
-            {
-                // The node's value is `null` or `{}` but its descendants appear in
-                // `node_id_value_pairs`.
-                return std::errc::operation_not_permitted;
-            }
-
-            if (false
-                == check_key_uniqueness_among_sibling_nodes(node, parent_node_id_to_key_names))
-            {
-                return std::errc::protocol_not_supported;
-            }
-
-            // Iteratively check if there's any key duplication in the node's ancestors until:
-            // 1. The ancestor has already been checked. We only need to check an ancestor node
-            //    once since if there are key duplications among its siblings, it would've been
-            //    caught when the sibling was first checked (the order in which siblings get checked
-            //    doesn't affect the results).
-            // 2. We reach the root node.
-            auto next_ancestor_node_id_to_check{node.get_parent_id_unsafe()};
-            while (false == key_duplication_checked_node_id_bitmap[next_ancestor_node_id_to_check])
-            {
-                auto const& node_to_check{schema_tree.get_node(next_ancestor_node_id_to_check)};
-                if (node_to_check.is_root()) {
-                    key_duplication_checked_node_id_bitmap[node_to_check.get_id()] = true;
-                    break;
-                }
-
-                if (false
-                    == check_key_uniqueness_among_sibling_nodes(
-                            node_to_check,
-                            parent_node_id_to_key_names
-                    ))
-                {
-                    return std::errc::protocol_not_supported;
-                }
-
-                key_duplication_checked_node_id_bitmap[next_ancestor_node_id_to_check] = true;
-                next_ancestor_node_id_to_check = node_to_check.get_parent_id_unsafe();
-            }
-        }
-    } catch (SchemaTree::OperationFailed const& ex) {
-        return std::errc::operation_not_permitted;
-    }
+//    try {
+//        std::unordered_map<SchemaTree::Node::id_t, std::unordered_set<std::string_view>>
+//                parent_node_id_to_key_names;
+//        std::vector<bool> key_duplication_checked_node_id_bitmap(schema_tree.get_size(), false);
+//        for (auto const& [node_id, value] : node_id_value_pairs) {
+//            auto const& node{schema_tree.get_node(node_id)};
+//            if (node.is_root()) {
+//                return std::errc::operation_not_permitted;
+//            }
+//
+//            auto const node_type{node.get_type()};
+//            if (false == value.has_value()) {
+//                // Value is an empty object (`{}`, which is not the same as `null`)
+//                if (SchemaTree::Node::Type::Obj != node_type) {
+//                    return std::errc::protocol_error;
+//                }
+//            } else if (false == node_type_matches_value_type(node_type, value.value())) {
+//                return std::errc::protocol_error;
+//            }
+//
+//            if (SchemaTree::Node::Type::Obj == node_type
+//                && false == is_leaf_node(schema_tree, node_id, node_id_value_pairs))
+//            {
+//                // The node's value is `null` or `{}` but its descendants appear in
+//                // `node_id_value_pairs`.
+//                return std::errc::operation_not_permitted;
+//            }
+//
+//            if (false
+//                == check_key_uniqueness_among_sibling_nodes(node, parent_node_id_to_key_names))
+//            {
+//                return std::errc::protocol_not_supported;
+//            }
+//
+//            // Iteratively check if there's any key duplication in the node's ancestors until:
+//            // 1. The ancestor has already been checked. We only need to check an ancestor node
+//            //    once since if there are key duplications among its siblings, it would've been
+//            //    caught when the sibling was first checked (the order in which siblings get checked
+//            //    doesn't affect the results).
+//            // 2. We reach the root node.
+//            auto next_ancestor_node_id_to_check{node.get_parent_id_unsafe()};
+//            while (false == key_duplication_checked_node_id_bitmap[next_ancestor_node_id_to_check])
+//            {
+//                auto const& node_to_check{schema_tree.get_node(next_ancestor_node_id_to_check)};
+//                if (node_to_check.is_root()) {
+//                    key_duplication_checked_node_id_bitmap[node_to_check.get_id()] = true;
+//                    break;
+//                }
+//
+//                if (false
+//                    == check_key_uniqueness_among_sibling_nodes(
+//                            node_to_check,
+//                            parent_node_id_to_key_names
+//                    ))
+//                {
+//                    return std::errc::protocol_not_supported;
+//                }
+//
+//                key_duplication_checked_node_id_bitmap[next_ancestor_node_id_to_check] = true;
+//                next_ancestor_node_id_to_check = node_to_check.get_parent_id_unsafe();
+//            }
+//        }
+//    } catch (SchemaTree::OperationFailed const& ex) {
+//        return std::errc::operation_not_permitted;
+//    }
     return std::errc{};
 }
 

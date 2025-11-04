@@ -157,36 +157,36 @@ auto IrUnitHandler::handle_log_event(
         clp::ffi::KeyValuePairLogEvent log_event,
         [[maybe_unused]] size_t log_event_idx
 ) -> IRErrorCode {
-    auto const serialize_result{log_event.serialize_to_json()};
-    if (serialize_result.has_error()) {
-        SPDLOG_ERROR(
-                "kv-ir search: Failed to serialize kv-pair log event to JSON objects."
-                " error_category={}, error={}",
-                serialize_result.error().category().name(),
-                serialize_result.error().message()
-        );
-        return IRErrorCode::IRErrorCode_Decode_Error;
-    }
-    auto const& [auto_gen_kv_pairs, user_gen_kv_pairs] = serialize_result.value();
-
-    try {
-        constexpr std::string_view cAutoGenKey{"\"auto_generated_kv_pairs\""};
-        constexpr std::string_view cUserGenKey{"\"user_generated_kv_pairs\""};
-        std::cout << fmt::format(
-                "{{{}:{},{}:{}}}\n",
-                cAutoGenKey,
-                auto_gen_kv_pairs.dump(),
-                cUserGenKey,
-                user_gen_kv_pairs.dump()
-        );
-    } catch (nlohmann::json::exception const& ex) {
-        SPDLOG_ERROR(
-                "kv-ir search: Failed to serialize kv-pair log event into JSON strings."
-                " ErrorMessage={}",
-                ex.what()
-        );
-        return IRErrorCode::IRErrorCode_Corrupted_IR;
-    }
+//    auto const serialize_result{log_event.serialize_to_json()};
+//    if (serialize_result.has_error()) {
+//        SPDLOG_ERROR(
+//                "kv-ir search: Failed to serialize kv-pair log event to JSON objects."
+//                " error_category={}, error={}",
+//                serialize_result.error().category().name(),
+//                serialize_result.error().message()
+//        );
+//        return IRErrorCode::IRErrorCode_Decode_Error;
+//    }
+//    auto const& [auto_gen_kv_pairs, user_gen_kv_pairs] = serialize_result.value();
+//
+//    try {
+//        constexpr std::string_view cAutoGenKey{"\"auto_generated_kv_pairs\""};
+//        constexpr std::string_view cUserGenKey{"\"user_generated_kv_pairs\""};
+//        std::cout << fmt::format(
+//                "{{{}:{},{}:{}}}\n",
+//                cAutoGenKey,
+//                auto_gen_kv_pairs.dump(),
+//                cUserGenKey,
+//                user_gen_kv_pairs.dump()
+//        );
+//    } catch (nlohmann::json::exception const& ex) {
+//        SPDLOG_ERROR(
+//                "kv-ir search: Failed to serialize kv-pair log event into JSON strings."
+//                " ErrorMessage={}",
+//                ex.what()
+//        );
+//        return IRErrorCode::IRErrorCode_Corrupted_IR;
+//    }
 
     return IRErrorCode::IRErrorCode_Success;
 }
@@ -218,10 +218,13 @@ auto deserialize_and_search_kv_ir_stream(
     )};
 
     auto deserializer_result{
-            make_deserializer(stream_reader, std::move(ir_unit_handler), std::move(query_handler))
+            make_deserializer(stream_reader, std::move(ir_unit_handler))
     };
 
     if (deserializer_result.has_error()) {
+        SPDLOG_WARN("failed to open kv-ir stream for deserialization: ({}) - {}",
+               deserializer_result.error().value(),
+               deserializer_result.error().message());
         return KvIrSearchError{KvIrSearchErrorEnum::DeserializerCreationFailure};
     }
 

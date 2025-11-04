@@ -425,15 +425,16 @@ auto deserialize_value_and_insert_to_node_id_value_pairs(
             node_id_value_pairs.emplace(node_id, Value{std::move(value_str)});
             break;
         }
-        case cProtocol::Payload::ValueEightByteEncodingClpStr:
+        case cProtocol::Payload::ValueEightByteEncodingClpStr: {
             if (auto const err{deserialize_encoded_text_ast_and_insert_to_node_id_value_pairs<
-                        ir::eight_byte_encoded_variable_t
-                >(reader, node_id, node_id_value_pairs)};
+                  ir::eight_byte_encoded_variable_t
+              >(reader, node_id, node_id_value_pairs)};
                 IRErrorCode::IRErrorCode_Success != err)
             {
-                return err;
+              return err;
             }
             break;
+        }
         case cProtocol::Payload::ValueFourByteEncodingClpStr:
             if (auto const err{deserialize_encoded_text_ast_and_insert_to_node_id_value_pairs<
                         ir::four_byte_encoded_variable_t
@@ -470,10 +471,11 @@ requires(
         return err;
     }
 
-    std::string logtype;
+    std::string buffer;
+    std::vector<size_t> positions;
     std::vector<encoded_variable_t> encoded_vars;
-    std::vector<std::string> dict_vars;
-    if (auto const err{deserialize_encoded_text_ast(reader, tag, logtype, encoded_vars, dict_vars)};
+
+    if (auto const err{deserialize_encoded_text_ast_new(reader, tag, buffer, positions, encoded_vars)};
         IRErrorCode::IRErrorCode_Success != err)
     {
         return err;
@@ -481,7 +483,7 @@ requires(
 
     node_id_value_pairs.emplace(
             node_id,
-            Value{ir::EncodedTextAst<encoded_variable_t>{logtype, dict_vars, encoded_vars}}
+            Value{ir::EncodedTextAstNew<encoded_variable_t>{std::move(buffer), std::move(positions), std::move(encoded_vars)}}
     );
     return IRErrorCode::IRErrorCode_Success;
 }

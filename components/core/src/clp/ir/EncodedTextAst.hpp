@@ -55,6 +55,47 @@ private:
 
 using EightByteEncodedTextAst = EncodedTextAst<eight_byte_encoded_variable_t>;
 using FourByteEncodedTextAst = EncodedTextAst<four_byte_encoded_variable_t>;
+
+/**
+ * A parsed and encoded unstructured text string.
+ * @tparam encoded_variable_t The type of encoded variables in the string.
+ */
+template <typename encoded_variable_t>
+class EncodedTextAstNew {
+public:
+    // Constructor
+    explicit EncodedTextAstNew(
+            std::string buffer,
+            std::vector<size_t> positions,
+            std::vector<encoded_variable_t> encoded_vars
+    )
+            : m_buffer{std::move(buffer)},
+              m_positions{std::move(positions)},
+              m_encoded_vars{std::move(encoded_vars)} {}
+
+    // Methods
+    auto operator==(EncodedTextAstNew const&) const -> bool = default;
+
+    [[nodiscard]] auto get_encoded_vars() const -> std::vector<encoded_variable_t> const& {
+        return m_encoded_vars;
+    }
+
+    /**
+     * Decodes and un-parses the EncodedTextAst into its string form.
+     * @return The string corresponding to the EncodedTextAst on success.
+     * @return std::nullopt if decoding fails.
+     */
+    [[nodiscard]] auto decode_and_unparse() const -> std::optional<std::string>;
+
+private:
+    // Variables
+    std::string m_buffer;
+    std::vector<size_t> m_positions;
+    std::vector<encoded_variable_t> m_encoded_vars;
+};
+
+using EightByteEncodedTextAstNew = EncodedTextAstNew<eight_byte_encoded_variable_t>;
+using FourByteEncodedTextAstNew = EncodedTextAstNew<four_byte_encoded_variable_t>;
 }  // namespace clp::ir
 
 #endif  // CLP_IR_ENCODEDTEXTAST_HPP

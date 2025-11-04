@@ -3,7 +3,7 @@
 
 #include <memory>
 #include <optional>
-#include <unordered_map>
+#include <absl/container/flat_hash_map.h>
 #include <utility>
 #include <vector>
 
@@ -28,7 +28,7 @@ namespace clp::ffi {
 class KeyValuePairLogEvent {
 public:
     // Types
-    using NodeIdValuePairs = std::unordered_map<SchemaTree::Node::id_t, std::optional<Value>>;
+    using NodeIdValuePairs = absl::flat_hash_map<SchemaTree::Node::id_t, std::optional<Value>>;
 
     // Factory functions
     /**

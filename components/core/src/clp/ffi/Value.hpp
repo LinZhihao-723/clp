@@ -31,7 +31,10 @@ using PrimitiveValueTypes = std::
               value_bool_t,
               std::string,
               clp::ir::EightByteEncodedTextAst,
-              clp::ir::FourByteEncodedTextAst>;
+              clp::ir::FourByteEncodedTextAst,
+              clp::ir::EightByteEncodedTextAstNew,
+              clp::ir::FourByteEncodedTextAstNew
+              >;
 
 /**
  * Variant for all primitive value types.

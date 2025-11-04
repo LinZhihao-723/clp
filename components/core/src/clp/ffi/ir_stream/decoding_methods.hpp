@@ -111,6 +111,15 @@ auto deserialize_encoded_text_ast(
         std::vector<std::string>& dict_vars
 ) -> IRErrorCode;
 
+template <typename encoded_variable_t>
+auto deserialize_encoded_text_ast_new(
+        ReaderInterface& reader,
+        encoded_tag_t encoded_tag,
+        std::string& buffer,
+        std::vector<size_t>& positions,
+        std::vector<encoded_variable_t>& encoded_vars
+) -> IRErrorCode;
+
 /**
  * Decodes the IR message calls the given methods to handle each component of the message
  * @tparam unescape_logtype Whether to remove the escape characters from the logtype before calling

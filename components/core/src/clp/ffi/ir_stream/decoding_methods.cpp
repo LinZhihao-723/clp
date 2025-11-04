@@ -158,7 +158,9 @@ deserialize_logtype(ReaderInterface& reader, encoded_tag_t encoded_tag, string& 
         return IRErrorCode_Corrupted_IR;
     }
 
-    if (ErrorCode_Success != reader.try_read_string(logtype_length, logtype)) {
+    auto const start_pos = logtype.size();
+    logtype.resize(start_pos + logtype_length);
+    if (ErrorCode_Success != reader.try_read_exact_length(logtype.data() + start_pos, logtype_length)) {
         return IRErrorCode_Incomplete_IR;
     }
     return IRErrorCode_Success;
@@ -191,7 +193,9 @@ deserialize_dict_var(ReaderInterface& reader, encoded_tag_t encoded_tag, string&
     }
 
     // Read the dictionary variable
-    if (ErrorCode_Success != reader.try_read_string(var_length, dict_var)) {
+    auto const start_pos = dict_var.size();
+    dict_var.resize(start_pos + var_length);
+    if (ErrorCode_Success != reader.try_read_exact_length(dict_var.data() + start_pos, var_length)) {
         return IRErrorCode_Incomplete_IR;
     }
 
@@ -370,7 +374,8 @@ auto deserialize_encoded_text_ast(
         std::vector<std::string>& dict_vars
 ) -> IRErrorCode {
     // Handle variables
-    string var_str;
+    static string var_str;
+    var_str.clear();
     bool is_encoded_var{false};
     while (is_variable_tag<encoded_variable_t>(encoded_tag, is_encoded_var)) {
         if (is_encoded_var) {
@@ -392,8 +397,10 @@ auto deserialize_encoded_text_ast(
         }
     }
 
+    static std::string logtype_buffer;
+    logtype_buffer.clear();
     // Handle logtype
-    if (auto error_code = deserialize_logtype(reader, encoded_tag, logtype);
+    if (auto error_code = deserialize_logtype(reader, encoded_tag, logtype_buffer);
         IRErrorCode_Success != error_code)
     {
         return error_code;
@@ -582,5 +589,65 @@ template auto deserialize_encoded_text_ast<eight_byte_encoded_variable_t>(
         std::string& logtype,
         std::vector<eight_byte_encoded_variable_t>& encoded_vars,
         std::vector<std::string>& dict_vars
+) -> IRErrorCode;
+
+
+template <typename encoded_variable_t>
+auto deserialize_encoded_text_ast_new(
+        ReaderInterface& reader,
+        encoded_tag_t encoded_tag,
+        std::string& buffer,
+        std::vector<size_t>& positions,
+        std::vector<encoded_variable_t>& encoded_vars
+) -> IRErrorCode {
+    // Handle variables
+    positions.emplace_back(0);
+    bool is_encoded_var{false};
+    while (is_variable_tag<encoded_variable_t>(encoded_tag, is_encoded_var)) {
+        if (is_encoded_var) {
+            encoded_variable_t encoded_variable;
+            if (false == deserialize_int(reader, encoded_variable)) {
+                return IRErrorCode_Incomplete_IR;
+            }
+            encoded_vars.push_back(encoded_variable);
+        } else {
+            if (auto error_code = deserialize_dict_var(reader, encoded_tag, buffer);
+                    IRErrorCode_Success != error_code)
+            {
+                return error_code;
+            }
+            positions.emplace_back(buffer.size());
+        }
+        if (ErrorCode_Success != reader.try_read_numeric_value(encoded_tag)) {
+            return IRErrorCode_Incomplete_IR;
+        }
+    }
+
+    static std::string logtype_buffer;
+    logtype_buffer.clear();
+    // Handle logtype
+    if (auto error_code = deserialize_logtype(reader, encoded_tag, logtype_buffer);
+            IRErrorCode_Success != error_code)
+    {
+        return error_code;
+    }
+
+    return IRErrorCode_Success;
+}
+
+template auto deserialize_encoded_text_ast_new<four_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        encoded_tag_t encoded_tag,
+        std::string& buffer,
+        std::vector<size_t>& positions,
+        std::vector<four_byte_encoded_variable_t>& encoded_vars
+) -> IRErrorCode;
+
+template auto deserialize_encoded_text_ast_new<eight_byte_encoded_variable_t>(
+        ReaderInterface& reader,
+        encoded_tag_t encoded_tag,
+        std::string& buffer,
+        std::vector<size_t>& positions,
+        std::vector<eight_byte_encoded_variable_t>& encoded_vars
 ) -> IRErrorCode;
 }  // namespace clp::ffi::ir_stream

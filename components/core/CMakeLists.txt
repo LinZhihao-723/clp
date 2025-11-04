@@ -175,6 +175,23 @@ if(CLP_NEED_CATCH2)
     message(STATUS "Found Catch2 ${Catch2_VERSION}")
 endif()
 
+include(FetchContent)
+
+FetchContent_Declare(
+  roaring
+  GIT_REPOSITORY https://github.com/RoaringBitmap/CRoaring.git
+  GIT_TAG v2.0.4
+  GIT_SHALLOW TRUE)
+
+set(ENABLE_ROARING_TESTS OFF CACHE INTERNAL "")
+
+set(ROARING_BUILD_STATIC ON CACHE INTERNAL "")
+FetchContent_MakeAvailable(roaring)
+
+FetchContent_GetProperties(roaring)
+SET(CPP_ROARING_HEADERS ${roaring_SOURCE_DIR}/cpp/roaring64map.hh  ${roaring_SOURCE_DIR}/cpp/roaring.hh)
+file(COPY  ${CPP_ROARING_HEADERS} DESTINATION ${roaring_SOURCE_DIR}/include/roaring)
+
 if(CLP_NEED_DATE)
     find_package(date REQUIRED)
     if (date_FOUND)
@@ -751,6 +768,7 @@ if(CLP_BUILD_TESTING)
             clp_s::search::kql
             clp_s::search::sql
             clp_s::timestamp_pattern
+            roaring
             date::date
             fmt::fmt
             log_surgeon::log_surgeon

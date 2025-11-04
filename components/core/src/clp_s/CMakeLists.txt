@@ -124,7 +124,9 @@ if(CLP_BUILD_CLP_S_CLP_DEPENDENCIES)
         target_link_libraries(
                 clp_s_clp_dependencies
                 PUBLIC
+                absl::flat_hash_map
                 clp::string_utils
+                roaring
                 log_surgeon::log_surgeon
                 ystdlib::containers
                 ${zstd_TARGET}
