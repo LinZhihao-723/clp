@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use aws_sdk_sqs::{Client, operation::receive_message::ReceiveMessageOutput};
 use clp_rust_utils::{
@@ -17,8 +19,8 @@ pub struct SqsListenerConfig {
     pub queue_url: String,
     pub base: S3IngestionBaseConfig,
     pub max_num_messages_to_fetch: i32,
-    pub init_polling_backoff_sec: i32,
-    pub max_polling_backoff_sec: i32,
+    pub init_polling_backoff_sec: u32,
+    pub max_polling_backoff_sec: u32,
 }
 
 /// Represents a SQS listener task that listens to SQS messages and extracts S3 object metadata.
@@ -63,7 +65,7 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
                     .receive_message()
                     .queue_url(self.config.queue_url.as_str())
                     .max_number_of_messages(self.config.max_num_messages_to_fetch)
-                    .wait_time_seconds(polling_backoff_sec).send() => {
+                    .wait_time_seconds(1).send() => {
                     polling_backoff_sec = if self.process_sqs_response(result?).await? {
                         self.config.init_polling_backoff_sec
                     } else { std::cmp::min(
@@ -71,6 +73,16 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
                         self.config.max_polling_backoff_sec
                     ) };
                 }
+            }
+
+            select! {
+                // Cancellation requested.
+                () = cancel_token.cancelled() => {
+                    return Ok(());
+                }
+
+                // Sleep
+                () = tokio::time::sleep(Duration::from_secs(u64::from(polling_backoff_sec))) => {}
             }
         }
     }

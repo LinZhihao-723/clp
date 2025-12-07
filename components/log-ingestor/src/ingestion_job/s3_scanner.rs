@@ -62,8 +62,17 @@ impl<S3ClientManager: AwsClientManagerType<Client>> Task<S3ClientManager> {
                         // simplicity.
                         continue;
                     }
-                    self.sleep().await;
                 }
+            }
+
+            select! {
+                // Cancellation requested.
+                () = cancel_token.cancelled() => {
+                    return Ok(());
+                }
+
+                // Sleep
+                () = self.sleep() => {}
             }
         }
     }
