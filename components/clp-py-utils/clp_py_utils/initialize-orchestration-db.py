@@ -109,6 +109,19 @@ def main(argv):
 
             scheduling_db_cursor.execute(
                 f"""
+                CREATE TABLE IF NOT EXISTS `log_ingestor_benchmark` (
+                    `id` INT NOT NULL AUTO_INCREMENT,
+                    `bucket` VARCHAR(255) NOT NULL,
+                    `key` VARCHAR(4095) NOT NULL,
+                    `dataset` VARCHAR(255) NOT NULL,
+                    `ingestion_job_id` BINARY(16) NOT NULL,
+                    PRIMARY KEY (`id`) USING BTREE
+                ) ROW_FORMAT=DYNAMIC
+                """
+            )
+
+            scheduling_db_cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS `{QUERY_JOBS_TABLE_NAME}` (
                     `id` INT NOT NULL AUTO_INCREMENT,
                     `type` INT NOT NULL,
