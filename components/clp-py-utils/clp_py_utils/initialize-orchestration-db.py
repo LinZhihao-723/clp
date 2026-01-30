@@ -113,8 +113,8 @@ def main(argv):
                     `id` INT NOT NULL AUTO_INCREMENT,
                     `bucket` VARCHAR(255) NOT NULL,
                     `key` VARCHAR(4095) NOT NULL,
-                    `dataset` VARCHAR(255) NOT NULL,
-                    `ingestion_job_id` BINARY(16) NOT NULL,
+                    `size` BIGINT NOT NULL,
+                    `ingestion_job_id` VARBINARY(16) NOT NULL,
                     PRIMARY KEY (`id`) USING BTREE
                 ) ROW_FORMAT=DYNAMIC
                 """

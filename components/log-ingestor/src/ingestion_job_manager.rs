@@ -159,6 +159,7 @@ impl IngestionJobManagerState {
                 sqs_client_manager,
                 config,
                 sender,
+                Some(self.inner.mysql_pool.clone()),
             );
             IngestionJob::SqsListener(listener)
         })

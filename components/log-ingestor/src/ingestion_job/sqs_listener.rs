@@ -17,9 +17,11 @@ use crate::aws_client_manager::AwsClientManagerType;
 ///
 /// * [`SqsClientManager`]: The type of the AWS SQS client manager.
 struct Task<SqsClientManager: AwsClientManagerType<Client>> {
+    id: Uuid,
     sqs_client_manager: SqsClientManager,
     config: SqsListenerConfig,
     sender: mpsc::Sender<ObjectMetadata>,
+    db_pool: Option<sqlx::MySqlPool>,
 }
 
 impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
@@ -98,16 +100,38 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
                 }
             };
 
+            let mut object_metadata_buffer = Vec::new();
+
             for record in event.records {
                 if let Some(object_metadata) = self.extract_object_metadata(record) {
-                    tracing::info!(
-                        object = ? object_metadata,
-                        "Received new object metadata from SQS."
-                    );
-                    self.sender.send(object_metadata).await?;
+                    object_metadata_buffer.push(object_metadata);
                     ingested = true;
                 }
             }
+
+            if let Some(db_pool) = self.db_pool.as_ref() {
+                let mut tx: sqlx::Transaction<sqlx::MySql> = db_pool.begin().await?;
+                for object_metadata in object_metadata_buffer.iter() {
+                    sqlx::query(
+                        "INSERT INTO log_ingestor_benchmark \
+                        (bucket, `key`, size, ingestion_job_id) \
+                        VALUES (?, ?, ?, ?)"
+                    )
+                        .bind(object_metadata.bucket.as_str())
+                        .bind(object_metadata.key.as_str())
+                        .bind(object_metadata.size as i64)
+                        .bind(self.id.as_bytes().as_slice())
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                tx.commit().await?;
+            }
+
+            for object_metadata in object_metadata_buffer.into_iter() {
+                tracing::info!(bucket = %object_metadata.bucket, key = %object_metadata.key, size = %object_metadata.size, "Ingested object metadata");
+                self.sender.send(object_metadata).await?;
+            }
+
             if let Some(receipt_handle) = msg.receipt_handle() {
                 self.sqs_client_manager
                     .get()
@@ -180,11 +204,14 @@ impl SqsListener {
         sqs_client_manager: SqsClientManager,
         config: SqsListenerConfig,
         sender: mpsc::Sender<ObjectMetadata>,
+        db_pool: Option<sqlx::MySqlPool>,
     ) -> Self {
         let task = Task {
+            id: id.clone(),
             sqs_client_manager,
             config,
             sender,
+            db_pool: None,
         };
         let cancel_token = CancellationToken::new();
         let child_cancel_token = cancel_token.clone();

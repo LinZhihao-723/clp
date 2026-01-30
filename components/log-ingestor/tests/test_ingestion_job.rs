@@ -191,6 +191,7 @@ async fn test_sqs_listener() -> Result<()> {
         SqsClientWrapper::from(sqs_client),
         sqs_listener_config,
         sender,
+        None,
     );
 
     let s3_client = clp_rust_utils::s3::create_new_client(
