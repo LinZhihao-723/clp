@@ -115,6 +115,7 @@ def main(argv):
                     `key` VARCHAR(4095) NOT NULL,
                     `size` BIGINT NOT NULL,
                     `ingestion_job_id` VARBINARY(16) NOT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (`id`) USING BTREE
                 ) ROW_FORMAT=DYNAMIC
                 """

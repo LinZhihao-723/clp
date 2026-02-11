@@ -128,7 +128,7 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
             }
 
             for object_metadata in object_metadata_buffer.into_iter() {
-                tracing::info!(bucket = %object_metadata.bucket, key = %object_metadata.key, size = %object_metadata.size, "Ingested object metadata");
+                // tracing::info!(bucket = %object_metadata.bucket, key = %object_metadata.key, size = %object_metadata.size, "Ingested object metadata");
                 self.sender.send(object_metadata).await?;
             }
 
@@ -142,6 +142,10 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
                     .send()
                     .await?;
             }
+        }
+
+        if !ingested {
+            tracing::info!("Nothing received: SQS.");
         }
         Ok(ingested)
     }
@@ -178,11 +182,15 @@ impl<SqsClientManager: AwsClientManagerType<Client>> Task<SqsClientManager> {
     }
 }
 
+struct Handle {
+    task_handle: tokio::task::JoinHandle<Result<()>>,
+    cancel_token: CancellationToken,
+}
+
 /// Represents a SQS listener job that manages the lifecycle of a SQS listener task.
 pub struct SqsListener {
     id: Uuid,
-    cancel_token: CancellationToken,
-    handle: tokio::task::JoinHandle<Result<()>>,
+    handles: Vec<Handle>,
 }
 
 impl SqsListener {
@@ -206,24 +214,30 @@ impl SqsListener {
         sender: mpsc::Sender<ObjectMetadata>,
         db_pool: Option<sqlx::MySqlPool>,
     ) -> Self {
-        let task = Task {
-            id: id.clone(),
-            sqs_client_manager,
-            config,
-            sender,
-            db_pool: None,
-        };
-        let cancel_token = CancellationToken::new();
-        let child_cancel_token = cancel_token.clone();
-        let handle = tokio::spawn(async move {
-            task.run(child_cancel_token).await.inspect_err(|err| {
-                tracing::error!(error = ? err, "SQS listener task execution failed.");
-            })
-        });
+        let mut handles = Vec::new();
+        for i in 0..16 {
+            let task = Task {
+                id: id.clone(),
+                sqs_client_manager: sqs_client_manager.clone(),
+                config: config.clone(),
+                sender: sender.clone(),
+                db_pool: db_pool.clone(),
+            };
+            let cancel_token = CancellationToken::new();
+            let child_cancel_token = cancel_token.clone();
+            let handle = tokio::spawn(async move {
+                task.run(child_cancel_token).await.inspect_err(|err| {
+                    tracing::error!(error = ? err, "SQS listener task execution failed.");
+                })
+            });
+            handles.push(Handle {
+                task_handle: handle,
+                cancel_token,
+            });
+        }
         Self {
             id,
-            cancel_token,
-            handle,
+            handles,
         }
     }
 
@@ -239,8 +253,11 @@ impl SqsListener {
     ///
     /// * Forwards the underlying task's return values on failure ([`Task::run`]).
     pub async fn shutdown_and_join(self) -> Result<()> {
-        self.cancel_token.cancel();
-        self.handle.await?
+        for handle in self.handles {
+            handle.cancel_token.cancel();
+            handle.task_handle.await?;
+        }
+        Ok(())
     }
 
     /// # Returns
