@@ -1,0 +1,10 @@
+{"level":"INFO","service":"auth","id":1,"message":"user login success"}
+{"level":"INFO","service":"auth","id":2,"message":"user logout"}
+{"level":"WARN","service":"auth","id":3,"message":"password retry warning"}
+{"level":"ERROR","service":"auth","id":4,"message":"login failed timeout"}
+{"level":"INFO","service":"payment","id":5,"message":"payment processed"}
+{"level":"WARN","service":"payment","id":6,"message":"payment slow response"}
+{"level":"ERROR","service":"payment","id":7,"message":"payment failed timeout"}
+{"level":"INFO","service":"gateway","id":8,"message":"request routed"}
+{"level":"ERROR","service":"gateway","id":9,"message":"upstream failed"}
+{"level":"INFO","service":"gateway","id":10,"message":"health check ok"}

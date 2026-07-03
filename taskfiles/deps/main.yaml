@@ -193,6 +193,10 @@ tasks:
             - "-DCMAKE_BUILD_TYPE=Release"
             - "-DCMAKE_INSTALL_MESSAGE=LAZY"
 
+            # Build with position-independent code so the static runtime can be linked into the
+            # `clp-s` shared library (`libclp-s.so`).
+            - "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+
             # Set CMP0135 so that extracted files use the current timestamp as their modification
             # timestamp, which ensures the library gets rebuilt if the extracted files change.
             - "-DCMAKE_POLICY_DEFAULT_CMP0135=NEW"
@@ -222,6 +226,9 @@ tasks:
     cmds:
       - task: "yscope-dev-utils:boost:download-and-install"
         vars:
+          BUILD_AND_INSTALL_ARGS:
+            - "cxxflags=-fPIC"
+            - "cflags=-fPIC"
           CMAKE_SETTINGS_DIR: "{{.G_DEPS_CPP_CMAKE_SETTINGS_DIR}}"
           FILE_SHA256: "d6c69e4459eb5d6ec208250291221e7ff4a2affde9af6e49c9303b89c687461f"
           TARGETS:

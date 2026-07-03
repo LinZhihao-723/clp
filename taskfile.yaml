@@ -194,6 +194,9 @@ tasks:
         vars:
           BUILD_DIR: "{{.G_CORE_COMPONENT_BUILD_DIR}}"
           SOURCE_DIR: "{{.G_CORE_COMPONENT_DIR}}"
+          EXTRA_ARGS:
+            - "-DCLP_BUILD_CLP_S_LIBRARY=ON"
+            - "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
 
   core-build:
     internal: true
@@ -204,6 +207,7 @@ tasks:
       - "{{.G_CORE_COMPONENT_BUILD_DIR}}/clp"
       - "{{.G_CORE_COMPONENT_BUILD_DIR}}/clp-s"
       - "{{.G_CORE_COMPONENT_BUILD_DIR}}/indexer"
+      - "{{.G_CORE_COMPONENT_BUILD_DIR}}/libclp-s.so"
       - "{{.G_CORE_COMPONENT_BUILD_DIR}}/log-converter"
       - "{{.G_CORE_COMPONENT_BUILD_DIR}}/reducer-server"
     cmds:
@@ -211,7 +215,15 @@ tasks:
         vars:
           BUILD_DIR: "{{.G_CORE_COMPONENT_BUILD_DIR}}"
           JOBS: "{{.G_CPP_MAX_PARALLELISM_PER_BUILD_TASK}}"
-          TARGETS: ["clg", "clo", "clp", "clp-s", "indexer", "log-converter", "reducer-server"]
+          TARGETS:
+            - "clg"
+            - "clo"
+            - "clp"
+            - "clp-s"
+            - "clp_s_lib"
+            - "indexer"
+            - "log-converter"
+            - "reducer-server"
 
   # NOTE: We rely on cargo for checksumming. It automatically rebuilds when source files change or
   # when a binary is missing.

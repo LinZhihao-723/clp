@@ -51,8 +51,10 @@ tasks:
   install-remote-cmake-lib:
     internal: true
     vars:
+      # Build every CMake-based dependency with position-independent code so its static libraries
+      # can be linked into the `clp-s` shared library (`libclp-s.so`).
       CMAKE_GEN_ARGS:
-        ref: "default (list) .CMAKE_GEN_ARGS"
+        ref: "concat (default (list) .CMAKE_GEN_ARGS) (list \"-DCMAKE_POSITION_INDEPENDENT_CODE=ON\")"
       CMAKE_SOURCE_DIR: >-
         {{default "." .CMAKE_SOURCE_DIR}}
       INSTALL_PREFIX: "{{.G_DEPS_CPP_DIR}}/{{.LIB_NAME}}-install"

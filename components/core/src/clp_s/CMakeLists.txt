@@ -185,10 +185,17 @@ if(CLP_BUILD_CLP_S_CLP_DEPENDENCIES)
                 )
         endif()
         if(CLP_BUILD_CLP_S_ENABLE_LIBARCHIVE)
+                # Executables (e.g. `clp-s`) link libarchive statically, matching the rest of the
+                # project's static-linking convention. The `clp-s` shared library (`libclp-s.so`),
+                # however, links libarchive dynamically because the system's static `libarchive.a`
+                # is not position-independent and therefore can't be linked into a shared object.
+                # Select the variant based on the consuming target's type.
+                find_library(CLP_S_LIBARCHIVE_SHARED_LIBRARY NAMES archive)
+                set(clp_s_libarchive_is_shared_consumer "$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>")
                 target_link_libraries(
                         clp_s_clp_dependencies
                         PUBLIC
-                        LibArchive::LibArchive
+                        "$<IF:${clp_s_libarchive_is_shared_consumer},${CLP_S_LIBARCHIVE_SHARED_LIBRARY},LibArchive::LibArchive>"
                 )
         endif()
 endif()
@@ -490,9 +497,10 @@ set(
         TraceableException.hpp
 )
 
-if(CLP_BUILD_EXECUTABLES)
-        # Runtime dependencies built by clp-s for the executable. Keep in sync with
-        # `CLP_BUILD_CLP_S_*` flags required by `CLP_BUILD_EXECUTABLES` inside options.cmake.
+if(CLP_BUILD_EXECUTABLES OR CLP_BUILD_CLP_S_LIBRARY)
+        # Runtime dependencies shared by the clp-s executable and the clp-s C-API shared library.
+        # Keep in sync with the `CLP_BUILD_CLP_S_*` flags required by `CLP_BUILD_EXECUTABLES` and
+        # `CLP_BUILD_CLP_S_LIBRARY` inside options.cmake.
         add_library(clp_s_binary_runtime INTERFACE)
         target_link_libraries(
                 clp_s_binary_runtime
@@ -508,7 +516,9 @@ if(CLP_BUILD_EXECUTABLES)
                 clp_s::search::kql
                 clp_s::timestamp_parser
         )
+endif()
 
+if(CLP_BUILD_EXECUTABLES)
         add_executable(
                 clp-s
                 clp-s.cpp
@@ -535,6 +545,34 @@ if(CLP_BUILD_EXECUTABLES)
                 clp-s
                 PROPERTIES
                 RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        )
+endif()
+
+if(CLP_BUILD_CLP_S_LIBRARY)
+        add_library(clp_s_lib SHARED capi.cpp)
+        add_library(clp_s::lib ALIAS clp_s_lib)
+        target_compile_definitions(
+                clp_s_lib
+                PRIVATE
+                CLP_BUILD_CLP_S_ENABLE_CURL=$<BOOL:${CLP_BUILD_CLP_S_ENABLE_CURL}>
+        )
+        target_compile_features(clp_s_lib PRIVATE cxx_std_20)
+        target_include_directories(clp_s_lib PUBLIC ../)
+        target_link_libraries(
+                clp_s_lib
+                PRIVATE
+                clp_s_binary_runtime
+                ${MONGOCXX_TARGET}
+                msgpack-cxx
+                spdlog::spdlog
+                ystdlib::error_handling
+        )
+        set_target_properties(
+                clp_s_lib
+                PROPERTIES
+                OUTPUT_NAME "clp-s"
+                RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+                LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
         )
 endif()
 

@@ -78,6 +78,12 @@ option(
 )
 
 option(
+    CLP_BUILD_CLP_S_LIBRARY
+    "Build clp-s as a shared library with a C interface."
+    OFF
+)
+
+option(
     CLP_BUILD_CLP_S_REDUCER_DEPENDENCIES
     "Build clp_s::reducer_dependencies."
     ON
@@ -161,6 +167,42 @@ function(validate_clp_binaries_dependencies)
 endfunction()
 
 function(set_clp_binaries_dependencies)
+    set_clp_need_flags(
+        CLP_NEED_ABSL
+        CLP_NEED_BOOST
+        CLP_NEED_DATE
+        CLP_NEED_FMT
+        CLP_NEED_LIBARCHIVE
+        CLP_NEED_LOG_SURGEON
+        CLP_NEED_MARIADB
+        CLP_NEED_MONGOCXX
+        CLP_NEED_MSGPACKCXX
+        CLP_NEED_NLOHMANN_JSON
+        CLP_NEED_SIMDJSON
+        CLP_NEED_SPDLOG
+        CLP_NEED_SQLITE
+        CLP_NEED_YAMLCPP
+        CLP_NEED_YSTDLIB
+        CLP_NEED_ZSTD
+    )
+endfunction()
+
+function(validate_clp_s_library_dependencies)
+    validate_clp_dependencies_for_target(CLP_BUILD_CLP_S_LIBRARY
+        CLP_BUILD_CLP_S_ARCHIVEREADER
+        CLP_BUILD_CLP_S_ARCHIVEWRITER
+        CLP_BUILD_CLP_S_CLP_DEPENDENCIES
+        CLP_BUILD_CLP_S_IO
+        CLP_BUILD_CLP_S_JSONCONSTRUCTOR
+        CLP_BUILD_CLP_S_REDUCER_DEPENDENCIES
+        CLP_BUILD_CLP_S_SEARCH
+        CLP_BUILD_CLP_S_SEARCH_AST
+        CLP_BUILD_CLP_S_SEARCH_KQL
+        CLP_BUILD_CLP_S_TIMESTAMP_PARSER
+    )
+endfunction()
+
+function(set_clp_s_library_dependencies)
     set_clp_need_flags(
         CLP_NEED_ABSL
         CLP_NEED_BOOST
@@ -522,6 +564,11 @@ function(validate_and_setup_all_clp_dependency_flags)
     if (CLP_BUILD_CLP_S_JSONCONSTRUCTOR)
         validate_clp_s_json_constructor_dependencies()
         set_clp_s_json_constructor_dependencies()
+    endif()
+
+    if (CLP_BUILD_CLP_S_LIBRARY)
+        validate_clp_s_library_dependencies()
+        set_clp_s_library_dependencies()
     endif()
 
     if (CLP_BUILD_CLP_S_REDUCER_DEPENDENCIES)
