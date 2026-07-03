@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use clp_rust_utils::{
@@ -887,6 +887,8 @@ impl ClpIngestionState {
         mut tx: sqlx::Transaction<'_, sqlx::MySql>,
         objects: Vec<ObjectMetadata>,
     ) -> anyhow::Result<()> {
+        let num_entries = objects.len();
+        let started = Instant::now();
         let buffer_entries = self
             .ingest_s3_object_metadata(&mut tx, objects)
             .await
@@ -907,6 +909,7 @@ impl ClpIngestionState {
                     "Failed to commit ingestion."
                 );
             })?;
+        crate::telemetry::record_ingestion_db(started.elapsed(), num_entries as u64);
         self.sender.send(buffer_entries).await?;
         Ok(())
     }
@@ -1086,6 +1089,7 @@ impl ClpCompressionState {
             table = CLP_COMPRESSION_JOB_TABLE_NAME
         );
 
+        let started = Instant::now();
         let object_metadata_ids: &[S3ObjectMetadataId] = match &io_config.input {
             InputConfig::S3ObjectMetadataInputConfig { config } => &config.s3_object_metadata_ids,
             InputConfig::S3InputConfig { .. } => {
@@ -1142,6 +1146,7 @@ impl ClpCompressionState {
         }
 
         tx.commit().await?;
+        crate::telemetry::record_compression_submission(started.elapsed());
         Ok(compression_job_id)
     }
 
@@ -1179,6 +1184,8 @@ impl ClpCompressionState {
 
         let (status, status_msg) = self.wait_for_compression_result(id).await?;
 
+        // Start timing only the completion database write, excluding the polling wait above.
+        let started = Instant::now();
         let ingested_s3_object_metadata_status = match status {
             CompressionJobStatus::Succeeded => IngestedS3ObjectMetadataStatus::Compressed,
             CompressionJobStatus::Failed | CompressionJobStatus::Killed => {
@@ -1225,6 +1232,7 @@ impl ClpCompressionState {
         }
 
         tx.commit().await?;
+        crate::telemetry::record_compression_completion_db(started.elapsed());
         Ok((status, status_msg))
     }
 

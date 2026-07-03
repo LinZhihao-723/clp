@@ -1,0 +1,22 @@
+# BuildKit honors this `<Dockerfile>.dockerignore` (used by `docker compose build`), reading it in
+# preference to any context-root `.dockerignore`. Patterns are evaluated against the build context
+# (the repository root). The repo's `target/` alone is tens of GB, so excluding it here is what keeps
+# the build context small. The Dockerfile also COPYs only the four workspace-member crates plus the
+# root Cargo.toml/Cargo.lock, so anything excluded here is never needed.
+target/
+**/target/
+.git/
+build/
+docs/
+tools/
+tmp/
+test-config/
+components/core/
+components/webui/
+components/clp-py-utils/
+components/clp-package-utils/
+components/job-orchestration/
+components/clp-mcp-server/
+components/package-template/
+**/node_modules/
+**/*.log

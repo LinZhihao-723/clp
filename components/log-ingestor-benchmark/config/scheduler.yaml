@@ -1,0 +1,7 @@
+database:
+  host: clp-db
+  port: 3306
+  name: clp-db
+poll_interval_ms: 100
+max_concurrent_jobs: 16
+simulated_compression_duration_ms: 0

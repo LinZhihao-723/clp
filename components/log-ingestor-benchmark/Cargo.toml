@@ -1,0 +1,30 @@
+[package]
+name = "log-ingestor-benchmark"
+version = "0.12.1-dev"
+edition = "2024"
+
+[lib]
+name = "log_ingestor_benchmark"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mock-ingestor"
+path = "src/bin/mock_ingestor.rs"
+
+[[bin]]
+name = "mock-scheduler"
+path = "src/bin/mock_scheduler.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.56", features = ["derive"] }
+clp-rust-utils = { path = "../clp-rust-utils" }
+log-ingestor = { path = "../log-ingestor" }
+secrecy = "0.10.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "mysql"] }
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio-util = "0.7.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "std"] }

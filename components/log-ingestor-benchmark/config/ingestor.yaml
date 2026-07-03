@@ -1,0 +1,17 @@
+database:
+  host: clp-db
+  port: 3306
+  name: clp-db
+workload:
+  num_jobs: 4
+  tasks_per_job: 8
+  entries_per_minute_per_job: 15000
+  batch_size_min: 1
+  batch_size_max: 10
+  object_size_bytes_mean: 1024
+  run_duration_sec: 0        # 0 = run until SIGTERM
+metrics_report_interval_sec: 10   # 0 = disable periodic reports (final summary still prints)
+buffer:
+  flush_threshold_bytes: 4294967296   # 4 GiB
+  timeout_sec: 60
+  channel_capacity: 16

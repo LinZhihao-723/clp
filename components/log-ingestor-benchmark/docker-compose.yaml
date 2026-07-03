@@ -1,0 +1,55 @@
+# End-to-end benchmark of the CLP log-ingestor database ingestion path. Brings up a MySQL database,
+# the mock compression scheduler, and the mock ingestor. All variables have defaults so
+# `docker compose up` works with zero environment setup.
+services:
+  clp-db:
+    image: mysql:8.4.0
+    environment:
+      MYSQL_DATABASE: clp-db
+      MYSQL_USER: ${CLP_DB_USER:-clp-user}
+      MYSQL_PASSWORD: ${CLP_DB_PASS:-clp-password}
+      MYSQL_ROOT_PASSWORD: ${CLP_DB_ROOT_PASS:-root-password}
+    volumes:
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - clp-db-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u root --password=$$MYSQL_ROOT_PASSWORD
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  mock-scheduler:
+    build:
+      context: ../../
+      dockerfile: components/log-ingestor-benchmark/docker/Dockerfile
+    depends_on:
+      clp-db:
+        condition: service_healthy
+    environment:
+      CLP_DB_USER: ${CLP_DB_USER:-clp-user}
+      CLP_DB_PASS: ${CLP_DB_PASS:-clp-password}
+    command:
+      - mock-scheduler
+      - --config
+      - /app/config/scheduler.yaml
+
+  mock-ingestor:
+    build:
+      context: ../../
+      dockerfile: components/log-ingestor-benchmark/docker/Dockerfile
+    depends_on:
+      clp-db:
+        condition: service_healthy
+    environment:
+      CLP_DB_USER: ${CLP_DB_USER:-clp-user}
+      CLP_DB_PASS: ${CLP_DB_PASS:-clp-password}
+    command:
+      - mock-ingestor
+      - --config
+      - /app/config/ingestor.yaml
+
+volumes:
+  clp-db-data:
