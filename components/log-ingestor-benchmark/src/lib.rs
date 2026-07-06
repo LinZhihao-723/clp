@@ -89,6 +89,12 @@ pub struct WorkloadConfig {
 
     /// The run duration, in seconds. A value of `0` runs until a termination signal is received.
     pub run_duration_sec: u64,
+
+    /// The total number of ingested object-metadata rows at which the ingestor stops gracefully. A
+    /// value of `0` disables the cap, letting the run continue until a termination signal or the
+    /// configured run duration.
+    #[serde(default)]
+    pub stop_at_rows: u64,
 }
 
 /// The full configuration for the mock ingestor binary.

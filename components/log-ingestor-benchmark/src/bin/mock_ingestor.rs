@@ -132,16 +132,30 @@ async fn run_metrics_reporter(interval_sec: u64, token: CancellationToken) {
     }
 }
 
-/// Waits for a termination signal, or for the configured run duration to elapse when it is
-/// non-zero.
-async fn wait_for_shutdown(run_duration_sec: u64) {
-    if run_duration_sec == 0 {
-        wait_for_termination_signal().await;
+/// Resolves once the ingested-row count reaches `stop_at_rows`, polling the database-call metrics on
+/// a short interval. When `stop_at_rows` is zero the cap is disabled and this future never resolves.
+async fn wait_for_row_cap(stop_at_rows: u64) {
+    if stop_at_rows == 0 {
+        std::future::pending::<()>().await;
         return;
     }
+    loop {
+        if snapshot_db_call_metrics().ingestion_entries >= stop_at_rows {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// Waits for a termination signal, for the ingested-row count to reach `stop_at_rows` when it is
+/// non-zero, or for the configured run duration to elapse when it is non-zero.
+async fn wait_for_shutdown(run_duration_sec: u64, stop_at_rows: u64) {
     tokio::select! {
         () = wait_for_termination_signal() => {}
-        () = tokio::time::sleep(Duration::from_secs(run_duration_sec)) => {
+        () = wait_for_row_cap(stop_at_rows) => {
+            tracing::info!(stop_at_rows, "Row cap reached; stopping ingestion.");
+        }
+        () = tokio::time::sleep(Duration::from_secs(run_duration_sec)), if run_duration_sec != 0 => {
             tracing::info!(run_duration_sec, "Configured run duration elapsed.");
         }
     }
@@ -202,7 +216,7 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!(num_jobs = contexts.len(), "All ingestion jobs started.");
 
-    wait_for_shutdown(config.workload.run_duration_sec).await;
+    wait_for_shutdown(config.workload.run_duration_sec, config.workload.stop_at_rows).await;
     tracing::info!("Shutdown requested; stopping ingestion tasks.");
     token.cancel();
     while let Some(joined) = tasks.join_next().await {

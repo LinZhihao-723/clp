@@ -10,6 +10,7 @@ workload:
   batch_size_max: 10
   object_size_bytes_mean: 1024
   run_duration_sec: 0        # 0 = run until SIGTERM
+  stop_at_rows: 0            # 0 = unlimited; stop gracefully once this many object-metadata rows are ingested
 metrics_report_interval_sec: 10   # 0 = disable periodic reports (final summary still prints)
 buffer:
   flush_threshold_bytes: 4294967296   # 4 GiB
