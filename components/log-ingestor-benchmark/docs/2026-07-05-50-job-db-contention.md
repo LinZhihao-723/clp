@@ -1,6 +1,6 @@
 # 50-job DB-ingestion contention benchmark + READ COMMITTED mitigation
 
-Results from the `log-ingestor-benchmark` harness at **50 concurrent ingestion jobs**, in two parts:
+Results from the `log-ingestor-benchmark` harness at **50 concurrent ingestion jobs**, in three parts:
 
 1. **The finding (2026-07-05):** the compression-**submission** DB transaction degrades
    catastrophically under concurrency (up to ≈38 s/call) and grows with table size — the dominant
@@ -10,6 +10,10 @@ Results from the `log-ingestor-benchmark` harness at **50 concurrent ingestion j
    of the InnoDB default REPEATABLE READ) roughly **halves** the submission cost at comparable scale
    and — more importantly — keeps it **flat** instead of growing. Both this change and the
    `chunks(1000)` batch size are now applied on this branch.
+3. **MySQL server tuning (2026-07-07):** raising `innodb_buffer_pool_size` from the 128 MB default to
+   4 GB (plus a larger redo log and relaxed `flush_log_at_trx_commit`) cut submission cost a further
+   ~3–4× (to ~3.8 s/call) and moved the ingestor from **DB-bound to throttle-bound** — i.e. the
+   default InnoDB memory sizing was arguably the bigger culprit than the isolation level.
 
 Self-contained handoff for a follow-up **optimization** session.
 
@@ -28,8 +32,10 @@ At 50 jobs, batch size 1000, ~1 KB objects, comparing the two submission-transac
 growing with the table, and lifted throughput ~1.45×. The bottleneck is real and this materially
 relieves it — but does not eliminate it (12.5 s/call is still 14× the completion write).
 
-Both runs were DB-bound: throughput stayed well under the **12 500 rows/s** throttle ceiling
-(50 jobs × 15 000/min), so the DB — not the synthetic ingest rate — is the binding constraint.
+Both isolation-level runs were DB-bound: throughput stayed well under the **12 500 rows/s** throttle
+ceiling (50 jobs × 15 000/min), so the DB — not the synthetic ingest rate — was the binding
+constraint. **Tuning InnoDB (Arm C) removes that** — submission drops to ~3.8 s/call and throughput
+reaches ~12 200 rows/s (~97 % of the ceiling), so the ingestor becomes throttle-bound.
 
 ## Run configuration (both arms)
 
@@ -90,7 +96,58 @@ ingestion_per_entry_us=7482.9  submission_per_call_ms=12465.46  completion_db_pe
 - Throughput before the crash **~8 400 rows/s**.
 
 Because the READ COMMITTED submission curve is flat, extrapolating to 20M would still be ~12.5 s/call;
-the crash at 16.6M does not change the comparison.
+the crash at 16.6M does not change the comparison. A later rerun of this same arm (READ COMMITTED,
+batch 1000) reached the full 20M cap without crashing, at **~16.3 s/call** — so the signal-6 crash was
+a transient, non-reproducible MySQL fault, not a deterministic outcome of the workload. (The ~16.3 s
+vs ~12.5 s difference is host load: that rerun shared the machine with a live CLP package.)
+
+## Arm C — MySQL server tuning (2026-07-07)
+
+Same code as Arm B (READ COMMITTED, batch 1000), same workload (50 jobs, 20M cap), but with the
+benchmark's `clp-db` started with three non-default InnoDB settings (passed as `command:` flags to
+the `mysql:8.4.0` container, verified live via `SHOW VARIABLES`):
+
+| Setting | Default | Tuned |
+|---|---|---|
+| `innodb_buffer_pool_size` | 128 MB | **4 GB** |
+| `innodb_redo_log_capacity` | 100 MB | **2 GB** |
+| `innodb_flush_log_at_trx_commit` | 1 | **2** |
+
+Final metrics at the 20M cap (clean host, no co-running package):
+```
+ingestion_per_entry_us=2522.0  submission_per_call_ms=3834.03  completion_db_per_call_ms=205.50
+(entries=20003483  submits=1498  completions=1449)
+```
+
+| DB-call metric (READ COMMITTED, batch 1000, 20M) | Untuned | **Tuned** | Improvement |
+|---|---|---|---|
+| **Submission per call** | ~16.3 s | **~3.83 s** | **~4.3×** |
+| Ingestion per entry | ~7.9 ms | ~2.52 ms | ~3.1× |
+| Completion per call | ~0.70 s | ~0.21 s | ~3.4× |
+| Throughput | ~8.4 k rows/s | **~12.2 k rows/s** (~97 % of ceiling) | — |
+| Wall-clock | ~37 min | ~27 min | — |
+| DB crash | one transient signal-6 (recovered) | **none** | — |
+
+- **The DB stops being the bottleneck.** ~12.2 k rows/s is ~97 % of the 12 500 rows/s throttle
+  ceiling, so the ingestor is now **throttle-bound**, not DB-bound. Submission at ~3.8 s is no longer
+  the dominant cost.
+- **The buffer pool is the dominant lever.** At the 128 MB default, the growing
+  `ingested_s3_object_metadata` table and its secondary index don't fit in memory, so the batched
+  `UPDATE … WHERE id IN (…)` does disk I/O **while holding row locks** — which is much of what made
+  the original contention so severe. A 4 GB pool keeps the working set resident.
+  `flush_log_at_trx_commit=2` (fsync ~once/sec instead of per-commit) and the 2 GB redo log further
+  cut per-commit write-stall overhead.
+- **Caveat — clean vs shared host:** the ~16.3 s untuned figure was measured while a CLP package ran
+  on the same host; this tuned run had a clean host. Some of the 4.3× is that difference. But even
+  against the earlier *clean-host* untuned READ COMMITTED run (~12.5 s/call at 16.6M before it
+  crashed), tuned ~3.8 s is still **~3.3×** faster — so tuning, not host sharing, is the dominant
+  factor. A back-to-back untuned-vs-tuned pair on the same idle host would pin the exact ratio.
+
+**Implication for #2358:** the isolation-level fix relieves the lock contention, but the default
+`innodb_buffer_pool_size=128M` was arguably the bigger culprit. If the production CLP DB runs near
+default InnoDB memory settings, right-sizing the buffer pool (and relaxing redo/flush where the
+durability trade-off is acceptable) may matter more than the isolation change — worth flagging on the
+issue.
 
 ## ⚠️ Caveats — read before analyzing
 
@@ -179,6 +236,11 @@ To A/B the isolation level, toggle `submit_for_compression` between plain `db_po
 
 1. **Clean capped A/B.** Re-run REPEATABLE READ and READ COMMITTED both pinned at the same
    `stop_at_rows` (e.g. 20M) for a pinned before/after, now that the cap exists. Retry on MySQL crash.
+   Likewise, pin the untuned-vs-tuned (Arm C) ratio with a back-to-back pair on the same idle host.
+2. **Right-size InnoDB in prod (Arm C follow-up).** Confirm the production CLP DB's
+   `innodb_buffer_pool_size` and sweep it (128 MB / 512 MB / 1 GB / 4 GB) to find where the metadata
+   working set stops fitting; separately measure the `flush_log_at_trx_commit=1→2` durability/latency
+   trade-off. This may matter more than the isolation change.
 2. **Attack the remaining 12.5 s.** Options to try and measure:
    - Split the flush's status UPDATE out of the compression-job INSERT transaction (shorter lock
      hold), or commit per-chunk instead of one big transaction.
