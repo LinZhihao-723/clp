@@ -1,0 +1,12 @@
+[package]
+name = "compression-coordinator"
+version = "0.13.1-dev"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+clp-rust-utils = { path = "../clp-rust-utils" }
+non-empty-string = { version = "0.2.6", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+spider-core = { git = "https://github.com/sitaowang1998/spider.git", branch = "huntsman-dev" }
+thiserror = "2.0.18"
