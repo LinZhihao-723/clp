@@ -7,7 +7,7 @@ use spider_core::types::id::{JobId, ResourceGroupId};
 
 use crate::{
     error::Error,
-    task_io::{ClpSCompressionOption, DbConfig, S3InputSource},
+    task_io::{ClpSCompressionOption, S3InputSource},
 };
 
 /// The terminal outcome of a compression job.
@@ -34,7 +34,6 @@ pub trait S3CompressionJobSubmitter: Send + Sync {
     /// * `resource_group_id` - The Spider resource group to register the job under.
     /// * `clp_s_option` - `clp-s` tuning options shared by every task in the job.
     /// * `dataset` - The job's `CLP_S` dataset; effectively required for `CLP_S` + S3.
-    /// * `db_config` - Metadata-DB connection shared by every task (for the archive indexer).
     /// * `input_sources` - One entry per compression task, already partitioned upstream.
     ///
     /// # Returns
@@ -50,7 +49,6 @@ pub trait S3CompressionJobSubmitter: Send + Sync {
         resource_group_id: ResourceGroupId,
         clp_s_option: ClpSCompressionOption,
         dataset: Option<String>,
-        db_config: DbConfig,
         input_sources: Vec<S3InputSource>,
     ) -> Result<JobId, Error>;
 

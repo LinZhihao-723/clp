@@ -11,7 +11,7 @@ use anyhow::Context;
 use clp_rust_utils::{
     clp_config::{
         AwsAuthentication,
-        package::config::{ArchiveOutputStorage, WorkerConfig},
+        package::config::{ArchiveOutputStorage, SpiderTaskExecutorConfig},
     },
     s3::generate_s3_url,
 };
@@ -21,7 +21,6 @@ use crate::task_io::{
     ArchiveMetadata,
     ClpSCompressionOption,
     CompressionTaskOutput,
-    DbConfig,
     S3InputSource,
 };
 
@@ -40,15 +39,12 @@ use crate::task_io::{
 /// Returns an error if any compression step fails (e.g., running clp-s or uploading to S3).
 pub fn compress(
     ctx: &spider_tdl::TaskContext,
+    config: &SpiderTaskExecutorConfig,
     clp_s_option: &ClpSCompressionOption,
     dataset: Option<String>,
-    db_config: &DbConfig,
     input_source: S3InputSource,
 ) -> anyhow::Result<CompressionTaskOutput> {
-    let worker_config =
-        super::worker_config().map_err(|e| anyhow::anyhow!("failed to load worker config: {e}"))?;
-
-    let list_path = std::path::Path::new(&worker_config.tmp_directory).join(format!(
+    let list_path = std::path::Path::new(&config.tmp_directory).join(format!(
         "compression-{}-{}-{}-log-paths.txt",
         ctx.job_id, ctx.task_id, ctx.task_instance_id,
     ));
@@ -58,7 +54,7 @@ pub fn compress(
     let credential_env = s3_credential_env(&input_source.aws_authentication);
 
     let clp_s_bin = clp_s_binary_path()?;
-    let archive_dir = archive_staging_dir(worker_config, dataset.as_deref())?;
+    let archive_dir = archive_staging_dir(config, dataset.as_deref())?;
 
     let mut archives = Vec::new();
     run_clp_s(
@@ -73,7 +69,7 @@ pub fn compress(
         },
     )?;
 
-    let _ = (db_config, dataset, input_source, &archives);
+    let _ = (dataset, input_source, &archives);
     todo!(
         "steps 3-4: upload archives to S3, index, delete local; then return CompressionTaskOutput \
          {{ dataset, archives }}"
@@ -209,12 +205,12 @@ fn clp_s_binary_path() -> anyhow::Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns an error if `worker_config`'s archive output is not S3-backed, which this flow requires.
+/// Returns an error if `config`'s archive output is not S3-backed, which this flow requires.
 fn archive_staging_dir(
-    worker_config: &WorkerConfig,
+    config: &SpiderTaskExecutorConfig,
     dataset: Option<&str>,
 ) -> anyhow::Result<PathBuf> {
-    let base = match &worker_config.archive_output.storage {
+    let base = match &config.archive_output.storage {
         ArchiveOutputStorage::S3 {
             staging_directory, ..
         } => Path::new(staging_directory),

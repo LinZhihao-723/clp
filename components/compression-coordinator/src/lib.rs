@@ -8,11 +8,5 @@ pub mod task_io;
 
 pub use compression_job_submitter::{CompressionJobCompletion, S3CompressionJobSubmitter};
 pub use error::Error;
-pub use task::worker_config;
-pub use task_io::{
-    ArchiveMetadata,
-    ClpSCompressionOption,
-    CompressionTaskOutput,
-    DbConfig,
-    S3InputSource,
-};
+pub use task::spider_task_executor_config;
+pub use task_io::{ArchiveMetadata, ClpSCompressionOption, CompressionTaskOutput, S3InputSource};

@@ -43,25 +43,30 @@ impl Default for Config {
     }
 }
 
-/// Mirror of `clp_py_utils.clp_config.WorkerConfig`.
+/// Configuration for the Spider task executor.
+///
+/// Derived from `clp_py_utils.clp_config.WorkerConfig` but extended with `database` (which Python
+/// instead threads as a per-task arg), so it is not a faithful mirror.
 ///
 /// # NOTE
 ///
-/// * This type is partially defined: query-only fields are omitted and discarded through
+/// * This type is partially defined: query-only Python fields are omitted and discarded through
 ///   deserialization.
-/// * The default values must be kept in sync with the Python definition.
+/// * The default values of the mirrored fields must be kept in sync with the Python definition.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(default)]
-pub struct WorkerConfig {
+pub struct SpiderTaskExecutorConfig {
     pub package: Package,
     pub archive_output: ArchiveOutput,
     pub tmp_directory: String,
+    pub database: Database,
 }
 
-impl Default for WorkerConfig {
+impl Default for SpiderTaskExecutorConfig {
     fn default() -> Self {
         Self {
             package: Package::default(),
+            database: Database::default(),
             archive_output: ArchiveOutput::default(),
             tmp_directory: "var/tmp".to_owned(),
         }
@@ -92,6 +97,16 @@ impl Default for ClpDbNames {
     }
 }
 
+/// Mirror of `clp_py_utils.clp_config.DatabaseEngine`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DatabaseEngine {
+    #[serde(rename = "mariadb")]
+    MariaDb,
+
+    #[serde(rename = "mysql")]
+    Mysql,
+}
+
 /// Mirror of `clp_py_utils.clp_config.Database`.
 ///
 /// # NOTE
@@ -99,20 +114,32 @@ impl Default for ClpDbNames {
 /// * This type is partially defined: unused fields are omitted and discarded through
 ///   deserialization.
 /// * The default values must be kept in sync with the Python definition.
+/// * `engine` (serialized as `type`) mirrors [`DatabaseEngine`] and defaults to `mariadb`.
+/// * `table_prefix` is a fixed constant mirroring `CLP_METADATA_TABLE_PREFIX` (`"clp_"`) and is
+///   excluded from (de)serialization.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Database {
+    #[serde(rename = "type")]
+    pub engine: DatabaseEngine,
     pub host: String,
     pub port: u16,
     pub names: ClpDbNames,
+
+    #[serde(skip)]
+    pub table_prefix: String,
 }
 
 impl Default for Database {
     fn default() -> Self {
+        /// Mirror of `clp_py_utils.clp_config.CLP_METADATA_TABLE_PREFIX`.
+        const CLP_METADATA_TABLE_PREFIX: &str = "clp_";
         Self {
+            engine: DatabaseEngine::MariaDb,
             host: "localhost".to_owned(),
             port: 3306,
             names: ClpDbNames::default(),
+            table_prefix: CLP_METADATA_TABLE_PREFIX.to_owned(),
         }
     }
 }
@@ -379,7 +406,7 @@ impl Default for Telemetry {
 
 #[cfg(test)]
 mod tests {
-    use super::LogsInput;
+    use super::{Database, DatabaseEngine, LogsInput};
 
     #[test]
     fn deserialize_logs_input_s3_config() {
@@ -457,5 +484,60 @@ mod tests {
             }
             LogsInput::S3 { .. } => panic!("Expected Fs"),
         }
+    }
+
+    #[test]
+    fn deserialize_database_applies_type_and_table_prefix_defaults() {
+        let database_json = serde_json::json!({
+            "host": "h",
+            "port": 3306,
+            "names": {
+                "clp": "clp-db",
+                "spider": "spider-db",
+            }
+        });
+
+        let db = serde_json::from_str::<Database>(database_json.to_string().as_str())
+            .expect("failed to deserialize `Database` from JSON");
+
+        assert_eq!(db.engine, DatabaseEngine::MariaDb);
+        assert_eq!(db.table_prefix, "clp_");
+    }
+
+    #[test]
+    fn deserialize_database_reads_mysql_type() {
+        let database_json = serde_json::json!({
+            "type": "mysql",
+            "host": "h",
+            "port": 3306,
+            "names": {
+                "clp": "clp-db",
+                "spider": "spider-db",
+            }
+        });
+
+        let db = serde_json::from_str::<Database>(database_json.to_string().as_str())
+            .expect("failed to deserialize `Database` from JSON");
+
+        assert_eq!(db.engine, DatabaseEngine::Mysql);
+    }
+
+    #[test]
+    fn deserialize_database_ignores_provided_table_prefix() {
+        let database_json = serde_json::json!({
+            "type": "mysql",
+            "host": "h",
+            "port": 3306,
+            "names": {
+                "clp": "clp-db",
+                "spider": "spider-db",
+            },
+            "table_prefix": "custom_"
+        });
+
+        let db = serde_json::from_str::<Database>(database_json.to_string().as_str())
+            .expect("failed to deserialize `Database` from JSON");
+
+        assert_eq!(db.table_prefix, "clp_");
     }
 }
