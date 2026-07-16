@@ -997,6 +997,7 @@ dependencies = [
  "clp-rust-utils",
  "non-empty-string",
  "serde",
+ "serde_json",
  "spider-core",
  "spider-tdl",
  "thiserror",
