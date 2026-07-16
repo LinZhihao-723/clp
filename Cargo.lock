@@ -994,6 +994,7 @@ version = "0.13.1-dev"
 dependencies = [
  "anyhow",
  "async-trait",
+ "aws-sdk-s3",
  "clp-rust-utils",
  "non-empty-string",
  "serde",
@@ -1001,6 +1002,7 @@ dependencies = [
  "spider-core",
  "spider-tdl",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

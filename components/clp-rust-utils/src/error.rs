@@ -11,6 +11,9 @@ pub enum Error {
     #[error("`yaml_serde::Error`: {0}")]
     SerdeYaml(#[from] yaml_serde::Error),
 
+    #[error("S3 request failed: {0}")]
+    S3(String),
+
     #[error("`sqlx::Error`: {0}")]
     Sqlx(#[from] sqlx::Error),
 

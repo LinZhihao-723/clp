@@ -14,13 +14,4 @@ pub enum Error {
     /// TODO: We might need more concrete error types.
     #[error("spider cluster request failed: {0}")]
     Cluster(String),
-
-    /// The `CLP_CONFIG_PATH` environment variable (pointing at the Spider task executor config
-    /// YAML) was unset or not valid Unicode.
-    #[error("failed to read the `CLP_CONFIG_PATH` environment variable: {0}")]
-    SpiderTaskExecutorConfigPathEnvVar(#[from] std::env::VarError),
-
-    /// Failed to read or parse the Spider task executor config YAML file at `CLP_CONFIG_PATH`.
-    #[error("failed to load the Spider task executor config: {0}")]
-    SpiderTaskExecutorConfigLoad(#[from] clp_rust_utils::Error),
 }

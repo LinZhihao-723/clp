@@ -9,11 +9,14 @@ use std::{
 
 use anyhow::Context;
 use clp_rust_utils::{
+    aws::AWS_DEFAULT_REGION,
     clp_config::{
         AwsAuthentication,
-        package::config::{ArchiveOutputStorage, SpiderTaskExecutorConfig},
+        S3Config,
+        package::config::{ArchiveOutputStorage, Database, SpiderTaskExecutorConfig},
     },
-    s3::generate_s3_url,
+    dataset::CLP_DEFAULT_DATASET_NAME,
+    s3::{create_new_client, generate_s3_url, put_file},
 };
 use non_empty_string::NonEmptyString;
 
@@ -36,7 +39,8 @@ use crate::task_io::{
 ///
 /// # Errors
 ///
-/// Returns an error if any compression step fails (e.g., running clp-s or uploading to S3).
+/// Returns an error if any compression step fails: running clp-s, uploading an archive to S3,
+/// running the indexer, or deleting a local archive.
 pub fn compress(
     ctx: &spider_tdl::TaskContext,
     config: &SpiderTaskExecutorConfig,
@@ -51,29 +55,95 @@ pub fn compress(
     std::fs::write(&list_path, build_s3_logs_list(&input_source))
         .with_context(|| format!("failed to write S3 logs list to {}", list_path.display()))?;
 
-    let credential_env = s3_credential_env(&input_source.aws_authentication);
+    let S3InputSource {
+        aws_authentication, ..
+    } = input_source;
+    let credential_env = s3_credential_env(&aws_authentication);
 
-    let clp_s_bin = clp_s_binary_path()?;
-    let archive_dir = archive_staging_dir(config, dataset.as_deref())?;
+    let dataset = dataset.unwrap_or_else(|| CLP_DEFAULT_DATASET_NAME.to_owned());
+    let (staging_dir, s3_config) = s3_archive_output(config)?;
+    let archive_dir = std::path::Path::new(staging_dir).join(&dataset);
+
+    let clp_s_bin = clp_binary_path("clp-s")?;
+    let indexer_bin = clp_binary_path("indexer")?;
+
+    let region = s3_config
+        .region_code
+        .as_ref()
+        .map_or(AWS_DEFAULT_REGION, NonEmptyString::as_str);
+    let client = super::runtime().block_on(create_new_client(
+        region,
+        s3_config.endpoint_url.as_ref(),
+        &s3_config.aws_authentication,
+    ));
+    let bucket = s3_config.bucket.to_string();
+    let key_prefix = s3_config.key_prefix.to_string();
 
     let mut archives = Vec::new();
-    run_clp_s(
+    let mut finishers = tokio::task::JoinSet::new();
+
+    let run_result = run_clp_s(
         &clp_s_bin,
         &archive_dir,
         clp_s_option,
         &list_path,
         &credential_env,
         |archive| {
+            let local_path = archive_dir.join(&archive.id);
+            let key = create_archive_s3_key(&key_prefix, &dataset, &archive.id);
+            let client = client.clone();
+            let bucket = bucket.clone();
+            let db_config = config.database.clone();
+            let indexer_bin = indexer_bin.clone();
+            let dataset = dataset.clone();
+            finishers.spawn_on(
+                async move {
+                    let index_path = local_path.clone();
+                    let index = tokio::task::spawn_blocking(move || {
+                        run_indexer(&indexer_bin, &db_config, &dataset, &index_path)
+                    });
+                    let (upload_result, index_result) =
+                        tokio::join!(put_file(&client, &bucket, &key, &local_path), index,);
+                    upload_result.with_context(|| {
+                        format!("failed to upload archive to s3://{bucket}/{key}")
+                    })?;
+                    index_result.map_err(|e| anyhow::anyhow!("indexer task panicked: {e}"))??;
+                    tokio::fs::remove_file(&local_path).await.with_context(|| {
+                        format!("failed to delete local archive {}", local_path.display())
+                    })?;
+                    anyhow::Ok(())
+                },
+                super::runtime().handle(),
+            );
             archives.push(archive);
             Ok(())
         },
-    )?;
+    );
 
-    let _ = (dataset, input_source, &archives);
-    todo!(
-        "steps 3-4: upload archives to S3, index, delete local; then return CompressionTaskOutput \
-         {{ dataset, archives }}"
-    )
+    let finish_error = super::runtime().block_on(async {
+        let mut first_error: Option<anyhow::Error> = None;
+        while let Some(joined) = finishers.join_next().await {
+            let result = joined
+                .map_err(|e| anyhow::anyhow!("finishing task panicked: {e}"))
+                .and_then(|r| r);
+            if let Err(e) = result
+                && first_error.is_none()
+            {
+                first_error = Some(e);
+            }
+        }
+        first_error
+    });
+
+    run_result?;
+    if let Some(e) = finish_error {
+        return Err(e);
+    }
+
+    Ok(CompressionTaskOutput {
+        dataset: Some(dataset),
+        archives,
+    })
 }
 
 /// Builds the `--files-from` list of S3 object URLs for clp-s.
@@ -100,12 +170,6 @@ fn build_s3_logs_list(input_source: &S3InputSource) -> String {
     list
 }
 
-/// The env var holding the AWS access key ID.
-const AWS_ACCESS_KEY_ID_ENV_VAR: &str = "AWS_ACCESS_KEY_ID";
-
-/// The env var holding the AWS secret access key.
-const AWS_SECRET_ACCESS_KEY_ENV_VAR: &str = "AWS_SECRET_ACCESS_KEY";
-
 /// Resolves the AWS credential env vars clp-s needs to access the S3 objects.
 ///
 /// # Returns
@@ -113,6 +177,12 @@ const AWS_SECRET_ACCESS_KEY_ENV_VAR: &str = "AWS_SECRET_ACCESS_KEY";
 /// The env-var name/value pairs for [`AwsAuthentication::Credentials`], or an empty vector for
 /// [`AwsAuthentication::Default`] (which assumes credentials are already in the ambient env).
 fn s3_credential_env(auth: &AwsAuthentication) -> Vec<(&'static str, String)> {
+    /// The env var holding the AWS access key ID.
+    const AWS_ACCESS_KEY_ID_ENV_VAR: &str = "AWS_ACCESS_KEY_ID";
+
+    /// The env var holding the AWS secret access key.
+    const AWS_SECRET_ACCESS_KEY_ENV_VAR: &str = "AWS_SECRET_ACCESS_KEY";
+
     match auth {
         AwsAuthentication::Credentials { credentials } => vec![
             (AWS_ACCESS_KEY_ID_ENV_VAR, credentials.access_key_id.clone()),
@@ -127,9 +197,6 @@ fn s3_credential_env(auth: &AwsAuthentication) -> Vec<(&'static str, String)> {
 
 /// The env var holding the CLP installation's home directory.
 const CLP_HOME_ENV_VAR: &str = "CLP_HOME";
-
-/// The path of the clp-s binary relative to [`CLP_HOME_ENV_VAR`].
-const CLP_S_BINARY_SUBPATH: &str = "bin/clp-s";
 
 /// Parses a single clp-s `--print-archive-stats` stdout line into an [`ArchiveMetadata`].
 ///
@@ -179,46 +246,101 @@ fn build_clp_s_args(
     args
 }
 
-/// Resolves the clp-s binary path from [`CLP_HOME_ENV_VAR`].
+/// Resolves the path of a CLP binary from [`CLP_HOME_ENV_VAR`], joining `bin/{binary}`.
 ///
 /// # Returns
 ///
-/// The path to the clp-s binary.
+/// The path to the named binary under the CLP installation.
 ///
 /// # Errors
 ///
 /// Returns an error if [`CLP_HOME_ENV_VAR`] is unset or not valid Unicode.
-fn clp_s_binary_path() -> anyhow::Result<PathBuf> {
+fn clp_binary_path(binary: &str) -> anyhow::Result<PathBuf> {
     let clp_home = std::env::var(CLP_HOME_ENV_VAR)
         .context("failed to read the CLP_HOME environment variable")?;
-    Ok(Path::new(&clp_home).join(CLP_S_BINARY_SUBPATH))
+    Ok(Path::new(&clp_home).join("bin").join(binary))
 }
 
-/// Resolves the local staging directory the archives are written to before upload.
-///
-/// The dataset, when set, is appended to the S3 staging directory (matching Python's
-/// `archive_output_dir / dataset`).
+/// Resolves the S3 archive-output staging directory and S3 config from `config`.
 ///
 /// # Returns
 ///
-/// The archive staging directory.
+/// The staging directory and the S3 config the archives are uploaded to.
 ///
 /// # Errors
 ///
 /// Returns an error if `config`'s archive output is not S3-backed, which this flow requires.
-fn archive_staging_dir(
-    config: &SpiderTaskExecutorConfig,
-    dataset: Option<&str>,
-) -> anyhow::Result<PathBuf> {
-    let base = match &config.archive_output.storage {
+fn s3_archive_output(config: &SpiderTaskExecutorConfig) -> anyhow::Result<(&str, &S3Config)> {
+    match &config.archive_output.storage {
         ArchiveOutputStorage::S3 {
-            staging_directory, ..
-        } => Path::new(staging_directory),
+            staging_directory,
+            s3_config,
+        } => Ok((staging_directory, s3_config)),
         ArchiveOutputStorage::Fs { .. } => {
             anyhow::bail!("S3 archive output is required for the S3 compression flow")
         }
-    };
-    Ok(dataset.map_or_else(|| base.to_path_buf(), |dataset| base.join(dataset)))
+    }
+}
+
+/// Builds the S3 object key for an archive (mirror of Python's
+/// `<key_prefix><dataset>/<archive_id>`).
+///
+/// # Returns
+///
+/// The archive's S3 object key.
+fn create_archive_s3_key(key_prefix: &str, dataset: &str, archive_id: &str) -> String {
+    format!("{key_prefix}{dataset}/{archive_id}")
+}
+
+/// Builds the `indexer` command-line arguments for indexing one archive.
+///
+/// # Returns
+///
+/// The ordered `indexer` arguments.
+fn build_indexer_args(database: &Database, dataset: &str, archive_path: &Path) -> Vec<OsString> {
+    vec![
+        OsString::from("--db-type"),
+        // clp-core's indexer only supports MySQL, regardless of the configured DB engine.
+        OsString::from("mysql"),
+        OsString::from("--db-host"),
+        OsString::from(&database.host),
+        OsString::from("--db-port"),
+        OsString::from(database.port.to_string()),
+        OsString::from("--db-name"),
+        OsString::from(&database.names.clp),
+        OsString::from("--db-table-prefix"),
+        OsString::from(&database.table_prefix),
+        OsString::from(dataset),
+        archive_path.as_os_str().to_os_string(),
+    ]
+}
+
+/// Runs the `indexer` on one archive, blocking until it exits.
+///
+/// # Returns
+///
+/// `()` once the indexer exits successfully.
+///
+/// # Errors
+///
+/// Returns an error if the indexer fails to spawn or exits with a non-zero status.
+fn run_indexer(
+    indexer_bin: &Path,
+    database: &Database,
+    dataset: &str,
+    archive_path: &Path,
+) -> anyhow::Result<()> {
+    let status = Command::new(indexer_bin)
+        .args(build_indexer_args(database, dataset, archive_path))
+        .status()
+        .with_context(|| format!("failed to spawn indexer at {}", indexer_bin.display()))?;
+    if !status.success() {
+        anyhow::bail!(
+            "indexer exited with {status} for archive {}",
+            archive_path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Runs clp-s, invoking `on_archive` for each archive it reports on stdout.
@@ -296,14 +418,18 @@ fn run_clp_s(
 mod tests {
     use std::{ffi::OsString, path::Path};
 
-    use clp_rust_utils::clp_config::{AwsAuthentication, AwsCredentials};
+    use clp_rust_utils::clp_config::{
+        AwsAuthentication,
+        AwsCredentials,
+        package::config::{ClpDbNames, Database, DatabaseEngine},
+    };
     use non_empty_string::NonEmptyString;
 
     use super::{
-        AWS_ACCESS_KEY_ID_ENV_VAR,
-        AWS_SECRET_ACCESS_KEY_ENV_VAR,
         build_clp_s_args,
+        build_indexer_args,
         build_s3_logs_list,
+        create_archive_s3_key,
         parse_archive_stats,
         s3_credential_env,
     };
@@ -346,8 +472,8 @@ mod tests {
         assert_eq!(
             s3_credential_env(&auth),
             vec![
-                (AWS_ACCESS_KEY_ID_ENV_VAR, "the-access-key".to_string()),
-                (AWS_SECRET_ACCESS_KEY_ENV_VAR, "the-secret-key".to_string()),
+                ("AWS_ACCESS_KEY_ID", "the-access-key".to_string()),
+                ("AWS_SECRET_ACCESS_KEY", "the-secret-key".to_string()),
             ]
         );
     }
@@ -436,6 +562,46 @@ mod tests {
                 OsString::from("--single-file-archive"),
                 OsString::from("--files-from"),
                 OsString::from("/tmp/log-paths.txt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn archive_s3_key_joins_prefix_dataset_and_id() {
+        assert_eq!(
+            create_archive_s3_key("prefix/", "default", "abc"),
+            "prefix/default/abc"
+        );
+    }
+
+    #[test]
+    fn build_indexer_args_uses_mysql_and_expected_order() {
+        let database = Database {
+            engine: DatabaseEngine::MariaDb,
+            host: "db-host".to_string(),
+            port: 3306,
+            names: ClpDbNames {
+                clp: "clp-db".to_string(),
+                spider: "spider-db".to_string(),
+            },
+            table_prefix: "clp_".to_string(),
+        };
+
+        assert_eq!(
+            build_indexer_args(&database, "default", Path::new("/archives/abc")),
+            vec![
+                OsString::from("--db-type"),
+                OsString::from("mysql"),
+                OsString::from("--db-host"),
+                OsString::from("db-host"),
+                OsString::from("--db-port"),
+                OsString::from("3306"),
+                OsString::from("--db-name"),
+                OsString::from("clp-db"),
+                OsString::from("--db-table-prefix"),
+                OsString::from("clp_"),
+                OsString::from("default"),
+                OsString::from("/archives/abc"),
             ]
         );
     }

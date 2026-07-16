@@ -9,26 +9,49 @@ pub mod s3_compression;
 /// Returns the process-wide Spider task executor config, loading it from `CLP_CONFIG_PATH` on first
 /// access.
 ///
-/// The config is loaded once, on first access; subsequent calls return the cached result.
+/// The config is loaded once, on first access; subsequent calls return the cached value.
 ///
 /// # Returns
 ///
 /// A reference to the cached [`SpiderTaskExecutorConfig`].
 ///
-/// # Errors
+/// # Panics
 ///
-/// Returns a reference to the cached error if the config failed to load.
-pub fn spider_task_executor_config()
--> Result<&'static SpiderTaskExecutorConfig, &'static crate::Error> {
-    SPIDER_TASK_EXECUTOR_CONFIG.as_ref()
+/// Panics if `CLP_CONFIG_PATH` is unset or not valid Unicode, or if the YAML file at that path
+/// cannot be read or parsed.
+#[must_use]
+pub(crate) fn spider_task_executor_config() -> &'static SpiderTaskExecutorConfig {
+    &SPIDER_TASK_EXECUTOR_CONFIG
+}
+
+/// Returns the process-wide Tokio runtime the compression tasks use to drive async S3 I/O.
+///
+/// # Returns
+///
+/// A reference to the cached multi-threaded [`tokio::runtime::Runtime`].
+///
+/// # Panics
+///
+/// Panics if the runtime failed to build on first access.
+#[must_use]
+pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
+    &TOKIO_RUNTIME
 }
 
 /// The env var holding the path to the Spider task executor config YAML.
 const CLP_CONFIG_PATH_ENV_VAR: &str = "CLP_CONFIG_PATH";
 
+/// Process-wide multi-threaded Tokio runtime, built on first access.
+static TOKIO_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build the compression-coordinator Tokio runtime")
+});
+
 /// Process-wide cache of the Spider task executor config, populated on first access from
 /// [`load_spider_task_executor_config_from_env`].
-static SPIDER_TASK_EXECUTOR_CONFIG: LazyLock<Result<SpiderTaskExecutorConfig, crate::Error>> =
+static SPIDER_TASK_EXECUTOR_CONFIG: LazyLock<SpiderTaskExecutorConfig> =
     LazyLock::new(load_spider_task_executor_config_from_env);
 
 /// Loads the [`SpiderTaskExecutorConfig`] from the YAML file at the path named by
@@ -38,11 +61,15 @@ static SPIDER_TASK_EXECUTOR_CONFIG: LazyLock<Result<SpiderTaskExecutorConfig, cr
 ///
 /// The deserialized [`SpiderTaskExecutorConfig`].
 ///
-/// # Errors
+/// # Panics
 ///
-/// Returns an error if [`CLP_CONFIG_PATH_ENV_VAR`] is unset or not valid Unicode, or if the YAML
-/// file at that path cannot be read or parsed.
-fn load_spider_task_executor_config_from_env() -> Result<SpiderTaskExecutorConfig, crate::Error> {
-    let path = std::env::var(CLP_CONFIG_PATH_ENV_VAR)?;
-    Ok(clp_rust_utils::serde::yaml::from_path(&path)?)
+/// Panics if [`CLP_CONFIG_PATH_ENV_VAR`] is unset or not valid Unicode, or if the YAML file at that
+/// path cannot be read or parsed.
+fn load_spider_task_executor_config_from_env() -> SpiderTaskExecutorConfig {
+    let path = std::env::var(CLP_CONFIG_PATH_ENV_VAR).unwrap_or_else(|e| {
+        panic!("failed to read the `{CLP_CONFIG_PATH_ENV_VAR}` environment variable: {e}")
+    });
+    clp_rust_utils::serde::yaml::from_path(&path).unwrap_or_else(|e| {
+        panic!("failed to load the Spider task executor config from `{path}`: {e}")
+    })
 }
