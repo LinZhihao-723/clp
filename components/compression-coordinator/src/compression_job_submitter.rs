@@ -7,7 +7,7 @@ use spider_core::types::id::{JobId, ResourceGroupId};
 
 use crate::{
     error::Error,
-    task_io::{ClpSCompressionConfig, S3ArchiveOutputConfig, S3InputSource},
+    task_io::{ClpSCompressionOption, DbConfig, S3InputSource},
 };
 
 /// The terminal outcome of a compression job.
@@ -26,16 +26,16 @@ pub enum CompressionJobCompletion {
 /// Drives CLP S3 compression jobs on a Spider (Huntsman) cluster.
 #[async_trait]
 pub trait S3CompressionJobSubmitter: Send + Sync {
-    /// Builds the fan-out → commit task graph for `inputs` and registers it with Spider, without
-    /// starting it.
+    /// Builds the fan-out → commit task graph for `input_sources` and registers it with Spider,
+    /// without starting it.
     ///
     /// # Parameters
     ///
     /// * `resource_group_id` - The Spider resource group to register the job under.
-    /// * `clp_s_config` - `clp-s` tuning parameters shared by every task in the job.
-    /// * `output` - Where every task writes its produced archives.
+    /// * `clp_s_option` - `clp-s` tuning options shared by every task in the job.
     /// * `dataset` - The job's `CLP_S` dataset; effectively required for `CLP_S` + S3.
-    /// * `inputs` - One entry per compression task, already partitioned upstream.
+    /// * `db_config` - Metadata-DB connection shared by every task (for the archive indexer).
+    /// * `input_sources` - One entry per compression task, already partitioned upstream.
     ///
     /// # Returns
     ///
@@ -48,10 +48,10 @@ pub trait S3CompressionJobSubmitter: Send + Sync {
     async fn submit_s3_compression_job(
         &self,
         resource_group_id: ResourceGroupId,
-        clp_s_config: ClpSCompressionConfig,
-        output: S3ArchiveOutputConfig,
+        clp_s_option: ClpSCompressionOption,
         dataset: Option<String>,
-        inputs: Vec<S3InputSource>,
+        db_config: DbConfig,
+        input_sources: Vec<S3InputSource>,
     ) -> Result<JobId, Error>;
 
     /// Idempotently starts the job identified by `spider_job_id` (only if it hasn't already been

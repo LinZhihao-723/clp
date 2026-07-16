@@ -3,11 +3,16 @@
 
 pub mod compression_job_submitter;
 mod error;
+pub mod task;
 pub mod task_io;
 
 pub use compression_job_submitter::{CompressionJobCompletion, S3CompressionJobSubmitter};
 pub use error::Error;
+pub use task::worker_config;
 pub use task_io::{
-    ArchiveMetadata, ClpSCompressionConfig, CompressionTaskInput, CompressionTaskOutput,
-    S3ArchiveOutputConfig, S3InputSource,
+    ArchiveMetadata,
+    ClpSCompressionOption,
+    CompressionTaskOutput,
+    DbConfig,
+    S3InputSource,
 };

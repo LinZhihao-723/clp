@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::clp_config::{AwsAuthentication, S3Config};
 
@@ -43,6 +43,31 @@ impl Default for Config {
     }
 }
 
+/// Mirror of `clp_py_utils.clp_config.WorkerConfig`.
+///
+/// # NOTE
+///
+/// * This type is partially defined: query-only fields are omitted and discarded through
+///   deserialization.
+/// * The default values must be kept in sync with the Python definition.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(default)]
+pub struct WorkerConfig {
+    pub package: Package,
+    pub archive_output: ArchiveOutput,
+    pub tmp_directory: String,
+}
+
+impl Default for WorkerConfig {
+    fn default() -> Self {
+        Self {
+            package: Package::default(),
+            archive_output: ArchiveOutput::default(),
+            tmp_directory: "var/tmp".to_owned(),
+        }
+    }
+}
+
 /// Database names for CLP components.
 ///
 /// # NOTE
@@ -51,7 +76,7 @@ impl Default for Config {
 /// This struct mirrors all allowed DB names from `clp_py_utils.clp_config.ClpDbNameType`. Instead
 /// of storing them in a map, we use a struct to ensure all expected names are always present and
 /// reject all unknown fields.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClpDbNames {
     pub clp: String,
@@ -74,7 +99,7 @@ impl Default for ClpDbNames {
 /// * This type is partially defined: unused fields are omitted and discarded through
 ///   deserialization.
 /// * The default values must be kept in sync with the Python definition.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Database {
     pub host: String,
@@ -245,27 +270,51 @@ impl Default for LogIngestor {
 ///
 /// # NOTE
 ///
-/// * This type is partially defined: unused fields are omitted and discarded through
-///   deserialization.
 /// * The default values must be kept in sync with the Python definition.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(default)]
 pub struct ArchiveOutput {
+    pub storage: ArchiveOutputStorage,
     pub target_archive_size: u64,
     pub target_dictionaries_size: u64,
     pub target_encoded_file_size: u64,
     pub target_segment_size: u64,
     pub compression_level: u8,
+    pub retention_period: Option<u64>,
 }
 
 impl Default for ArchiveOutput {
     fn default() -> Self {
         Self {
+            storage: ArchiveOutputStorage::default(),
             target_archive_size: 256 * 1024 * 1024,
             target_dictionaries_size: 32 * 1024 * 1024,
             target_encoded_file_size: 256 * 1024 * 1024,
             target_segment_size: 256 * 1024 * 1024,
             compression_level: 3,
+            retention_period: None,
+        }
+    }
+}
+
+/// Mirror of `clp_py_utils.clp_config.ArchiveFsStorage` | `ArchiveS3Storage`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(tag = "type")]
+pub enum ArchiveOutputStorage {
+    #[serde(rename = "fs")]
+    Fs { directory: String },
+
+    #[serde(rename = "s3")]
+    S3 {
+        staging_directory: String,
+        s3_config: S3Config,
+    },
+}
+
+impl Default for ArchiveOutputStorage {
+    fn default() -> Self {
+        Self::Fs {
+            directory: "var/data/archives".to_owned(),
         }
     }
 }

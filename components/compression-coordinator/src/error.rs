@@ -14,4 +14,13 @@ pub enum Error {
     /// TODO: We might need more concrete error types.
     #[error("spider cluster request failed: {0}")]
     Cluster(String),
+
+    /// The `CLP_CONFIG_PATH` environment variable (pointing at the worker-config YAML) was
+    /// unset or not valid Unicode.
+    #[error("failed to read the `CLP_CONFIG_PATH` environment variable: {0}")]
+    WorkerConfigPathEnvVar(#[from] std::env::VarError),
+
+    /// Failed to read or parse the worker-config YAML file at `CLP_CONFIG_PATH`.
+    #[error("failed to load the worker config: {0}")]
+    WorkerConfigLoad(#[from] clp_rust_utils::Error),
 }

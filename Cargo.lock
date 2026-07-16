@@ -992,11 +992,13 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 name = "compression-coordinator"
 version = "0.13.1-dev"
 dependencies = [
+ "anyhow",
  "async-trait",
  "clp-rust-utils",
  "non-empty-string",
  "serde",
  "spider-core",
+ "spider-tdl",
  "thiserror",
 ]
 
@@ -1040,6 +1042,12 @@ dependencies = [
  "once_cell",
  "tiny-keccak",
 ]
+
+[[package]]
+name = "const-str"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18f12cc9948ed9604230cdddc7c86e270f9401ccbe3c2e98a4378c5e7632212f"
 
 [[package]]
 name = "const_format"
@@ -3764,6 +3772,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "spider-tdl"
+version = "0.1.0"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=huntsman-dev#7b70971d85e92bcda200530092b80a8b3cc1e27a"
+dependencies = [
+ "const-str",
+ "rmp-serde",
+ "serde",
+ "spider-core",
+ "thiserror",
 ]
 
 [[package]]
