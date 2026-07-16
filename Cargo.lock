@@ -3748,7 +3748,7 @@ dependencies = [
 [[package]]
 name = "spider-core"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=huntsman-dev#7b70971d85e92bcda200530092b80a8b3cc1e27a"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
 dependencies = [
  "non-empty-string",
  "rand 0.9.4",
@@ -3767,7 +3767,7 @@ dependencies = [
 [[package]]
 name = "spider-derive"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=huntsman-dev#7b70971d85e92bcda200530092b80a8b3cc1e27a"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3777,7 +3777,7 @@ dependencies = [
 [[package]]
 name = "spider-tdl"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=huntsman-dev#7b70971d85e92bcda200530092b80a8b3cc1e27a"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
 dependencies = [
  "const-str",
  "rmp-serde",
@@ -3789,11 +3789,13 @@ dependencies = [
 [[package]]
 name = "spider-utils"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=huntsman-dev#7b70971d85e92bcda200530092b80a8b3cc1e27a"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
 dependencies = [
+ "rand 0.9.4",
  "rmp-serde",
  "serde",
  "thiserror",
+ "tokio",
  "tonic",
  "tracing-appender",
  "tracing-subscriber",

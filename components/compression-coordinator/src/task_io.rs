@@ -9,7 +9,14 @@ use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 
 /// The metadata-DB connection a compression task uses for the archive indexer.
-pub type DbConfig = Database;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DbConfig {
+    /// Connection parameters (host, port, DB names).
+    pub database: Database,
+
+    /// Metadata-table name prefix (mirrors Python's `CLP_METADATA_TABLE_PREFIX`, i.e. `clp_`).
+    pub table_prefix: String,
+}
 
 /// `clp-s` tuning and engine options for a compression job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
