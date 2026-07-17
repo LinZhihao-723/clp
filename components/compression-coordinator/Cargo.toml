@@ -23,8 +23,8 @@ non-empty-string = { version = "0.2.6", features = ["serde"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-spider-core = { git = "https://github.com/sitaowang1998/spider.git", branch = "integration-test-dev-compose" }
-spider-tdl = { git = "https://github.com/sitaowang1998/spider.git", branch = "integration-test-dev-compose" }
+spider-core = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
+spider-tdl = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread"] }

@@ -3766,7 +3766,7 @@ dependencies = [
 [[package]]
 name = "spider-core"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "non-empty-string",
  "rand 0.9.4",
@@ -3785,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "spider-derive"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3795,7 +3795,7 @@ dependencies = [
 [[package]]
 name = "spider-tdl"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "const-str",
  "rmp-serde",
@@ -3808,7 +3808,7 @@ dependencies = [
 [[package]]
 name = "spider-tdl-derive"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3818,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "spider-utils"
 version = "0.1.0"
-source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "rand 0.9.4",
  "rmp-serde",
