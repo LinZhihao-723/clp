@@ -77,11 +77,13 @@ def main(argv):
                     `num_tasks_completed` INT NOT NULL DEFAULT '0',
                     `clp_binary_version` INT NULL DEFAULT NULL,
                     `clp_config` MEDIUMBLOB NOT NULL,
+                    `ingestion_job_id` BIGINT UNSIGNED DEFAULT NULL,
                     `spider_id` BIGINT UNSIGNED DEFAULT NULL,
                     PRIMARY KEY (`id`) USING BTREE,
                     INDEX `JOB_STATUS` (`status`) USING BTREE,
                     INDEX `JOB_UPDATE_TIME` (`update_time`) USING BTREE,
                     INDEX `JOB_START_TIME_STATUS` (`start_time`, `status`) USING BTREE,
+                    INDEX `JOB_INGESTION_JOB_ID` (`ingestion_job_id`) USING BTREE,
                     INDEX `JOB_SPIDER_ID` (`spider_id`) USING BTREE
                 ) ROW_FORMAT=DYNAMIC
                 """

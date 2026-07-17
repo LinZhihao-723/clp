@@ -32,8 +32,8 @@ impl Default for Config {
             package: Package::default(),
             database: Database::default(),
             results_cache: ResultsCache::default(),
-            api_server: None,
-            log_ingestor: None,
+            api_server: Some(ApiServer::default()),
+            log_ingestor: Some(LogIngestor::default()),
             logs_directory: "var/log".to_owned(),
             stream_output: StreamOutput::default(),
             logs_input: LogsInput::Fs {
@@ -230,7 +230,7 @@ pub struct Package {
 impl Default for Package {
     fn default() -> Self {
         Self {
-            storage_engine: StorageEngine::Clp,
+            storage_engine: StorageEngine::ClpS,
         }
     }
 }
@@ -288,9 +288,14 @@ pub enum StreamOutputStorage {
 
     #[serde(rename = "s3")]
     S3 {
+        #[serde(default = "default_stream_staging_directory")]
         staging_directory: String,
         s3_config: S3Config,
     },
+}
+
+fn default_stream_staging_directory() -> String {
+    "var/data/staged-streams".to_owned()
 }
 
 impl Default for StreamOutputStorage {
@@ -364,9 +369,14 @@ pub enum ArchiveOutputStorage {
 
     #[serde(rename = "s3")]
     S3 {
+        #[serde(default = "default_archive_staging_directory")]
         staging_directory: String,
         s3_config: S3Config,
     },
+}
+
+fn default_archive_staging_directory() -> String {
+    "var/data/staged-archives".to_owned()
 }
 
 impl Default for ArchiveOutputStorage {

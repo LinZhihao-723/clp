@@ -27,8 +27,11 @@ impl BrotliMsgpack {
         Ok(brotli_compressor.into_inner())
     }
 
-    /// Deserialize a value from a Brotli-compressed `MessagePack` byte sequence produced by
-    /// [`BrotliMsgpack::serialize`].
+    /// Deserialize an owned value from a Brotli-compressed `MessagePack` byte sequence.
+    ///
+    /// [`DeserializeOwned`] is required because the decompressed `MessagePack` buffer is created
+    /// inside this function and dropped before the function returns. The returned value therefore
+    /// cannot borrow data from that buffer.
     ///
     /// # Return
     /// The deserialized value.
@@ -37,13 +40,11 @@ impl BrotliMsgpack {
     ///
     /// Returns an error if:
     ///
-    /// * Forwards [`std::io::Read::read_to_end`]'s errors on failure (including invalid brotli
-    ///   input).
     /// * Forwards [`rmp_serde::from_slice`]'s errors on failure.
-    pub fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Error> {
-        let mut brotli_decompressor = Decompressor::new(bytes, 4096);
+    /// * Forwards [`std::io::Read::read_to_end`]'s errors on failure.
+    pub fn deserialize<T: DeserializeOwned>(data: &[u8]) -> Result<T, Error> {
         let mut msgpack_data = Vec::new();
-        brotli_decompressor.read_to_end(&mut msgpack_data)?;
+        Decompressor::new(data, 4096).read_to_end(&mut msgpack_data)?;
         Ok(rmp_serde::from_slice(&msgpack_data)?)
     }
 }
