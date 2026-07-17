@@ -1083,7 +1083,7 @@ impl ClpCompressionState {
         io_config: ClpIoConfig,
     ) -> anyhow::Result<CompressionJobId> {
         const COMPRESSION_JOB_SUBMISSION_QUERY: &str = formatcp!(
-            r"INSERT INTO {table} (`clp_config`) VALUES (?)",
+            r"INSERT INTO {table} (`ingestion_job_id`, `clp_config`) VALUES (?, ?)",
             table = CLP_COMPRESSION_JOB_TABLE_NAME
         );
 
@@ -1101,6 +1101,7 @@ impl ClpCompressionState {
 
             // Submit compression job
             let result = sqlx::query(COMPRESSION_JOB_SUBMISSION_QUERY)
+                .bind(self.ingestion_job_id)
                 .bind(clp_rust_utils::serde::BrotliMsgpack::serialize(&io_config)?)
                 .execute(&mut *tx)
                 .await?;
