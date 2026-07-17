@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 use crate::clp_config::{AwsAuthentication, S3Config};
@@ -60,6 +62,35 @@ pub struct SpiderTaskExecutorConfig {
     pub archive_output: ArchiveOutput,
     pub tmp_directory: String,
     pub database: Database,
+}
+
+impl SpiderTaskExecutorConfig {
+    /// Resolves `tmp_directory` against `clp_home`.
+    ///
+    /// # Returns
+    ///
+    /// `tmp_directory` unchanged if it is already absolute; otherwise `clp_home` joined with it.
+    #[must_use]
+    pub fn abs_tmp_directory(&self, clp_home: &Path) -> PathBuf {
+        make_config_path_absolute(clp_home, &self.tmp_directory)
+    }
+
+    /// Resolves the archive-output storage's local directory against `clp_home`.
+    ///
+    /// # Returns
+    ///
+    /// The storage's local directory (`directory` for `Fs`, `staging_directory` for `S3`) unchanged
+    /// if it is already absolute; otherwise `clp_home` joined with it.
+    #[must_use]
+    pub fn abs_archive_output_staging(&self, clp_home: &Path) -> PathBuf {
+        let directory = match &self.archive_output.storage {
+            ArchiveOutputStorage::Fs { directory } => directory,
+            ArchiveOutputStorage::S3 {
+                staging_directory, ..
+            } => staging_directory,
+        };
+        make_config_path_absolute(clp_home, directory)
+    }
 }
 
 impl Default for SpiderTaskExecutorConfig {
@@ -404,9 +435,31 @@ impl Default for Telemetry {
     }
 }
 
+/// Mirror of `clp_py_utils.core.make_config_path_absolute`.
+///
+/// # Returns
+///
+/// `path` unchanged if it is already absolute; otherwise `root` joined with `path`.
+fn make_config_path_absolute(root: &Path, path: &str) -> PathBuf {
+    if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        root.join(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Database, DatabaseEngine, LogsInput};
+    use std::path::Path;
+
+    use super::{
+        ArchiveOutput,
+        ArchiveOutputStorage,
+        Database,
+        DatabaseEngine,
+        LogsInput,
+        SpiderTaskExecutorConfig,
+    };
 
     #[test]
     fn deserialize_logs_input_s3_config() {
@@ -539,5 +592,79 @@ mod tests {
             .expect("failed to deserialize `Database` from JSON");
 
         assert_eq!(db.table_prefix, "clp_");
+    }
+
+    #[test]
+    fn abs_tmp_directory_joins_relative_path() {
+        let config = SpiderTaskExecutorConfig {
+            tmp_directory: "var/tmp".to_owned(),
+            ..SpiderTaskExecutorConfig::default()
+        };
+
+        assert_eq!(
+            config.abs_tmp_directory(Path::new("/opt/clp")),
+            Path::new("/opt/clp/var/tmp")
+        );
+    }
+
+    #[test]
+    fn abs_tmp_directory_leaves_absolute_path_unchanged() {
+        let config = SpiderTaskExecutorConfig {
+            tmp_directory: "/abs/tmp".to_owned(),
+            ..SpiderTaskExecutorConfig::default()
+        };
+
+        assert_eq!(
+            config.abs_tmp_directory(Path::new("/opt/clp")),
+            Path::new("/abs/tmp")
+        );
+    }
+
+    #[test]
+    fn abs_archive_output_staging_joins_relative_s3_path() {
+        let config = s3_config_with_staging_directory("var/staged-archives");
+
+        assert_eq!(
+            config.abs_archive_output_staging(Path::new("/opt/clp")),
+            Path::new("/opt/clp/var/staged-archives")
+        );
+    }
+
+    #[test]
+    fn abs_archive_output_staging_leaves_absolute_s3_path_unchanged() {
+        let config = s3_config_with_staging_directory("/abs/staged-archives");
+
+        assert_eq!(
+            config.abs_archive_output_staging(Path::new("/opt/clp")),
+            Path::new("/abs/staged-archives")
+        );
+    }
+
+    /// # Returns
+    ///
+    /// A [`SpiderTaskExecutorConfig`] whose archive output is S3-backed with `staging_directory`.
+    fn s3_config_with_staging_directory(staging_directory: &str) -> SpiderTaskExecutorConfig {
+        use non_empty_string::NonEmptyString;
+
+        use crate::clp_config::{AwsAuthentication, S3Config};
+
+        SpiderTaskExecutorConfig {
+            archive_output: ArchiveOutput {
+                storage: ArchiveOutputStorage::S3 {
+                    staging_directory: staging_directory.to_owned(),
+                    s3_config: S3Config {
+                        bucket: NonEmptyString::try_from("bucket".to_string())
+                            .expect("bucket is non-empty"),
+                        region_code: None,
+                        key_prefix: NonEmptyString::try_from("prefix/".to_string())
+                            .expect("key prefix is non-empty"),
+                        endpoint_url: None,
+                        aws_authentication: AwsAuthentication::Default,
+                    },
+                },
+                ..ArchiveOutput::default()
+            },
+            ..SpiderTaskExecutorConfig::default()
+        }
     }
 }

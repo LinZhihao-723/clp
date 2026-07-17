@@ -48,7 +48,8 @@ pub fn compress(
     dataset: Option<String>,
     input_source: S3InputSource,
 ) -> anyhow::Result<CompressionTaskOutput> {
-    let list_path = std::path::Path::new(&config.tmp_directory).join(format!(
+    let clp_home = clp_home()?;
+    let list_path = config.abs_tmp_directory(&clp_home).join(format!(
         "compression-{}-{}-{}-log-paths.txt",
         ctx.job_id, ctx.task_id, ctx.task_instance_id,
     ));
@@ -61,11 +62,11 @@ pub fn compress(
     let credential_env = s3_credential_env(&aws_authentication);
 
     let dataset = dataset.unwrap_or_else(|| CLP_DEFAULT_DATASET_NAME.to_owned());
-    let (staging_dir, s3_config) = s3_archive_output(config)?;
-    let archive_dir = std::path::Path::new(staging_dir).join(&dataset);
+    let s3_config = s3_archive_output(config)?;
+    let archive_dir = config.abs_archive_output_staging(&clp_home).join(&dataset);
 
-    let clp_s_bin = clp_binary_path("clp-s")?;
-    let indexer_bin = clp_binary_path("indexer")?;
+    let clp_s_bin = clp_binary_path(&clp_home, "clp-s");
+    let indexer_bin = clp_binary_path(&clp_home, "indexer");
 
     let region = s3_config
         .region_code
@@ -198,6 +199,21 @@ fn s3_credential_env(auth: &AwsAuthentication) -> Vec<(&'static str, String)> {
 /// The env var holding the CLP installation's home directory.
 const CLP_HOME_ENV_VAR: &str = "CLP_HOME";
 
+/// Reads the CLP installation's home directory from [`CLP_HOME_ENV_VAR`].
+///
+/// # Returns
+///
+/// The CLP home directory.
+///
+/// # Errors
+///
+/// Returns an error if [`CLP_HOME_ENV_VAR`] is unset or not valid Unicode.
+fn clp_home() -> anyhow::Result<PathBuf> {
+    let clp_home = std::env::var(CLP_HOME_ENV_VAR)
+        .context("failed to read the CLP_HOME environment variable")?;
+    Ok(PathBuf::from(clp_home))
+}
+
 /// Parses a single clp-s `--print-archive-stats` stdout line into an [`ArchiveMetadata`].
 ///
 /// clp-s emits a superset of [`ArchiveMetadata`]'s fields per line; unknown keys are ignored.
@@ -246,36 +262,27 @@ fn build_clp_s_args(
     args
 }
 
-/// Resolves the path of a CLP binary from [`CLP_HOME_ENV_VAR`], joining `bin/{binary}`.
+/// Resolves the path of a CLP binary under `clp_home`, joining `bin/{binary}`.
 ///
 /// # Returns
 ///
 /// The path to the named binary under the CLP installation.
-///
-/// # Errors
-///
-/// Returns an error if [`CLP_HOME_ENV_VAR`] is unset or not valid Unicode.
-fn clp_binary_path(binary: &str) -> anyhow::Result<PathBuf> {
-    let clp_home = std::env::var(CLP_HOME_ENV_VAR)
-        .context("failed to read the CLP_HOME environment variable")?;
-    Ok(Path::new(&clp_home).join("bin").join(binary))
+fn clp_binary_path(clp_home: &Path, binary: &str) -> PathBuf {
+    clp_home.join("bin").join(binary)
 }
 
-/// Resolves the S3 archive-output staging directory and S3 config from `config`.
+/// Resolves the S3 config the archives are uploaded to from `config`.
 ///
 /// # Returns
 ///
-/// The staging directory and the S3 config the archives are uploaded to.
+/// The S3 config the archives are uploaded to.
 ///
 /// # Errors
 ///
 /// Returns an error if `config`'s archive output is not S3-backed, which this flow requires.
-fn s3_archive_output(config: &SpiderTaskExecutorConfig) -> anyhow::Result<(&str, &S3Config)> {
+fn s3_archive_output(config: &SpiderTaskExecutorConfig) -> anyhow::Result<&S3Config> {
     match &config.archive_output.storage {
-        ArchiveOutputStorage::S3 {
-            staging_directory,
-            s3_config,
-        } => Ok((staging_directory, s3_config)),
+        ArchiveOutputStorage::S3 { s3_config, .. } => Ok(s3_config),
         ArchiveOutputStorage::Fs { .. } => {
             anyhow::bail!("S3 archive output is required for the S3 compression flow")
         }
