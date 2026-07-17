@@ -2,12 +2,23 @@
 name = "compression-coordinator"
 version = "0.13.1-dev"
 edition = "2024"
+autotests = false
+
+[lib]
+name = "compression_coordinator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "compression-coordinator"
+path = "src/bin/compression_coordinator.rs"
 
 [dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
 aws-sdk-s3 = "1.121.0"
+clap = { version = "4.5.56", features = ["derive"] }
 clp-rust-utils = { path = "../clp-rust-utils" }
+const_format = "0.2.35"
 non-empty-string = { version = "0.2.6", features = ["serde"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -16,4 +27,4 @@ spider-core = { git = "https://github.com/sitaowang1998/spider.git", branch = "i
 spider-tdl = { git = "https://github.com/sitaowang1998/spider.git", branch = "integration-test-dev-compose" }
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio"] }
 thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["fs", "rt-multi-thread"] }
+tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread"] }
