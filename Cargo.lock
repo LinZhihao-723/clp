@@ -942,6 +942,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "clp-rust-utils"
 version = "0.13.1-dev"
 dependencies = [
+ "anyhow",
  "aws-config",
  "aws-sdk-s3",
  "aws-sdk-sqs",
@@ -1018,6 +1019,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tonic",
 ]
 
 [[package]]
@@ -1501,7 +1503,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2116,7 +2118,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -3427,7 +3429,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3858,7 +3860,7 @@ dependencies = [
 [[package]]
 name = "spider-client"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "spider-core",
  "spider-proto-rust",
@@ -3871,7 +3873,7 @@ dependencies = [
 [[package]]
 name = "spider-core"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "non-empty-string",
  "rand 0.9.4",
@@ -3890,7 +3892,7 @@ dependencies = [
 [[package]]
 name = "spider-derive"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3900,7 +3902,7 @@ dependencies = [
 [[package]]
 name = "spider-proto-rust"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "prost",
  "spider-core",
@@ -3914,7 +3916,7 @@ dependencies = [
 [[package]]
 name = "spider-tdl"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "const-str",
  "rmp-serde",
@@ -3927,7 +3929,7 @@ dependencies = [
 [[package]]
 name = "spider-tdl-derive"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3937,7 +3939,7 @@ dependencies = [
 [[package]]
 name = "spider-utils"
 version = "0.1.0"
-source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cba89da79ebd8906769915568e7db4cd7106e339"
+source = "git+https://github.com/LinZhihao-723/spider.git?branch=integration-test-dev-compose#cf82a6f8f2e40db3d5774764fa151731b3a74838"
 dependencies = [
  "rand 0.9.4",
  "rmp-serde",
@@ -4303,7 +4305,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

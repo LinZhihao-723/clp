@@ -19,3 +19,6 @@ spider-tdl = { git = "https://github.com/LinZhihao-723/spider.git", branch = "in
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["fs", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+tonic = "0.14.6"
