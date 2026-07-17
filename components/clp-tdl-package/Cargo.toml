@@ -10,5 +10,5 @@ crate-type = ["cdylib", "rlib"]
 compression-coordinator = { path = "../compression-coordinator" }
 rmp-serde = "1.3.1"
 serde = { version = "1.0.228", features = ["derive"] }
-spider-core = { git = "https://github.com/sitaowang1998/spider.git", branch = "integration-test-dev-compose" }
-spider-tdl = { git = "https://github.com/sitaowang1998/spider.git", branch = "integration-test-dev-compose", features = ["derive"] }
+spider-core = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
+spider-tdl = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose", features = ["derive"] }

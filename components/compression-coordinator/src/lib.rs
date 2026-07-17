@@ -3,6 +3,7 @@
 
 pub mod compression_job_submitter;
 mod error;
+mod spider_submitter;
 pub mod task;
 pub mod task_io;
 
