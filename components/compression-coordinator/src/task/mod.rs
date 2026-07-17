@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 
+pub mod commit;
 pub mod s3_compression;
 
 /// Returns the process-wide Spider task executor config, loading it from `CLP_CONFIG_PATH` on first
@@ -20,7 +21,7 @@ pub mod s3_compression;
 /// Panics if `CLP_CONFIG_PATH` is unset or not valid Unicode, or if the YAML file at that path
 /// cannot be read or parsed.
 #[must_use]
-pub(crate) fn spider_task_executor_config() -> &'static SpiderTaskExecutorConfig {
+pub fn spider_task_executor_config() -> &'static SpiderTaskExecutorConfig {
     &SPIDER_TASK_EXECUTOR_CONFIG
 }
 
@@ -72,4 +73,35 @@ fn load_spider_task_executor_config_from_env() -> SpiderTaskExecutorConfig {
     clp_rust_utils::serde::yaml::from_path(&path).unwrap_or_else(|e| {
         panic!("failed to load the Spider task executor config from `{path}`: {e}")
     })
+}
+
+/// Uploads a local file to S3 with a single `PutObject` (mirror of Python's `s3_put`).
+///
+/// # Returns
+///
+/// `()` once the object has been uploaded.
+///
+/// # Errors
+///
+/// Returns an error if `src` cannot be read into a body stream or the `PutObject` request fails.
+async fn put_file(
+    client: &aws_sdk_s3::Client,
+    bucket: &str,
+    key: &str,
+    src: &std::path::Path,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+
+    let body = aws_sdk_s3::primitives::ByteStream::from_path(src)
+        .await
+        .with_context(|| format!("failed to read {} for upload", src.display()))?;
+    client
+        .put_object()
+        .bucket(bucket)
+        .key(key)
+        .body(body)
+        .send()
+        .await
+        .with_context(|| format!("failed to upload to s3://{bucket}/{key}"))?;
+    Ok(())
 }

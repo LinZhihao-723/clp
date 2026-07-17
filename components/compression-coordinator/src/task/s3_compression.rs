@@ -16,7 +16,7 @@ use clp_rust_utils::{
         package::config::{ArchiveOutputStorage, Database, SpiderTaskExecutorConfig},
     },
     dataset::CLP_DEFAULT_DATASET_NAME,
-    s3::{create_new_client, generate_s3_url, put_file},
+    s3::{create_new_client, generate_s3_url},
 };
 use non_empty_string::NonEmptyString;
 
@@ -103,7 +103,7 @@ pub fn compress(
                         run_indexer(&indexer_bin, &db_config, &dataset, &index_path)
                     });
                     let (upload_result, index_result) =
-                        tokio::join!(put_file(&client, &bucket, &key, &local_path), index,);
+                        tokio::join!(super::put_file(&client, &bucket, &key, &local_path), index,);
                     upload_result.with_context(|| {
                         format!("failed to upload archive to s3://{bucket}/{key}")
                     })?;

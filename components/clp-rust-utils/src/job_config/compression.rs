@@ -1,5 +1,6 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
+use sqlx::{Database, Decode, Encode, MySql, encode::IsNull, error::BoxDynError};
 use strum::EnumString;
 use utoipa::ToSchema;
 
@@ -32,4 +33,22 @@ pub enum CompressionJobStatus {
     Failed = 3,
     /// Job was killed by a user.
     Killed = 4,
+}
+
+crate::impl_sqlx_type!(CompressionJobStatus => i32);
+
+impl<'r> Decode<'r, MySql> for CompressionJobStatus {
+    fn decode(value: <MySql as Database>::ValueRef<'r>) -> Result<Self, BoxDynError> {
+        let raw = <i32 as Decode<MySql>>::decode(value)?;
+        Ok(Self::try_from(raw)?)
+    }
+}
+
+impl<'q> Encode<'q, MySql> for CompressionJobStatus {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <MySql as Database>::ArgumentBuffer<'q>,
+    ) -> Result<IsNull, BoxDynError> {
+        <i32 as Encode<MySql>>::encode_by_ref(&i32::from(*self), buf)
+    }
 }

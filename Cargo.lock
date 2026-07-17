@@ -968,6 +968,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clp-tdl-package"
+version = "0.13.1-dev"
+dependencies = [
+ "compression-coordinator",
+ "rmp-serde",
+ "serde",
+ "spider-core",
+ "spider-tdl",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -997,10 +1008,12 @@ dependencies = [
  "aws-sdk-s3",
  "clp-rust-utils",
  "non-empty-string",
+ "secrecy",
  "serde",
  "serde_json",
  "spider-core",
  "spider-tdl",
+ "sqlx",
  "thiserror",
  "tokio",
 ]
@@ -3786,7 +3799,18 @@ dependencies = [
  "rmp-serde",
  "serde",
  "spider-core",
+ "spider-tdl-derive",
  "thiserror",
+]
+
+[[package]]
+name = "spider-tdl-derive"
+version = "0.1.0"
+source = "git+https://github.com/sitaowang1998/spider.git?branch=integration-test-dev-compose#ee4440f23d20fce9f28ede9452c5c514416efda7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
