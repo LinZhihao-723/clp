@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use clp_rust_utils::{
     job_config::{ClpIoConfig, CompressionJobId, CompressionJobStatus, InputConfig},
-    serde::BrotliMsgpack,
+    serde::{BrotliMsgpack, BrotliMsgpackBytes},
 };
 use const_format::formatcp;
 use sqlx::MySqlPool;
@@ -13,7 +13,7 @@ const COMPRESSION_JOB_TABLE_NAME: &str = "compression_jobs";
 struct CompressionJob {
     id: CompressionJobId,
     #[sqlx(rename = "clp_config")]
-    clp_io_config: Vec<u8>,
+    clp_io_config: BrotliMsgpackBytes,
 }
 
 pub struct CompressionCoordinator {
@@ -51,7 +51,7 @@ impl CompressionCoordinator {
             let clp_io_config: ClpIoConfig =
                 match BrotliMsgpack::deserialize(&job_row.clp_io_config) {
                     Ok(config) => config,
-                    Err(err) => {
+                    Err(_) => {
                         const ERR_MSG: &str = "Failed to decompress job config. The config data \
                                                may have been corrupted or truncated.";
                         const QUERY: &str = formatcp!(
