@@ -48,7 +48,26 @@ impl CompressionCoordinator {
 
         let jobs = self.fetch_new_jobs().await?;
         for job_row in jobs {
-            let clp_io_config: ClpIoConfig = BrotliMsgpack::deserialize(&job_row.clp_io_config)?;
+            let clp_io_config: ClpIoConfig =
+                match BrotliMsgpack::deserialize(&job_row.clp_io_config) {
+                    Ok(config) => config,
+                    Err(err) => {
+                        const ERR_MSG: &str = "Failed to decompress job config. The config data \
+                                               may have been corrupted or truncated.";
+                        const QUERY: &str = formatcp!(
+                            "UPDATE `{table}` SET `status` = ?, `status_msg` = ?, `update_time` = \
+                             CURRENT_TIMESTAMP() WHERE `id` = ?;",
+                            table = COMPRESSION_JOB_TABLE_NAME,
+                        );
+                        sqlx::query(QUERY)
+                            .bind(CompressionJobStatus::Failed)
+                            .bind(ERR_MSG)
+                            .bind(job_row.id)
+                            .execute(&self.db_pool)
+                            .await?;
+                        continue;
+                    }
+                };
             let input_type = match &clp_io_config.input {
                 InputConfig::S3InputConfig { .. } => "s3",
                 InputConfig::S3ObjectMetadataInputConfig { .. } => "s3_object_metadata",
