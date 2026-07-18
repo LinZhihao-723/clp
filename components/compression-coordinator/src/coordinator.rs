@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clp_rust_utils::{
     job_config::{
@@ -8,10 +8,11 @@ use clp_rust_utils::{
         InputConfig,
         S3ObjectMetadataInputConfig,
     },
-    s3::S3ObjectMetadataId,
+    s3::{ObjectMetadata, S3ObjectMetadataId},
     serde::{BrotliMsgpack, BrotliMsgpackBytes},
 };
 use const_format::formatcp;
+use non_empty_string::NonEmptyString;
 use sqlx::MySqlPool;
 
 use crate::partition::PathsToCompressBuffer;
@@ -153,10 +154,26 @@ impl CompressionCoordinator {
     /// Fetches S3 object metadata rows from the `ingested_s3_object_metadata` table for the given
     /// `s3_object_metadata_ids` and `ingestion_job_id`, and adds the metadata to
     /// `paths_to_compress_buffer`.
+    ///
+    /// # Parameters
+    ///
+    /// * `config`: Contains the ingestion job ID, requested S3 object metadata IDs, bucket, and
+    ///   required key prefix.
+    /// * `paths_to_compress_buffer`: The buffer to which validated object metadata is added.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`anyhow::Error`] if the database query fails to fetch the requested S3 object metadata.
+    /// * [`anyhow::Error`] if no metadata rows are found for the requested metadata IDs and
+    ///   ingestion job ID.
+    /// * [`anyhow::Error`] if any requested metadata ID is missing from the query results.
+    /// * [`anyhow::Error`] if a returned object key does not begin with the configured key prefix.
     async fn process_s3_object_metadata_input(
         &self,
         config: &S3ObjectMetadataInputConfig,
-        _paths_to_compress_buffer: &mut PathsToCompressBuffer,
+        paths_to_compress_buffer: &mut PathsToCompressBuffer,
     ) -> anyhow::Result<()> {
         let s3_object_metadata_ids = &config.s3_object_metadata_ids;
         let ingestion_job_id = config.ingestion_job_id;
@@ -173,13 +190,6 @@ impl CompressionCoordinator {
             .push(") AND `ingestion_job_id` = ")
             .push_bind(ingestion_job_id);
 
-        tracing::info!(
-            query = query_builder.sql(),
-            ?s3_object_metadata_ids,
-            ingestion_job_id,
-            "Built S3 object metadata query"
-        );
-
         let metadata_list = query_builder
             .build_query_as::<(S3ObjectMetadataId, String, u64)>()
             .fetch_all(&self.db_pool)
@@ -190,6 +200,37 @@ impl CompressionCoordinator {
                  s3_object_metadata_ids and ingestion_job_id {}.",
                 ingestion_job_id,
             ));
+        }
+
+        let returned_ids: HashSet<S3ObjectMetadataId> = metadata_list
+            .iter()
+            .map(|(metadata_id, ..)| *metadata_id)
+            .collect();
+        let requested_ids: HashSet<S3ObjectMetadataId> =
+            s3_object_metadata_ids.iter().copied().collect();
+
+        let mut missing_ids: Vec<S3ObjectMetadataId> =
+            requested_ids.difference(&returned_ids).copied().collect();
+        missing_ids.sort();
+
+        if !missing_ids.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Missing metadata rows in {INGESTED_S3_OBJECT_METADATA_TABLE_NAME} for \
+                 ingestion_job_id {ingestion_job_id}: {missing_ids:?}."
+            ));
+        }
+
+        for (_, key, size) in metadata_list {
+            if !key.starts_with(config.s3_config.key_prefix.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Metadata key {key} does not start with the key prefix {}.",
+                    config.s3_config.key_prefix,
+                ));
+            }
+
+            let key = NonEmptyString::try_from(key).map_err(anyhow::Error::msg)?;
+            let object_metadata = ObjectMetadata::new(config.s3_config.bucket.clone(), key, size);
+            paths_to_compress_buffer.add_file(object_metadata);
         }
 
         Ok(())
