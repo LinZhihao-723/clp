@@ -1,10 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     clp_config::{AwsAuthentication, S3Config},
     dataset::resolve_dataset_name,
+    serde::deserialize_duration_seconds,
 };
 
 /// Mirror of `clp_py_utils.clp_config.ClpConfig`.
@@ -20,6 +24,7 @@ pub struct Config {
     pub package: Package,
     pub database: Database,
     pub results_cache: ResultsCache,
+    pub compression_scheduler: CompressionScheduler,
     pub api_server: Option<ApiServer>,
     pub log_ingestor: Option<LogIngestor>,
     pub logs_directory: String,
@@ -35,6 +40,7 @@ impl Default for Config {
             package: Package::default(),
             database: Database::default(),
             results_cache: ResultsCache::default(),
+            compression_scheduler: CompressionScheduler::default(),
             api_server: Some(ApiServer::default()),
             log_ingestor: Some(LogIngestor::default()),
             logs_directory: "var/log".to_owned(),
@@ -44,6 +50,43 @@ impl Default for Config {
             },
             archive_output: ArchiveOutput::default(),
             telemetry: Telemetry::default(),
+        }
+    }
+}
+
+/// Mirror of `clp_py_utils.clp_config.OrchestrationType`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub enum OrchestrationType {
+    #[serde(rename = "celery")]
+    Celery,
+
+    #[serde(rename = "spider")]
+    Spider,
+}
+
+/// Mirror of `clp_py_utils.clp_config.CompressionScheduler`.
+///
+/// The Rust default orchestration type is `spider`, while the Python default is `celery`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(default)]
+pub struct CompressionScheduler {
+    #[serde(deserialize_with = "deserialize_duration_seconds")]
+    pub jobs_poll_delay: Duration,
+    pub max_concurrent_tasks_per_job: u64,
+    pub logging_level: String,
+    #[serde(rename = "type")]
+    pub orchestration_type: OrchestrationType,
+    pub telemetry_update_interval_ms: u64,
+}
+
+impl Default for CompressionScheduler {
+    fn default() -> Self {
+        Self {
+            jobs_poll_delay: Duration::from_millis(100),
+            max_concurrent_tasks_per_job: 0,
+            logging_level: "INFO".to_owned(),
+            orchestration_type: OrchestrationType::Spider,
+            telemetry_update_interval_ms: 60_000,
         }
     }
 }
@@ -524,14 +567,16 @@ fn make_config_path_absolute(root: &Path, path: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{path::Path, time::Duration};
 
     use super::{
         ArchiveOutput,
         ArchiveOutputStorage,
+        CompressionScheduler,
         Database,
         DatabaseEngine,
         LogsInput,
+        OrchestrationType,
         SpiderTaskExecutorConfig,
     };
 
@@ -613,6 +658,36 @@ mod tests {
             archive_output.dataset_archive_storage_directory(None),
             "prefix/default"
         );
+    }
+
+    #[test]
+    fn deserialize_compression_scheduler_config() {
+        let config = serde_json::from_value::<CompressionScheduler>(serde_json::json!({
+            "jobs_poll_delay": 0.25,
+            "max_concurrent_tasks_per_job": 8,
+            "logging_level": "DEBUG",
+            "type": "spider",
+            "telemetry_update_interval_ms": 30000,
+        }))
+        .expect("failed to deserialize `CompressionScheduler` from JSON");
+
+        assert_eq!(config.jobs_poll_delay, Duration::from_millis(250));
+        assert_eq!(config.max_concurrent_tasks_per_job, 8);
+        assert_eq!(config.logging_level, "DEBUG");
+        assert_eq!(config.orchestration_type, OrchestrationType::Spider);
+        assert_eq!(config.telemetry_update_interval_ms, 30_000);
+    }
+
+    #[test]
+    fn deserialize_compression_scheduler_applies_defaults() {
+        let config = serde_json::from_value::<CompressionScheduler>(serde_json::json!({}))
+            .expect("failed to deserialize `CompressionScheduler` from JSON");
+
+        assert_eq!(config.jobs_poll_delay, Duration::from_millis(100));
+        assert_eq!(config.max_concurrent_tasks_per_job, 0);
+        assert_eq!(config.logging_level, "INFO");
+        assert_eq!(config.orchestration_type, OrchestrationType::Spider);
+        assert_eq!(config.telemetry_update_interval_ms, 60_000);
     }
 
     #[test]

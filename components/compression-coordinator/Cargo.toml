@@ -29,7 +29,8 @@ spider-core = { git = "https://github.com/LinZhihao-723/spider.git", branch = "i
 spider-tdl = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio"] }
 thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread", "signal", "time"] }
+tracing = "0.1.44"
 
 [dev-dependencies]
 tonic = "0.14.6"
