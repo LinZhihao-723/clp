@@ -8,6 +8,7 @@ use clp_rust_utils::{
         InputConfig,
         S3ObjectMetadataInputConfig,
     },
+    s3::S3ObjectMetadataId,
     serde::{BrotliMsgpack, BrotliMsgpackBytes},
 };
 use const_format::formatcp;
@@ -16,6 +17,7 @@ use sqlx::MySqlPool;
 use crate::partition::PathsToCompressBuffer;
 
 const COMPRESSION_JOB_TABLE_NAME: &str = "compression_jobs";
+const INGESTED_S3_OBJECT_METADATA_TABLE_NAME: &str = "ingested_s3_object_metadata";
 
 #[derive(Debug, sqlx::FromRow)]
 struct CompressionJob {
@@ -56,52 +58,70 @@ impl CompressionCoordinator {
 
         let jobs = self.fetch_new_jobs().await?;
         for job_row in jobs {
-            let clp_io_config: ClpIoConfig =
-                match BrotliMsgpack::deserialize(&job_row.clp_io_config) {
-                    Ok(config) => config,
-                    Err(_) => {
-                        const ERR_MSG: &str = "Failed to decompress job config. The config data \
-                                               may have been corrupted or truncated.";
-                        self.update_compression_job_metadata(
-                            job_row.id,
-                            CompressionJobStatus::Failed,
-                            ERR_MSG,
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
+            let job_id = job_row.id;
 
-            // Skips jobs that are not ingested from the log ingestor
-            let s3_object_metadata_input_config = match &clp_io_config.input {
-                InputConfig::S3InputConfig { .. } => continue,
-                InputConfig::S3ObjectMetadataInputConfig { config } => config.clone(),
-            };
-
-            let mut paths_to_compress_buffer =
-                PathsToCompressBuffer::new(job_row.id, clp_io_config, self.db_pool.clone());
-
-            match Self::process_s3_object_metadata_input(
-                &s3_object_metadata_input_config,
-                &mut paths_to_compress_buffer,
-            )
-            .await
-            {
-                Ok(()) => {}
-                Err(err) => {
-                    let status_msg = format!("Failed to process S3 object metadata input: {err}");
-                    self.update_compression_job_metadata(
-                        job_row.id,
-                        CompressionJobStatus::Failed,
-                        &status_msg,
-                    )
-                    .await?;
+            match self.schedule_job(job_row).await {
+                Ok(true) => continue,
+                Ok(false) => {
+                    tracing::debug!("Failed to schedule job {job_id}");
                     continue;
+                }
+                Err(err) => {
+                    tracing::warn!(error = ?err, "Unexpected error while scheduling job {job_id}");
+                    return Err(err);
                 }
             }
         }
 
         Ok(())
+    }
+
+    async fn schedule_job(&self, job_row: CompressionJob) -> anyhow::Result<bool> {
+        let clp_io_config: ClpIoConfig = match BrotliMsgpack::deserialize(&job_row.clp_io_config) {
+            Ok(config) => config,
+            Err(_) => {
+                const ERR_MSG: &str = "Failed to decompress job config. The config data may have \
+                                       been corrupted or truncated.";
+                self.update_compression_job_metadata(
+                    job_row.id,
+                    CompressionJobStatus::Failed,
+                    ERR_MSG,
+                )
+                .await?;
+                return Ok(false);
+            }
+        };
+
+        // Skips jobs that are not ingested from the log ingestor
+        let s3_object_metadata_input_config = match &clp_io_config.input {
+            InputConfig::S3InputConfig { .. } => return Ok(false),
+            InputConfig::S3ObjectMetadataInputConfig { config } => config.clone(),
+        };
+
+        let mut paths_to_compress_buffer =
+            PathsToCompressBuffer::new(job_row.id, clp_io_config, self.db_pool.clone());
+
+        match self
+            .process_s3_object_metadata_input(
+                &s3_object_metadata_input_config,
+                &mut paths_to_compress_buffer,
+            )
+            .await
+        {
+            Ok(()) => {}
+            Err(err) => {
+                let status_msg = format!("Failed to process S3 object metadata input: {err}");
+                self.update_compression_job_metadata(
+                    job_row.id,
+                    CompressionJobStatus::Failed,
+                    &status_msg,
+                )
+                .await?;
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     pub async fn poll_running_jobs(&mut self) -> bool {
@@ -134,9 +154,44 @@ impl CompressionCoordinator {
     /// `s3_object_metadata_ids` and `ingestion_job_id`, and adds the metadata to
     /// `paths_to_compress_buffer`.
     async fn process_s3_object_metadata_input(
-        _config: &S3ObjectMetadataInputConfig,
+        &self,
+        config: &S3ObjectMetadataInputConfig,
         _paths_to_compress_buffer: &mut PathsToCompressBuffer,
     ) -> anyhow::Result<()> {
+        let s3_object_metadata_ids = &config.s3_object_metadata_ids;
+        let ingestion_job_id = config.ingestion_job_id;
+
+        let mut query_builder = sqlx::QueryBuilder::<sqlx::MySql>::new(formatcp!(
+            "SELECT `id`, `key`, `size` FROM `{table}` WHERE `id` IN (",
+            table = INGESTED_S3_OBJECT_METADATA_TABLE_NAME,
+        ));
+        let mut separated_ids = query_builder.separated(", ");
+        for id in s3_object_metadata_ids {
+            separated_ids.push_bind(id);
+        }
+        query_builder
+            .push(") AND `ingestion_job_id` = ")
+            .push_bind(ingestion_job_id);
+
+        tracing::info!(
+            query = query_builder.sql(),
+            ?s3_object_metadata_ids,
+            ingestion_job_id,
+            "Built S3 object metadata query"
+        );
+
+        let metadata_list = query_builder
+            .build_query_as::<(S3ObjectMetadataId, String, u64)>()
+            .fetch_all(&self.db_pool)
+            .await?;
+        if metadata_list.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No rows found in {INGESTED_S3_OBJECT_METADATA_TABLE_NAME} for the given \
+                 s3_object_metadata_ids and ingestion_job_id {}.",
+                ingestion_job_id,
+            ));
+        }
+
         Ok(())
     }
 }
