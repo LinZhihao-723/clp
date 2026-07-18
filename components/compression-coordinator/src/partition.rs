@@ -5,7 +5,6 @@ use clp_rust_utils::{
     s3::ObjectMetadata,
     serde::BrotliMsgpackBytes,
 };
-use sqlx::MySqlPool;
 
 struct FileMetadata {
     path: PathBuf,
@@ -30,7 +29,6 @@ struct TaskArguments {
     task_id: i32,
     clp_io_config: ClpIoConfig,
     paths_to_compress: Option<PathsToCompress>,
-    db_pool: MySqlPool,
 }
 
 pub(crate) struct PathsToCompressBuffer {
@@ -47,11 +45,7 @@ pub(crate) struct PathsToCompressBuffer {
 }
 
 impl PathsToCompressBuffer {
-    pub(crate) fn new(
-        scheduling_job_id: CompressionJobId,
-        clp_io_config: ClpIoConfig,
-        db_pool: MySqlPool,
-    ) -> Self {
+    pub(crate) fn new(scheduling_job_id: CompressionJobId, clp_io_config: ClpIoConfig) -> Self {
         let target_archive_size = clp_io_config.output.target_archive_size;
 
         Self {
@@ -69,7 +63,6 @@ impl PathsToCompressBuffer {
                 task_id: -1,
                 clp_io_config,
                 paths_to_compress: None,
-                db_pool,
             },
         }
     }
