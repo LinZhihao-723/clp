@@ -18,10 +18,10 @@ static INIT_TASK_TRACING: Once = Once::new();
 /// Installs a stderr `tracing` subscriber into this cdylib's own global dispatcher.
 ///
 /// The task-executor and this dlopen'd package each statically link their own copy of `tracing`,
-/// so they have independent global dispatchers. The executor's subscriber is invisible here; without
-/// this call every task-side event hits `NoSubscriber` and is dropped. The subscriber mirrors the
-/// executor's format (JSON to stderr, `RUST_LOG`-driven filter) so both streams interleave in the
-/// same executor log file.
+/// so they have independent global dispatchers. The executor's subscriber is invisible here;
+/// without this call every task-side event hits `NoSubscriber` and is dropped. The subscriber
+/// mirrors the executor's format (JSON to stderr, `RUST_LOG`-driven filter) so both streams
+/// interleave in the same executor log file.
 fn init_task_tracing() {
     INIT_TASK_TRACING.call_once(|| {
         let _ = tracing_subscriber::fmt()

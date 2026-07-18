@@ -13,7 +13,12 @@ use clp_rust_utils::{
     clp_config::{
         AwsAuthentication,
         S3Config,
-        package::config::{ArchiveOutput, ArchiveOutputStorage, Database, SpiderTaskExecutorConfig},
+        package::config::{
+            ArchiveOutput,
+            ArchiveOutputStorage,
+            Database,
+            SpiderTaskExecutorConfig,
+        },
     },
     dataset::resolve_dataset_name,
     s3::{create_new_client, generate_s3_url},
@@ -294,7 +299,11 @@ fn s3_archive_output(config: &SpiderTaskExecutorConfig) -> anyhow::Result<&S3Con
 /// # Returns
 ///
 /// The archive's S3 object key.
-fn create_archive_s3_key(archive_output: &ArchiveOutput, dataset: &str, archive_id: &str) -> String {
+fn create_archive_s3_key(
+    archive_output: &ArchiveOutput,
+    dataset: &str,
+    archive_id: &str,
+) -> String {
     format!(
         "{}/{archive_id}",
         archive_output.dataset_archive_storage_directory(Some(dataset))

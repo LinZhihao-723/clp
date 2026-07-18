@@ -4,12 +4,16 @@
 //! Usage: `cargo run --example commit_decode_probe -p compression-coordinator -- <payload.bin>`
 
 use compression_coordinator::CompressionTaskOutput;
-use spider_core::types::id::{JobId, ResourceGroupId, TaskId};
-use spider_core::types::io::SerializedTaskOutputs;
+use spider_core::types::{
+    id::{JobId, ResourceGroupId, TaskId},
+    io::SerializedTaskOutputs,
+};
 use spider_tdl::TaskContext;
 
 fn main() -> anyhow::Result<()> {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "payload.bin".to_owned());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "payload.bin".to_owned());
     let payload = std::fs::read(&path)?;
     println!(
         "payload: {} bytes, head={:02x?}",
@@ -36,7 +40,10 @@ fn main() -> anyhow::Result<()> {
 
     // (B) Full TaskContext msgpack round-trip: exactly what the EM (`rmp_serde::to_vec`) and the
     // .so (`rmp_serde::from_slice` + `get_task_graph_outputs`) do across the FFI boundary.
-    println!("\n== (B) TaskContext round-trip (EM to_vec -> .so from_slice -> get_task_graph_outputs) ==");
+    println!(
+        "\n== (B) TaskContext round-trip (EM to_vec -> .so from_slice -> get_task_graph_outputs) \
+         =="
+    );
     let ctx = TaskContext::new(
         JobId::from(1),
         TaskId::Commit,

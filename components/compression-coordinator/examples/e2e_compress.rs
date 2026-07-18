@@ -1,10 +1,10 @@
 //! End-to-end test harness that drives one full CLP S3 compression job on a Spider (Huntsman)
 //! cluster through the [`S3CompressionJobSubmitter`] implementation for [`SpiderClient`].
 //!
-//! Simulating the real coordinator flow, the harness decodes the `clp-s` options, dataset, and input
-//! S3 settings from the compression job's stored config blob (`compression_jobs.clp_config`, a
-//! Brotli-compressed msgpack [`ClpIoConfig`]) rather than from environment variables. It creates its
-//! own Spider resource group for the submission; only the CLP DB and Spider endpoint are
+//! Simulating the real coordinator flow, the harness decodes the `clp-s` options, dataset, and
+//! input S3 settings from the compression job's stored config blob (`compression_jobs.clp_config`,
+//! a Brotli-compressed msgpack [`ClpIoConfig`]) rather than from environment variables. It creates
+//! its own Spider resource group for the submission; only the CLP DB and Spider endpoint are
 //! environment-driven.
 //!
 //! Against a loaded CLP metadata-DB snapshot, the harness:
@@ -12,8 +12,8 @@
 //! 1. Reads the single compression job (its id and `clp_config` blob) and its ingested S3 object
 //!    keys from the CLP DB, decoding the job config to recover the `clp-s` options and input S3
 //!    settings.
-//! 2. Partitions the object keys into exactly [`NUM_COMPRESSION_TASKS`] compression tasks, as evenly
-//!    as possible.
+//! 2. Partitions the object keys into exactly [`NUM_COMPRESSION_TASKS`] compression tasks, as
+//!    evenly as possible.
 //! 3. Submits the job to Spider, persists the returned Spider job id, and marks the CLP job
 //!    `RUNNING`.
 //! 4. Ensures the target archives and column-metadata tables exist.
@@ -56,16 +56,16 @@ const CLP_TABLE_PREFIX: &str = "clp_";
 const NUM_COMPRESSION_TASKS: usize = 10;
 
 /// The external-id prefix of the Spider resource group the harness creates. A unique per-run suffix
-/// is appended so repeated runs against the same cluster do not collide (`add_resource_group` rejects
-/// a duplicate external id).
+/// is appended so repeated runs against the same cluster do not collide (`add_resource_group`
+/// rejects a duplicate external id).
 const HARNESS_RESOURCE_GROUP_EXTERNAL_ID_PREFIX: &str = "clp-e2e-harness";
 
 /// The password of the Spider resource group the harness creates.
 const HARNESS_RESOURCE_GROUP_PASSWORD: &[u8] = b"clp-e2e-harness";
 
 /// The harness's runtime configuration. Only the CLP DB and Spider endpoint are environment-driven;
-/// the `clp-s` options, dataset, and input S3 settings are decoded from the job's `clp_config` blob,
-/// and the resource group is created on the Spider cluster.
+/// the `clp-s` options, dataset, and input S3 settings are decoded from the job's `clp_config`
+/// blob, and the resource group is created on the Spider cluster.
 struct HarnessConfig {
     db_host: String,
     db_port: u16,
@@ -191,12 +191,13 @@ async fn read_job_object_keys(
     pool: &MySqlPool,
     clp_job_id: CompressionJobId,
 ) -> anyhow::Result<Vec<String>> {
-    let object_keys: Vec<String> =
-        sqlx::query_scalar("SELECT `key` FROM ingested_s3_object_metadata WHERE compression_job_id = ?")
-            .bind(clp_job_id)
-            .fetch_all(pool)
-            .await
-            .context("failed to read the job's ingested S3 object keys")?;
+    let object_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT `key` FROM ingested_s3_object_metadata WHERE compression_job_id = ?",
+    )
+    .bind(clp_job_id)
+    .fetch_all(pool)
+    .await
+    .context("failed to read the job's ingested S3 object keys")?;
     if object_keys.is_empty() {
         bail!("compression job {clp_job_id} has no ingested S3 objects");
     }
@@ -331,13 +332,24 @@ async fn run(config: HarnessConfig) -> anyhow::Result<()> {
             .unwrap_or_default()
     );
     let resource_group_id = client
-        .add_resource_group(external_resource_group_id, HARNESS_RESOURCE_GROUP_PASSWORD.to_vec())
+        .add_resource_group(
+            external_resource_group_id,
+            HARNESS_RESOURCE_GROUP_PASSWORD.to_vec(),
+        )
         .await
         .map_err(|error| anyhow::anyhow!("failed to create the Spider resource group: {error}"))?;
-    println!("created Spider resource group id: {}", resource_group_id.get());
+    println!(
+        "created Spider resource group id: {}",
+        resource_group_id.get()
+    );
 
     let spider_job_id: JobId = client
-        .submit_s3_compression_job(resource_group_id, clp_s_option, dataset.clone(), input_sources)
+        .submit_s3_compression_job(
+            resource_group_id,
+            clp_s_option,
+            dataset.clone(),
+            input_sources,
+        )
         .await
         .map_err(|error| anyhow::anyhow!("failed to submit the compression job: {error}"))?;
     println!("submitted Spider job id: {}", spider_job_id.get());
@@ -346,12 +358,12 @@ async fn run(config: HarnessConfig) -> anyhow::Result<()> {
         "UPDATE compression_jobs SET spider_id = ?, status = ?, start_time = CURRENT_TIMESTAMP() \
          WHERE id = ?",
     )
-        .bind(spider_job_id.get())
-        .bind(CompressionJobStatus::Running)
-        .bind(clp_job_id)
-        .execute(&pool)
-        .await
-        .context("failed to persist the Spider job id and mark the CLP job running")?;
+    .bind(spider_job_id.get())
+    .bind(CompressionJobStatus::Running)
+    .bind(clp_job_id)
+    .execute(&pool)
+    .await
+    .context("failed to persist the Spider job id and mark the CLP job running")?;
 
     let archives_table = ensure_metadata_tables(&pool, dataset.as_deref()).await?;
     println!("ensured metadata tables (archives table: `{archives_table}`)");
@@ -401,8 +413,8 @@ async fn verify_and_report(
         i64,
         Option<f64>,
     ) = sqlx::query_as(
-        "SELECT status, uncompressed_size, compressed_size, duration FROM compression_jobs \
-         WHERE id = ?",
+        "SELECT status, uncompressed_size, compressed_size, duration FROM compression_jobs WHERE \
+         id = ?",
     )
     .bind(clp_job_id)
     .fetch_one(pool)
@@ -410,7 +422,8 @@ async fn verify_and_report(
     .context("failed to read the CLP job's final state")?;
 
     let archives: Vec<(String, i64, i64, i64, i64)> = sqlx::query_as(&format!(
-        "SELECT id, begin_timestamp, end_timestamp, uncompressed_size, size FROM `{archives_table}`"
+        "SELECT id, begin_timestamp, end_timestamp, uncompressed_size, size FROM \
+         `{archives_table}`"
     ))
     .fetch_all(pool)
     .await
