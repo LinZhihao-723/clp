@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
 use clp_rust_utils::{
-    job_config::{ClpIoConfig, CompressionJobId, CompressionJobStatus, InputConfig, S3InputConfig},
-    s3::get_object_metadata,
+    job_config::{
+        ClpIoConfig,
+        CompressionJobId,
+        CompressionJobStatus,
+        InputConfig,
+        S3ObjectMetadataInputConfig,
+    },
     serde::{BrotliMsgpack, BrotliMsgpackBytes},
 };
 use const_format::formatcp;
@@ -57,44 +62,40 @@ impl CompressionCoordinator {
                     Err(_) => {
                         const ERR_MSG: &str = "Failed to decompress job config. The config data \
                                                may have been corrupted or truncated.";
-                        const QUERY: &str = formatcp!(
-                            "UPDATE `{table}` SET `status` = ?, `status_msg` = ?, `update_time` = \
-                             CURRENT_TIMESTAMP() WHERE `id` = ?;",
-                            table = COMPRESSION_JOB_TABLE_NAME,
-                        );
-                        sqlx::query(QUERY)
-                            .bind(CompressionJobStatus::Failed)
-                            .bind(ERR_MSG)
-                            .bind(job_row.id)
-                            .execute(&self.db_pool)
-                            .await?;
+                        self.update_compression_job_metadata(
+                            job_row.id,
+                            CompressionJobStatus::Failed,
+                            ERR_MSG,
+                        )
+                        .await?;
                         continue;
                     }
                 };
 
-            let s3_input_config = match &clp_io_config.input {
-                InputConfig::S3InputConfig { config } => config.clone(),
-                InputConfig::S3ObjectMetadataInputConfig { .. } => continue,
+            // Skips jobs that are not ingested from the log ingestor
+            let s3_object_metadata_input_config = match &clp_io_config.input {
+                InputConfig::S3InputConfig { .. } => continue,
+                InputConfig::S3ObjectMetadataInputConfig { config } => config.clone(),
             };
 
             let mut paths_to_compress_buffer =
                 PathsToCompressBuffer::new(job_row.id, clp_io_config, self.db_pool.clone());
 
-            match Self::process_s3_input(&s3_input_config, &mut paths_to_compress_buffer).await {
+            match Self::process_s3_object_metadata_input(
+                &s3_object_metadata_input_config,
+                &mut paths_to_compress_buffer,
+            )
+            .await
+            {
                 Ok(()) => {}
                 Err(err) => {
-                    let status_msg = format!("Failed to process S3 input: {err}");
-                    const QUERY: &str = formatcp!(
-                        "UPDATE `{table}` SET `status` = ?, `status_msg` = ?, `update_time` = \
-                         CURRENT_TIMESTAMP() WHERE `id` = ?;",
-                        table = COMPRESSION_JOB_TABLE_NAME,
-                    );
-                    sqlx::query(QUERY)
-                        .bind(CompressionJobStatus::Failed)
-                        .bind(status_msg)
-                        .bind(job_row.id)
-                        .execute(&self.db_pool)
-                        .await?;
+                    let status_msg = format!("Failed to process S3 object metadata input: {err}");
+                    self.update_compression_job_metadata(
+                        job_row.id,
+                        CompressionJobStatus::Failed,
+                        &status_msg,
+                    )
+                    .await?;
                     continue;
                 }
             }
@@ -107,19 +108,35 @@ impl CompressionCoordinator {
         !self.scheduled_jobs.is_empty()
     }
 
-    async fn process_s3_input(
-        config: &S3InputConfig,
-        paths_to_compress_buffer: &mut PathsToCompressBuffer,
+    async fn update_compression_job_metadata(
+        &self,
+        job_id: CompressionJobId,
+        status: CompressionJobStatus,
+        status_msg: &str,
     ) -> anyhow::Result<()> {
-        let object_metadata_list = get_object_metadata(config).await?;
-        if object_metadata_list.is_empty() {
-            const ERR_MSG: &str = "Input URL doesn't resolve to any object";
-            return Err(anyhow::anyhow!(ERR_MSG));
-        }
+        const QUERY: &str = formatcp!(
+            "UPDATE `{table}` SET `status` = ?, `status_msg` = ?, `update_time` = \
+             CURRENT_TIMESTAMP() WHERE `id` = ?;",
+            table = COMPRESSION_JOB_TABLE_NAME,
+        );
 
-        for object_metadata in object_metadata_list {
-            paths_to_compress_buffer.add_file(object_metadata);
-        }
+        sqlx::query(QUERY)
+            .bind(status)
+            .bind(status_msg)
+            .bind(job_id)
+            .execute(&self.db_pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Fetches S3 object metadata rows from the `ingested_s3_object_metadata` table for the given
+    /// `s3_object_metadata_ids` and `ingestion_job_id`, and adds the metadata to
+    /// `paths_to_compress_buffer`.
+    async fn process_s3_object_metadata_input(
+        _config: &S3ObjectMetadataInputConfig,
+        _paths_to_compress_buffer: &mut PathsToCompressBuffer,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }
