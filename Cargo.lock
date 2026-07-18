@@ -977,6 +977,8 @@ dependencies = [
  "serde",
  "spider-core",
  "spider-tdl",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
