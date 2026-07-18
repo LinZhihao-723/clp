@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
 use clp_rust_utils::{
-    job_config::{ClpIoConfig, CompressionJobId, CompressionJobStatus, InputConfig},
+    job_config::{ClpIoConfig, CompressionJobId, CompressionJobStatus, InputConfig, S3InputConfig},
+    s3::get_object_metadata,
     serde::{BrotliMsgpack, BrotliMsgpackBytes},
 };
 use const_format::formatcp;
 use sqlx::MySqlPool;
+
+use crate::partition::PathsToCompressBuffer;
 
 const COMPRESSION_JOB_TABLE_NAME: &str = "compression_jobs";
 
@@ -68,30 +71,55 @@ impl CompressionCoordinator {
                         continue;
                     }
                 };
-            let input_type = match &clp_io_config.input {
-                InputConfig::S3InputConfig { .. } => "s3",
-                InputConfig::S3ObjectMetadataInputConfig { .. } => "s3_object_metadata",
+
+            let s3_input_config = match &clp_io_config.input {
+                InputConfig::S3InputConfig { config } => config.clone(),
+                InputConfig::S3ObjectMetadataInputConfig { .. } => continue,
             };
-            tracing::info!(
-                "Deserialized compression job {}: input_type={input_type}, output={:#?}",
-                job_row.id,
-                clp_io_config.output
-            );
-            self.schedule_job(job_row.id, clp_io_config).await?;
+
+            let mut paths_to_compress_buffer =
+                PathsToCompressBuffer::new(job_row.id, clp_io_config, self.db_pool.clone());
+
+            match Self::process_s3_input(&s3_input_config, &mut paths_to_compress_buffer).await {
+                Ok(()) => {}
+                Err(err) => {
+                    let status_msg = format!("Failed to process S3 input: {err}");
+                    const QUERY: &str = formatcp!(
+                        "UPDATE `{table}` SET `status` = ?, `status_msg` = ?, `update_time` = \
+                         CURRENT_TIMESTAMP() WHERE `id` = ?;",
+                        table = COMPRESSION_JOB_TABLE_NAME,
+                    );
+                    sqlx::query(QUERY)
+                        .bind(CompressionJobStatus::Failed)
+                        .bind(status_msg)
+                        .bind(job_row.id)
+                        .execute(&self.db_pool)
+                        .await?;
+                    continue;
+                }
+            }
         }
 
         Ok(())
     }
 
-    async fn schedule_job(
-        &mut self,
-        _job_id: CompressionJobId,
-        _clp_io_config: ClpIoConfig,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     pub async fn poll_running_jobs(&mut self) -> bool {
         !self.scheduled_jobs.is_empty()
+    }
+
+    async fn process_s3_input(
+        config: &S3InputConfig,
+        paths_to_compress_buffer: &mut PathsToCompressBuffer,
+    ) -> anyhow::Result<()> {
+        let object_metadata_list = get_object_metadata(config).await?;
+        if object_metadata_list.is_empty() {
+            const ERR_MSG: &str = "Input URL doesn't resolve to any object";
+            return Err(anyhow::anyhow!(ERR_MSG));
+        }
+
+        for object_metadata in object_metadata_list {
+            paths_to_compress_buffer.add_file(object_metadata);
+        }
+        Ok(())
     }
 }
