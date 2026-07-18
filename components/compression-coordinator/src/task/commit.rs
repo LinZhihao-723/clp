@@ -4,7 +4,7 @@ use anyhow::Context;
 use clp_rust_utils::{
     clp_config::package::credentials,
     database::mysql::create_clp_db_mysql_pool,
-    dataset::VALID_DATASET_NAME_REGEX,
+    dataset::{VALID_DATASET_NAME_REGEX, resolve_dataset_name},
     job_config::{CompressionJobId, CompressionJobStatus},
 };
 use secrecy::SecretString;
@@ -37,9 +37,10 @@ pub fn commit(
     super::runtime().block_on(commit_async(spider_job_id, dataset, archives))
 }
 
-/// In one DB transaction, inserts all `archives` and CAS-transitions the CLP compression job (found
-/// by reverse-lookup on `spider_id`) from `RUNNING` to `SUCCEEDED`, recording the job's total sizes
-/// and duration.
+/// In one DB transaction, idempotently registers the dataset (defaulting a missing `dataset` to
+/// `CLP_DEFAULT_DATASET_NAME`) in the `datasets` table, inserts all `archives`, and CAS-transitions
+/// the CLP compression job (found by reverse-lookup on `spider_id`) from `RUNNING` to `SUCCEEDED`,
+/// recording the job's total sizes and duration.
 ///
 /// # Returns
 ///
@@ -70,7 +71,7 @@ async fn commit_async(
     {
         anyhow::bail!("invalid dataset name: {dataset}");
     }
-    let archives_table = archives_table_name(&config.database.table_prefix, dataset.as_deref());
+    let archives_table = config.database.archives_table_name(dataset.as_deref());
 
     let credentials = db_credentials_from_env()?;
 
@@ -104,6 +105,20 @@ async fn commit_async(
             "CLP compression job {id} is in unexpected state {status:?}; refusing to commit"
         );
     }
+
+    let datasets_table = config.database.datasets_table_name();
+    let archive_storage_directory = config
+        .archive_output
+        .dataset_archive_storage_directory(dataset.as_deref());
+    sqlx::query(&format!(
+        "INSERT INTO `{datasets_table}` (name, archive_storage_directory) VALUES (?, ?) ON \
+         DUPLICATE KEY UPDATE name = name"
+    ))
+    .bind(resolve_dataset_name(dataset.as_deref()))
+    .bind(&archive_storage_directory)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("failed to register dataset in `{datasets_table}`"))?;
 
     let mut builder = sqlx::QueryBuilder::<sqlx::MySql>::new(format!(
         "INSERT INTO `{archives_table}` (id, begin_timestamp, end_timestamp, uncompressed_size, \
@@ -165,34 +180,4 @@ fn db_credentials_from_env() -> anyhow::Result<credentials::Database> {
         user,
         password: SecretString::from(password),
     })
-}
-
-/// Builds the archives table name (mirror of Python's `_get_table_name`).
-///
-/// # Returns
-///
-/// `<table_prefix><dataset>_archives` when a dataset is given, otherwise `<table_prefix>archives`.
-fn archives_table_name(table_prefix: &str, dataset: Option<&str>) -> String {
-    dataset.map_or_else(
-        || format!("{table_prefix}archives"),
-        |dataset| format!("{table_prefix}{dataset}_archives"),
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::archives_table_name;
-
-    #[test]
-    fn archives_table_name_with_dataset() {
-        assert_eq!(
-            archives_table_name("clp_", Some("mydataset")),
-            "clp_mydataset_archives"
-        );
-    }
-
-    #[test]
-    fn archives_table_name_without_dataset() {
-        assert_eq!(archives_table_name("clp_", None), "clp_archives");
-    }
 }

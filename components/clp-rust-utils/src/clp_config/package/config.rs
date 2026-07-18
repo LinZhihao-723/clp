@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::clp_config::{AwsAuthentication, S3Config};
+use crate::{
+    clp_config::{AwsAuthentication, S3Config},
+    dataset::resolve_dataset_name,
+};
 
 /// Mirror of `clp_py_utils.clp_config.ClpConfig`.
 ///
@@ -159,6 +162,47 @@ pub struct Database {
 
     #[serde(skip)]
     pub table_prefix: String,
+}
+
+impl Database {
+    /// # Returns
+    ///
+    /// The archives table name `<prefix><dataset>_archives`, where a `None` dataset resolves to
+    /// `default`.
+    #[must_use]
+    pub fn archives_table_name(&self, dataset: Option<&str>) -> String {
+        self.archive_metadata_table_name("archives", dataset)
+    }
+
+    /// # Returns
+    ///
+    /// The column-metadata table name `<prefix><dataset>_column_metadata`, where a `None` dataset
+    /// resolves to `default`.
+    #[must_use]
+    pub fn column_metadata_table_name(&self, dataset: Option<&str>) -> String {
+        self.archive_metadata_table_name("column_metadata", dataset)
+    }
+
+    /// # Returns
+    ///
+    /// The datasets table name `<prefix>datasets`.
+    #[must_use]
+    pub fn datasets_table_name(&self) -> String {
+        format!("{}datasets", self.table_prefix)
+    }
+
+    /// Builds a per-dataset archive-metadata table name (mirror of Python's `_get_table_name`).
+    ///
+    /// # Returns
+    ///
+    /// `<prefix><dataset>_<suffix>`, where `dataset` defaults to the `CLP_S` default when `None`.
+    fn archive_metadata_table_name(&self, suffix: &str, dataset: Option<&str>) -> String {
+        format!(
+            "{}{}_{suffix}",
+            self.table_prefix,
+            resolve_dataset_name(dataset)
+        )
+    }
 }
 
 impl Default for Database {
@@ -346,6 +390,26 @@ pub struct ArchiveOutput {
     pub retention_period: Option<u64>,
 }
 
+impl ArchiveOutput {
+    /// Derives a dataset's `archive_storage_directory` (mirror of Python's `add_dataset`).
+    ///
+    /// # Returns
+    ///
+    /// The dataset's storage base (`s3_config.key_prefix` for S3, `directory` for `Fs`) joined with
+    /// `dataset`, where a `None` dataset resolves to `default`.
+    #[must_use]
+    pub fn dataset_archive_storage_directory(&self, dataset: Option<&str>) -> String {
+        let base = match &self.storage {
+            ArchiveOutputStorage::Fs { directory } => directory.as_str(),
+            ArchiveOutputStorage::S3 { s3_config, .. } => s3_config.key_prefix.as_str(),
+        };
+        Path::new(base)
+            .join(resolve_dataset_name(dataset))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
 impl Default for ArchiveOutput {
     fn default() -> Self {
         Self {
@@ -470,6 +534,86 @@ mod tests {
         LogsInput,
         SpiderTaskExecutorConfig,
     };
+
+    #[test]
+    fn archives_table_name_with_dataset() {
+        assert_eq!(
+            Database::default().archives_table_name(Some("mydataset")),
+            "clp_mydataset_archives"
+        );
+    }
+
+    #[test]
+    fn archives_table_name_defaults_none_to_default() {
+        assert_eq!(
+            Database::default().archives_table_name(None),
+            "clp_default_archives"
+        );
+    }
+
+    #[test]
+    fn column_metadata_table_name_with_dataset() {
+        assert_eq!(
+            Database::default().column_metadata_table_name(Some("mydataset")),
+            "clp_mydataset_column_metadata"
+        );
+    }
+
+    #[test]
+    fn datasets_table_name_is_prefix_datasets() {
+        assert_eq!(Database::default().datasets_table_name(), "clp_datasets");
+    }
+
+    #[test]
+    fn dataset_archive_storage_directory_fs() {
+        let archive_output = ArchiveOutput {
+            storage: ArchiveOutputStorage::Fs {
+                directory: "/var/data/archives".to_owned(),
+            },
+            ..ArchiveOutput::default()
+        };
+
+        assert_eq!(
+            archive_output.dataset_archive_storage_directory(Some("mydataset")),
+            "/var/data/archives/mydataset"
+        );
+        assert_eq!(
+            archive_output.dataset_archive_storage_directory(None),
+            "/var/data/archives/default"
+        );
+    }
+
+    #[test]
+    fn dataset_archive_storage_directory_s3() {
+        use non_empty_string::NonEmptyString;
+
+        use crate::clp_config::{AwsAuthentication, S3Config};
+
+        let archive_output = ArchiveOutput {
+            storage: ArchiveOutputStorage::S3 {
+                staging_directory: "var/data/staged-archives".to_owned(),
+                s3_config: S3Config {
+                    bucket: NonEmptyString::try_from("bucket".to_string())
+                        .expect("bucket is non-empty"),
+                    region_code: None,
+                    key_prefix: NonEmptyString::try_from("prefix".to_string())
+                        .expect("key prefix is non-empty"),
+                    endpoint_url: None,
+                    aws_authentication: AwsAuthentication::Default,
+                },
+            },
+            ..ArchiveOutput::default()
+        };
+
+        assert_eq!(
+            archive_output.dataset_archive_storage_directory(Some("mydataset")),
+            "prefix/mydataset"
+        );
+        assert_eq!(
+            archive_output.dataset_archive_storage_directory(None),
+            "prefix/default"
+        );
+    }
 
     #[test]
     fn deserialize_logs_input_s3_config() {

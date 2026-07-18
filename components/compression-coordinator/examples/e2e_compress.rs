@@ -32,6 +32,7 @@
 
 use anyhow::{Context, bail};
 use clp_rust_utils::{
+    clp_config::package::config::Database,
     dataset::VALID_DATASET_NAME_REGEX,
     job_config::{ClpIoConfig, CompressionJobId, CompressionJobStatus, InputConfig},
     serde::BrotliMsgpack,
@@ -107,19 +108,6 @@ impl HarnessConfig {
 /// The variable's value, or `default` when unset.
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_owned())
-}
-
-/// Builds the `<prefix>[<dataset>_]<suffix>` metadata-DB table name (mirror of Python's
-/// `_get_table_name`).
-///
-/// # Returns
-///
-/// `<prefix><dataset>_<suffix>` when a dataset is given, otherwise `<prefix><suffix>`.
-fn table_name(prefix: &str, suffix: &str, dataset: Option<&str>) -> String {
-    dataset.map_or_else(
-        || format!("{prefix}{suffix}"),
-        |dataset| format!("{prefix}{dataset}_{suffix}"),
-    )
 }
 
 /// Partitions `keys` into `num_groups` groups whose sizes differ by at most one, dropping empty
@@ -232,8 +220,12 @@ async fn ensure_metadata_tables(pool: &MySqlPool, dataset: Option<&str>) -> anyh
         bail!("invalid dataset name: {dataset}");
     }
 
-    let archives_table = table_name(CLP_TABLE_PREFIX, "archives", dataset);
-    let column_metadata_table = table_name(CLP_TABLE_PREFIX, "column_metadata", dataset);
+    let database = Database {
+        table_prefix: CLP_TABLE_PREFIX.to_owned(),
+        ..Database::default()
+    };
+    let archives_table = database.archives_table_name(dataset);
+    let column_metadata_table = database.column_metadata_table_name(dataset);
 
     sqlx::query(&format!(
         "CREATE TABLE IF NOT EXISTS `{archives_table}` (

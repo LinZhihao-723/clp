@@ -13,9 +13,9 @@ use clp_rust_utils::{
     clp_config::{
         AwsAuthentication,
         S3Config,
-        package::config::{ArchiveOutputStorage, Database, SpiderTaskExecutorConfig},
+        package::config::{ArchiveOutput, ArchiveOutputStorage, Database, SpiderTaskExecutorConfig},
     },
-    dataset::CLP_DEFAULT_DATASET_NAME,
+    dataset::resolve_dataset_name,
     s3::{create_new_client, generate_s3_url},
 };
 use non_empty_string::NonEmptyString;
@@ -61,7 +61,7 @@ pub fn compress(
     } = input_source;
     let credential_env = s3_credential_env(&aws_authentication);
 
-    let dataset = dataset.unwrap_or_else(|| CLP_DEFAULT_DATASET_NAME.to_owned());
+    let dataset = dataset.unwrap_or_else(|| resolve_dataset_name(None).to_owned());
     let s3_config = s3_archive_output(config)?;
     let archive_dir = config.abs_archive_output_staging(&clp_home).join(&dataset);
 
@@ -78,7 +78,6 @@ pub fn compress(
         &s3_config.aws_authentication,
     ));
     let bucket = s3_config.bucket.to_string();
-    let key_prefix = s3_config.key_prefix.to_string();
 
     let mut archives = Vec::new();
     let mut finishers = tokio::task::JoinSet::new();
@@ -91,7 +90,7 @@ pub fn compress(
         &credential_env,
         |archive| {
             let local_path = archive_dir.join(&archive.id);
-            let key = create_archive_s3_key(&key_prefix, &dataset, &archive.id);
+            let key = create_archive_s3_key(&config.archive_output, &dataset, &archive.id);
             let client = client.clone();
             let bucket = bucket.clone();
             let db_config = config.database.clone();
@@ -289,14 +288,17 @@ fn s3_archive_output(config: &SpiderTaskExecutorConfig) -> anyhow::Result<&S3Con
     }
 }
 
-/// Builds the S3 object key for an archive (mirror of Python's
-/// `<key_prefix><dataset>/<archive_id>`).
+/// Builds the S3 object key for an archive by appending `archive_id` to
+/// [`ArchiveOutput::dataset_archive_storage_directory`].
 ///
 /// # Returns
 ///
 /// The archive's S3 object key.
-fn create_archive_s3_key(key_prefix: &str, dataset: &str, archive_id: &str) -> String {
-    format!("{key_prefix}{dataset}/{archive_id}")
+fn create_archive_s3_key(archive_output: &ArchiveOutput, dataset: &str, archive_id: &str) -> String {
+    format!(
+        "{}/{archive_id}",
+        archive_output.dataset_archive_storage_directory(Some(dataset))
+    )
 }
 
 /// Builds the `indexer` command-line arguments for indexing one archive.
@@ -428,7 +430,14 @@ mod tests {
     use clp_rust_utils::clp_config::{
         AwsAuthentication,
         AwsCredentials,
-        package::config::{ClpDbNames, Database, DatabaseEngine},
+        S3Config,
+        package::config::{
+            ArchiveOutput,
+            ArchiveOutputStorage,
+            ClpDbNames,
+            Database,
+            DatabaseEngine,
+        },
     };
     use non_empty_string::NonEmptyString;
 
@@ -575,9 +584,25 @@ mod tests {
 
     #[test]
     fn archive_s3_key_joins_prefix_dataset_and_id() {
+        let archive_output = ArchiveOutput {
+            storage: ArchiveOutputStorage::S3 {
+                staging_directory: "var/data/staged-archives".to_owned(),
+                s3_config: S3Config {
+                    bucket: NonEmptyString::try_from("bucket".to_string())
+                        .expect("bucket is non-empty"),
+                    region_code: None,
+                    key_prefix: NonEmptyString::try_from("LIB1/".to_string())
+                        .expect("key prefix is non-empty"),
+                    endpoint_url: None,
+                    aws_authentication: AwsAuthentication::Default,
+                },
+            },
+            ..ArchiveOutput::default()
+        };
+
         assert_eq!(
-            create_archive_s3_key("prefix/", "default", "abc"),
-            "prefix/default/abc"
+            create_archive_s3_key(&archive_output, "default", "abc"),
+            "LIB1/default/abc"
         );
     }
 
