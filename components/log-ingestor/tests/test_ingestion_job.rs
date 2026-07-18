@@ -132,10 +132,12 @@ pub async fn upload_noise_objects(
     num_objects_to_create: usize,
 ) -> Result<()> {
     let objects_to_create: Vec<_> = (0..num_objects_to_create)
-        .map(|_| ObjectMetadata {
-            bucket: bucket.clone(),
-            key: NonEmptyString::from_string(format!("{}.log", Uuid::new_v4())),
-            size: 16,
+        .map(|_| {
+            ObjectMetadata::new(
+                bucket.clone(),
+                NonEmptyString::from_string(format!("{}.log", Uuid::new_v4())),
+                16,
+            )
         })
         .collect();
 

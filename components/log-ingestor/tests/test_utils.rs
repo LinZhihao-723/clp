@@ -72,11 +72,11 @@ pub async fn upload_test_objects(
                 3 => " ",
                 _ => unreachable!(),
             };
-            ObjectMetadata {
-                bucket: bucket.clone(),
-                key: NonEmptyString::from_string(format!("{prefix}/idx{idx:05}{placeholder}.log")),
-                size: 16,
-            }
+            ObjectMetadata::new(
+                bucket.clone(),
+                NonEmptyString::from_string(format!("{prefix}/idx{idx:05}{placeholder}.log")),
+                16,
+            )
         })
         .collect();
 

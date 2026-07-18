@@ -216,11 +216,11 @@ impl<SqsClientManager: AwsClientManagerType<Client>, State: IngestionJobState + 
             return None;
         }
 
-        Some(ObjectMetadata {
-            bucket: record.s3.bucket.name,
+        Some(ObjectMetadata::new(
+            record.s3.bucket.name,
             key,
-            size: record.s3.object.size,
-        })
+            record.s3.object.size,
+        ))
     }
 
     /// # Returns:

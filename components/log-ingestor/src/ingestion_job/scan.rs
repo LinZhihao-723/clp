@@ -67,11 +67,11 @@ pub async fn scan_prefix<
             }
             let non_empty_key = NonEmptyString::new(key)
                 .map_err(|_| anyhow::anyhow!("received an empty object key from S3"))?;
-            paged_object_metadata.push(ObjectMetadata {
-                bucket: bucket_name.clone(),
-                key: non_empty_key,
-                size: size.try_into()?,
-            });
+            paged_object_metadata.push(ObjectMetadata::new(
+                bucket_name.clone(),
+                non_empty_key,
+                size.try_into()?,
+            ));
         }
 
         if !paged_object_metadata.is_empty() {
