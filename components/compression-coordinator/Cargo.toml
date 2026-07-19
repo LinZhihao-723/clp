@@ -28,6 +28,7 @@ spider-client = { git = "https://github.com/LinZhihao-723/spider.git", branch = 
 spider-core = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
 spider-tdl = { git = "https://github.com/LinZhihao-723/spider.git", branch = "integration-test-dev-compose" }
 sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio"] }
+strsim = "0.11.1"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread", "signal", "time"] }
 tracing = "0.1.44"

@@ -99,7 +99,7 @@ impl CompressionCoordinator {
             InputConfig::S3ObjectMetadataInputConfig { config } => config.clone(),
         };
 
-        let mut paths_to_compress_buffer = PathsToCompressBuffer::new(job_row.id, clp_io_config);
+        let mut paths_to_compress_buffer = PathsToCompressBuffer::new(&clp_io_config);
 
         match self
             .process_s3_object_metadata_input(

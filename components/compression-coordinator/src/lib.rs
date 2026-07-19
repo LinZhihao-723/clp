@@ -5,6 +5,7 @@ pub mod compression_job_submitter;
 mod coordinator;
 mod error;
 mod partition;
+mod round_robin_partition;
 mod spider_submitter;
 pub mod task;
 pub mod task_io;
