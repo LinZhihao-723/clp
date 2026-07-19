@@ -122,6 +122,7 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
             let database = self.database.clone();
             let job_submitter = self.job_submitter.clone();
             let resource_group_id = self.resource_group_id;
+            tracing::info!("Sending job {job_id} for scheduling.");
             tokio::spawn(async move {
                 if let Err(err) =
                     Self::schedule_job(db_pool, database, job_submitter, resource_group_id, job_row)
@@ -207,6 +208,12 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
             return Ok(());
         }
 
+        tracing::info!(
+            num_partitions = input_sources.len(),
+            "Partitioned job {} into compression tasks.",
+            job_row.id
+        );
+
         let output_config = &clp_io_config.output;
         let clp_s_option = ClpSCompressionOption {
             target_encoded_size: output_config.target_segment_size
@@ -252,11 +259,24 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
         };
 
         Self::mark_job_scheduled(&db_pool, job_row.id, spider_job_id, num_tasks).await?;
+        tracing::info!(
+            spider_job_id = spider_job_id.get(),
+            num_tasks,
+            "Submitted job {} to Spider.",
+            job_row.id
+        );
 
-        match job_submitter
+        let completion = job_submitter
             .run_s3_compression_job_to_completion(spider_job_id)
-            .await
-        {
+            .await;
+        tracing::info!(
+            spider_job_id = spider_job_id.get(),
+            result = ?completion,
+            "Received the result of job {}.",
+            job_row.id
+        );
+
+        match completion {
             Ok(CompressionJobCompletion::Succeeded) => {}
             Ok(CompressionJobCompletion::Failed { error_message }) => {
                 let status_msg = format!("The Spider compression job failed: {error_message}");
