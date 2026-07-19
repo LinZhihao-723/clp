@@ -2,7 +2,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Parser;
-use clp_rust_utils::{clp_config::package, database::mysql::create_clp_db_mysql_pool, serde::yaml};
+use clp_rust_utils::{
+    clp_config::package::{self, config::StorageEngine},
+    database::mysql::create_clp_db_mysql_pool,
+    serde::yaml,
+};
 use compression_coordinator::CompressionCoordinator;
 use const_format::formatcp;
 use spider_client::SpiderClient;
@@ -126,6 +130,13 @@ async fn main() -> anyhow::Result<()> {
     let (config, credentials) = read_config_and_credentials(&args)?;
     let _guard = clp_rust_utils::logging::set_up_logging("compression_coordinator.log");
 
+    anyhow::ensure!(
+        StorageEngine::ClpS == config.package.storage_engine,
+        "The compression coordinator only supports the `clp-s` storage engine, but `{:?}` is \
+         configured.",
+        config.package.storage_engine,
+    );
+
     let spider_config = config.spider.as_ref().ok_or_else(|| {
         anyhow::anyhow!("`spider` must be configured for the compression coordinator")
     })?;
@@ -153,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
     let cancellation_token = CancellationToken::new();
     let coordinator = CompressionCoordinator::new(
         db_pool,
+        config.database.clone(),
         spider_client,
         resource_group_id,
         coordinator_config.jobs_poll_delay,

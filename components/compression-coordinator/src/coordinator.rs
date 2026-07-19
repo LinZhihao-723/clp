@@ -1,6 +1,9 @@
 use std::{collections::HashSet, time::Duration};
 
+use anyhow::Context;
 use clp_rust_utils::{
+    clp_config::package::config::Database,
+    dataset::VALID_DATASET_NAME_REGEX,
     job_config::{
         ClpIoConfig,
         CompressionJobId,
@@ -38,6 +41,7 @@ struct CompressionJob {
 
 pub struct CompressionCoordinator<Submitter: S3CompressionJobSubmitter + Clone + 'static> {
     db_pool: MySqlPool,
+    database: Database,
     job_submitter: Submitter,
     resource_group_id: ResourceGroupId,
     last_polled_job_id: Option<CompressionJobId>,
@@ -48,6 +52,7 @@ pub struct CompressionCoordinator<Submitter: S3CompressionJobSubmitter + Clone +
 impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordinator<Submitter> {
     pub fn new(
         db_pool: MySqlPool,
+        database: Database,
         job_submitter: Submitter,
         resource_group_id: ResourceGroupId,
         jobs_poll_delay: Duration,
@@ -55,6 +60,7 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
     ) -> Self {
         Self {
             db_pool,
+            database,
             job_submitter,
             resource_group_id,
             last_polled_job_id: None,
@@ -113,11 +119,13 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
             let job_id = job_row.id;
 
             let db_pool = self.db_pool.clone();
+            let database = self.database.clone();
             let job_submitter = self.job_submitter.clone();
             let resource_group_id = self.resource_group_id;
             tokio::spawn(async move {
                 if let Err(err) =
-                    Self::schedule_job(db_pool, job_submitter, resource_group_id, job_row).await
+                    Self::schedule_job(db_pool, database, job_submitter, resource_group_id, job_row)
+                        .await
                 {
                     tracing::error!(error = ?err, "Failed to schedule job {job_id}.");
                 }
@@ -129,6 +137,7 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
 
     async fn schedule_job(
         db_pool: MySqlPool,
+        database: Database,
         job_submitter: Submitter,
         resource_group_id: ResourceGroupId,
         job_row: CompressionJob,
@@ -208,6 +217,20 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
                 .map(String::from),
         };
         let dataset = s3_object_metadata_input_config.dataset.map(String::from);
+
+        if let Err(err) =
+            Self::ensure_metadata_tables(&db_pool, &database, dataset.as_deref()).await
+        {
+            let status_msg = format!("Failed to ensure the dataset's metadata tables: {err}");
+            Self::update_compression_job_metadata(
+                &db_pool,
+                job_row.id,
+                CompressionJobStatus::Failed,
+                &status_msg,
+            )
+            .await?;
+            return Ok(());
+        }
 
         let num_tasks = input_sources.len();
         let spider_job_id = match job_submitter
@@ -315,6 +338,53 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
             .bind(job_id)
             .execute(db_pool)
             .await?;
+
+        Ok(())
+    }
+
+    async fn ensure_metadata_tables(
+        db_pool: &MySqlPool,
+        database: &Database,
+        dataset: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if let Some(dataset) = dataset
+            && !VALID_DATASET_NAME_REGEX.is_match(dataset)
+        {
+            anyhow::bail!("invalid dataset name: {dataset}");
+        }
+
+        let archives_table = database.archives_table_name(dataset);
+        let column_metadata_table = database.column_metadata_table_name(dataset);
+
+        sqlx::query(&format!(
+            "CREATE TABLE IF NOT EXISTS `{archives_table}` (
+                `pagination_id` BIGINT unsigned NOT NULL AUTO_INCREMENT,
+                `id` VARCHAR(64) NOT NULL,
+                `begin_timestamp` BIGINT NOT NULL,
+                `end_timestamp` BIGINT NOT NULL,
+                `uncompressed_size` BIGINT NOT NULL,
+                `size` BIGINT NOT NULL,
+                `creator_id` VARCHAR(64) NOT NULL,
+                `creation_ix` INT NOT NULL,
+                KEY `archives_creation_order` (`creator_id`,`creation_ix`) USING BTREE,
+                UNIQUE KEY `archive_id` (`id`) USING BTREE,
+                PRIMARY KEY (`pagination_id`)
+            )"
+        ))
+        .execute(db_pool)
+        .await
+        .with_context(|| format!("failed to create the `{archives_table}` table"))?;
+
+        sqlx::query(&format!(
+            "CREATE TABLE IF NOT EXISTS `{column_metadata_table}` (
+                `name` VARCHAR(512) NOT NULL,
+                `type` TINYINT NOT NULL,
+                PRIMARY KEY (`name`, `type`)
+            )"
+        ))
+        .execute(db_pool)
+        .await
+        .with_context(|| format!("failed to create the `{column_metadata_table}` table"))?;
 
         Ok(())
     }
