@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use clp_rust_utils::{
     job_config::{
@@ -15,12 +15,16 @@ use const_format::formatcp;
 use non_empty_string::NonEmptyString;
 use spider_core::types::id::{JobId, ResourceGroupId};
 use sqlx::MySqlPool;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     compression_job_submitter::{CompressionJobCompletion, S3CompressionJobSubmitter},
     partition::PathsToCompressBuffer,
     task_io::ClpSCompressionOption,
 };
+
+// TODO: We should make each detached coroutine a struct holding important states and tags. It
+// should also take the cancellation token.
 
 const COMPRESSION_JOB_TABLE_NAME: &str = "compression_jobs";
 const INGESTED_S3_OBJECT_METADATA_TABLE_NAME: &str = "ingested_s3_object_metadata";
@@ -37,6 +41,8 @@ pub struct CompressionCoordinator<Submitter: S3CompressionJobSubmitter + Clone +
     job_submitter: Submitter,
     resource_group_id: ResourceGroupId,
     last_polled_job_id: Option<CompressionJobId>,
+    jobs_poll_delay: Duration,
+    cancellation_token: CancellationToken,
 }
 
 impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordinator<Submitter> {
@@ -44,13 +50,32 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
         db_pool: MySqlPool,
         job_submitter: Submitter,
         resource_group_id: ResourceGroupId,
+        jobs_poll_delay: Duration,
+        cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             db_pool,
             job_submitter,
             resource_group_id,
             last_polled_job_id: None,
+            jobs_poll_delay,
+            cancellation_token,
         }
+    }
+
+    /// # Errors
+    ///
+    /// Forwards [`Self::search_and_schedule_new_jobs`]'s errors.
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        loop {
+            self.search_and_schedule_new_jobs().await?;
+            tokio::select! {
+                () = self.cancellation_token.cancelled() => break,
+                () = tokio::time::sleep(self.jobs_poll_delay) => {}
+            }
+        }
+
+        Ok(())
     }
 
     async fn fetch_new_jobs(&mut self) -> anyhow::Result<Vec<CompressionJob>> {
@@ -82,7 +107,7 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
         Ok(rows)
     }
 
-    pub async fn search_and_schedule_new_tasks(&mut self) -> anyhow::Result<()> {
+    async fn search_and_schedule_new_jobs(&mut self) -> anyhow::Result<()> {
         let jobs = self.fetch_new_jobs().await?;
         for job_row in jobs {
             let job_id = job_row.id;
@@ -244,11 +269,6 @@ impl<Submitter: S3CompressionJobSubmitter + Clone + 'static> CompressionCoordina
         }
 
         Ok(())
-    }
-
-    pub async fn poll_running_jobs(&mut self) -> bool {
-        // TODO: Track in-flight Spider jobs and retrieve their results.
-        false
     }
 
     async fn update_compression_job_metadata(

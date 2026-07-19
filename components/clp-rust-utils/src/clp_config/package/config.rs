@@ -3,6 +3,7 @@ use std::{
     time::Duration,
 };
 
+use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -24,7 +25,6 @@ pub struct Config {
     pub package: Package,
     pub database: Database,
     pub results_cache: ResultsCache,
-    pub compression_scheduler: CompressionScheduler,
     pub api_server: Option<ApiServer>,
     pub log_ingestor: Option<LogIngestor>,
     pub logs_directory: String,
@@ -32,6 +32,8 @@ pub struct Config {
     pub logs_input: LogsInput,
     pub archive_output: ArchiveOutput,
     pub telemetry: Telemetry,
+    pub compression_coordinator: Option<CompressionCoordinator>,
+    pub spider: Option<Spider>,
 }
 
 impl Default for Config {
@@ -40,7 +42,6 @@ impl Default for Config {
             package: Package::default(),
             database: Database::default(),
             results_cache: ResultsCache::default(),
-            compression_scheduler: CompressionScheduler::default(),
             api_server: Some(ApiServer::default()),
             log_ingestor: Some(LogIngestor::default()),
             logs_directory: "var/log".to_owned(),
@@ -50,45 +51,36 @@ impl Default for Config {
             },
             archive_output: ArchiveOutput::default(),
             telemetry: Telemetry::default(),
+            compression_coordinator: None,
+            spider: None,
         }
     }
 }
 
-/// Mirror of `clp_py_utils.clp_config.OrchestrationType`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub enum OrchestrationType {
-    #[serde(rename = "celery")]
-    Celery,
-
-    #[serde(rename = "spider")]
-    Spider,
-}
-
-/// Mirror of `clp_py_utils.clp_config.CompressionScheduler`.
-///
-/// The Rust default orchestration type is `spider`, while the Python default is `celery`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(default)]
-pub struct CompressionScheduler {
+pub struct CompressionCoordinator {
+    pub service_name: NonEmptyString,
     #[serde(deserialize_with = "deserialize_duration_seconds")]
     pub jobs_poll_delay: Duration,
-    pub max_concurrent_tasks_per_job: u64,
-    pub logging_level: String,
-    #[serde(rename = "type")]
-    pub orchestration_type: OrchestrationType,
-    pub telemetry_update_interval_ms: u64,
+    pub termination_timeout_seconds: u64,
 }
 
-impl Default for CompressionScheduler {
+impl Default for CompressionCoordinator {
     fn default() -> Self {
         Self {
+            service_name: NonEmptyString::new("compression-coordinator".to_owned())
+                .expect("default service name should not be empty"),
             jobs_poll_delay: Duration::from_millis(100),
-            max_concurrent_tasks_per_job: 0,
-            logging_level: "INFO".to_owned(),
-            orchestration_type: OrchestrationType::Spider,
-            telemetry_update_interval_ms: 60_000,
+            termination_timeout_seconds: 30,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct Spider {
+    pub host: NonEmptyString,
+    pub port: u16,
 }
 
 /// Configuration for the Spider task executor.
@@ -572,11 +564,10 @@ mod tests {
     use super::{
         ArchiveOutput,
         ArchiveOutputStorage,
-        CompressionScheduler,
+        CompressionCoordinator,
         Database,
         DatabaseEngine,
         LogsInput,
-        OrchestrationType,
         SpiderTaskExecutorConfig,
     };
 
@@ -661,33 +652,27 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_compression_scheduler_config() {
-        let config = serde_json::from_value::<CompressionScheduler>(serde_json::json!({
+    fn deserialize_compression_coordinator_config() {
+        let config = serde_json::from_value::<CompressionCoordinator>(serde_json::json!({
+            "service_name": "my-coordinator",
             "jobs_poll_delay": 0.25,
-            "max_concurrent_tasks_per_job": 8,
-            "logging_level": "DEBUG",
-            "type": "spider",
-            "telemetry_update_interval_ms": 30000,
+            "termination_timeout_seconds": 60,
         }))
-        .expect("failed to deserialize `CompressionScheduler` from JSON");
+        .expect("failed to deserialize `CompressionCoordinator` from JSON");
 
+        assert_eq!(config.service_name.as_str(), "my-coordinator");
         assert_eq!(config.jobs_poll_delay, Duration::from_millis(250));
-        assert_eq!(config.max_concurrent_tasks_per_job, 8);
-        assert_eq!(config.logging_level, "DEBUG");
-        assert_eq!(config.orchestration_type, OrchestrationType::Spider);
-        assert_eq!(config.telemetry_update_interval_ms, 30_000);
+        assert_eq!(config.termination_timeout_seconds, 60);
     }
 
     #[test]
-    fn deserialize_compression_scheduler_applies_defaults() {
-        let config = serde_json::from_value::<CompressionScheduler>(serde_json::json!({}))
-            .expect("failed to deserialize `CompressionScheduler` from JSON");
+    fn deserialize_compression_coordinator_applies_defaults() {
+        let config = serde_json::from_value::<CompressionCoordinator>(serde_json::json!({}))
+            .expect("failed to deserialize `CompressionCoordinator` from JSON");
 
+        assert_eq!(config.service_name.as_str(), "compression-coordinator");
         assert_eq!(config.jobs_poll_delay, Duration::from_millis(100));
-        assert_eq!(config.max_concurrent_tasks_per_job, 0);
-        assert_eq!(config.logging_level, "INFO");
-        assert_eq!(config.orchestration_type, OrchestrationType::Spider);
-        assert_eq!(config.telemetry_update_interval_ms, 60_000);
+        assert_eq!(config.termination_timeout_seconds, 30);
     }
 
     #[test]
