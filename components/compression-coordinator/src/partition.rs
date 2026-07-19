@@ -75,13 +75,14 @@ impl PathsToCompressBuffer {
         }
     }
 
-    /// Gets the Spider compression-task inputs created from completed partitions.
+    /// Consumes the buffer and returns the Spider compression-task inputs created from completed
+    /// partitions.
     ///
     /// # Returns
     ///
-    /// A slice containing one [`S3InputSource`] per completed partition.
-    pub(crate) fn get_tasks_input_sources(&self) -> &[S3InputSource] {
-        &self.tasks_input_sources
+    /// A vector containing one [`S3InputSource`] per completed partition.
+    pub(crate) fn into_tasks_input_sources(self) -> Vec<S3InputSource> {
+        self.tasks_input_sources
     }
 
     /// Partitions every buffered object, including a final partition smaller than the target size.

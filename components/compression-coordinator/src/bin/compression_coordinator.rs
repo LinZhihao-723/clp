@@ -2,6 +2,13 @@ use anyhow::Context;
 use clap::Parser;
 use clp_rust_utils::{clp_config::package, database::mysql::create_clp_db_mysql_pool, serde::yaml};
 use compression_coordinator::CompressionCoordinator;
+use spider_client::SpiderClient;
+use spider_core::types::id::ResourceGroupId;
+use tonic::transport::Endpoint;
+
+// Placeholders until the CLP config gains a Spider section holding the storage endpoint and the
+// resource group to submit jobs under.
+const DEFAULT_SPIDER_STORAGE_ENDPOINT: &str = "http://172.40.0.30:50051";
 
 #[derive(Parser)]
 #[command(version, about = "compression-coordinator for CLP.")]
@@ -67,7 +74,24 @@ async fn main() -> anyhow::Result<()> {
     tokio::pin!(shutdown);
 
     let db_pool = create_clp_db_mysql_pool(&config.database, &credentials.database, 1).await?;
-    let mut coordinator = CompressionCoordinator::new(db_pool);
+
+    let spider_endpoint = std::env::var("SPIDER_STORAGE_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_SPIDER_STORAGE_ENDPOINT.to_owned());
+    let endpoint = Endpoint::from_shared(spider_endpoint)
+        .context("Failed to parse `SPIDER_STORAGE_ENDPOINT` as a URL")?;
+    let spider_client = SpiderClient::builder(endpoint)
+        .connect()
+        .await
+        .map_err(|error| anyhow::anyhow!("Failed to connect to the Spider cluster: {error}"))?;
+
+    let resource_group_id = ResourceGroupId::from(
+        std::env::var("SPIDER_RESOURCE_GROUP_ID")
+            .context("Expect `SPIDER_RESOURCE_GROUP_ID` env variable")?
+            .parse::<u64>()
+            .context("Failed to parse `SPIDER_RESOURCE_GROUP_ID` as a u64")?,
+    );
+
+    let mut coordinator = CompressionCoordinator::new(db_pool, spider_client, resource_group_id);
     tracing::info!("Compression coordinator started");
 
     // TODO: poll existing dataset names
