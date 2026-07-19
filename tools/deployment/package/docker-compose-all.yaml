@@ -267,9 +267,36 @@ services:
         &password=${SPIDER_DB_PASS:?Please set a value.}",
     ]
 
+  compression-coordinator:
+    <<: *service_defaults
+    hostname: "compression_coordinator"
+    deploy:
+      # Value must be either 0 or 1. Set to 0 to disable the compression coordinator.
+      replicas: "${CLP_COMPRESSION_COORDINATOR_ENABLED:-0}"
+    environment:
+      <<: *clp_telemetry_env_defaults
+      CLP_LOGS_DIR: "/var/log/compression_coordinator"
+      CLP_DB_PASS: "${CLP_DB_PASS:?Please set a value.}"
+      CLP_DB_USER: "${CLP_DB_USER:-clp-user}"
+      OTEL_SERVICE_NAME: "compression-coordinator"
+      RUST_LOG: "${CLP_COMPRESSION_COORDINATOR_LOGGING_LEVEL:-INFO}"
+    volumes:
+      - *volume_clp_config_readonly
+      - *volume_clp_logs
+    depends_on:
+      db-table-creator:
+        condition: "service_completed_successfully"
+    command: [
+      "/opt/clp/bin/compression-coordinator",
+      "--config", "/etc/clp-config.yaml"
+    ]
+
   compression-scheduler:
     <<: *service_defaults
     hostname: "compression_scheduler"
+    deploy:
+      # Value must be either 0 or 1. Set to 0 to disable the compression scheduler.
+      replicas: "${CLP_COMPRESSION_SCHEDULER_ENABLED:-1}"
     stop_grace_period: "300s"
     environment:
       <<: *clp_telemetry_env_defaults
@@ -307,6 +334,9 @@ services:
   compression-worker:
     <<: *service_defaults
     hostname: "compression_worker"
+    deploy:
+      # Value must be either 0 or 1. Set to 0 to disable the compression worker.
+      replicas: "${CLP_COMPRESSION_WORKER_ENABLED:-1}"
     environment:
       <<: *clp_telemetry_env_defaults
       BROKER_URL: "amqp://${CLP_QUEUE_USER:-clp-user}:${CLP_QUEUE_PASS:?Please set a value.}\

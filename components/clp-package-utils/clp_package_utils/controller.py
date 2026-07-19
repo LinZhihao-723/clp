@@ -26,6 +26,7 @@ from clp_py_utils.clp_config import (
     ClpConfig,
     ClpDbNameType,
     ClpDbUserType,
+    COMPRESSION_COORDINATOR_COMPONENT_NAME,
     COMPRESSION_JOBS_TABLE_NAME,
     COMPRESSION_SCHEDULER_COMPONENT_NAME,
     COMPRESSION_WORKER_COMPONENT_NAME,
@@ -740,6 +741,43 @@ class BaseController(ABC):
 
         return env_vars
 
+    def _set_up_env_for_compression_coordinator(self) -> EnvVarsDict:
+        """
+        Sets up environment variables and directories for the compression coordinator component.
+
+        The compression coordinator replaces the compression scheduler and compression worker
+        components, so enabling it disables both.
+
+        :return: Dictionary of environment variables necessary to launch the component.
+        """
+        component_name = COMPRESSION_COORDINATOR_COMPONENT_NAME
+        if self._clp_config.compression_coordinator is None:
+            logger.info("%s is not configured, skipping environment setup...", component_name)
+            return EnvVarsDict({"CLP_COMPRESSION_COORDINATOR_ENABLED": "0"})
+        logger.info("Setting up environment for %s...", component_name)
+
+        logs_dir = self._clp_config.logs_directory / component_name
+        resolved_logs_dir = resolve_host_path_in_container(logs_dir)
+        resolved_logs_dir.mkdir(parents=True, exist_ok=True)
+
+        env_vars = EnvVarsDict()
+
+        # Component-enablement config
+        env_vars |= {
+            "CLP_COMPRESSION_COORDINATOR_ENABLED": "1",
+            "CLP_COMPRESSION_SCHEDULER_ENABLED": "0",
+            "CLP_COMPRESSION_WORKER_ENABLED": "0",
+        }
+
+        # Logging config
+        env_vars |= {
+            "CLP_COMPRESSION_COORDINATOR_LOGGING_LEVEL": (
+                self._clp_config.compression_coordinator.logging_level
+            ),
+        }
+
+        return env_vars
+
     def _set_up_env_for_webui(self, container_clp_config: ClpConfig) -> EnvVarsDict:
         """
         Sets up environment variables and settings for the Web UI component.
@@ -1205,6 +1243,7 @@ class DockerComposeController(BaseController):
         env_vars |= self._set_up_env_for_compression_scheduler()
         env_vars |= self._set_up_env_for_query_scheduler()
         env_vars |= self._set_up_env_for_compression_worker(num_workers)
+        env_vars |= self._set_up_env_for_compression_coordinator()
         env_vars |= self._set_up_env_for_query_worker(num_workers)
         env_vars |= self._set_up_env_for_reducer(num_workers)
         env_vars |= self._set_up_env_for_api_server()

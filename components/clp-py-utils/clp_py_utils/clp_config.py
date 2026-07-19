@@ -38,6 +38,7 @@ REDUCER_COMPONENT_NAME = "reducer"
 RESULTS_CACHE_COMPONENT_NAME = "results_cache"
 OTEL_COLLECTOR_COMPONENT_NAME = "otel-collector"
 COMPRESSION_SCHEDULER_COMPONENT_NAME = "compression_scheduler"
+COMPRESSION_COORDINATOR_COMPONENT_NAME = "compression_coordinator"
 QUERY_SCHEDULER_COMPONENT_NAME = "query_scheduler"
 PRESTO_COORDINATOR_COMPONENT_NAME = "presto-coordinator"
 COMPRESSION_WORKER_COMPONENT_NAME = "compression_worker"
@@ -399,6 +400,18 @@ class CompressionScheduler(BaseModel):
     logging_level: LoggingLevel = "INFO"
     type: OrchestrationTypeStr = OrchestrationType.CELERY
     telemetry_update_interval_ms: PositiveInt = 60000
+
+
+class CompressionCoordinator(BaseModel):
+    service_name: NonEmptyStr = "compression-coordinator"
+    jobs_poll_delay: PositiveFloat = 0.1  # seconds
+    termination_timeout_seconds: PositiveInt = 30
+    logging_level: LoggingLevelRust = "INFO"
+
+
+class Spider(BaseModel):
+    host: DomainStr
+    port: Port
 
 
 class QueryScheduler(BaseModel):
@@ -830,6 +843,8 @@ class ClpConfig(BaseModel):
     garbage_collector: GarbageCollector = GarbageCollector()
     api_server: ApiServer | None = ApiServer()
     log_ingestor: LogIngestor | None = LogIngestor()
+    compression_coordinator: CompressionCoordinator | None = None
+    spider: Spider | None = None
     credentials_file_path: SerializablePath = CLP_DEFAULT_CREDENTIALS_FILE_PATH
 
     mcp_server: McpServer | None = None
@@ -1026,6 +1041,15 @@ class ClpConfig(BaseModel):
             return self
         if self.package.storage_engine != StorageEngine.CLP_S:
             msg = f"log-ingestor is only compatible with storage engine `{StorageEngine.CLP_S}`."
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_compression_coordinator_config(self):
+        if self.compression_coordinator is None:
+            return self
+        if self.spider is None:
+            msg = "`spider` config must be non-null when `compression_coordinator` is set."
             raise ValueError(msg)
         return self
 

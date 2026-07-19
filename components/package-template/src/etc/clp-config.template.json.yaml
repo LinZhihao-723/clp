@@ -64,6 +64,20 @@ telemetry:
 #  port: 6000
 #  logging_level: "INFO"
 #
+## compression-coordinator config. When set, it replaces the compression scheduler and compression
+## worker, and the `spider` config below must also be set.
+#compression_coordinator:
+#  service_name: "compression-coordinator"
+#  jobs_poll_delay: 0.1  # seconds
+#  termination_timeout_seconds: 30
+#  logging_level: "INFO"
+#
+## Connection config for an externally-managed Spider cluster. Required by
+## `compression_coordinator`.
+#spider:
+#  host: "localhost"
+#  port: 6000
+#
 #query_scheduler:
 #  host: "localhost"
 #  port: 7000
