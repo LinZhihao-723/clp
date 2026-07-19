@@ -1,16 +1,50 @@
 //! Compression task implementations and the Spider task executor config they read at runtime.
 
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
+use anyhow::Context;
 use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 
 pub mod commit;
 pub mod s3_compression;
 
-/// Returns the process-wide Spider task executor config, loading it from `CLP_CONFIG_PATH` on first
-/// access.
+/// Initializes the process-wide Tokio runtime the compression tasks use to drive async S3 I/O.
 ///
-/// The config is loaded once, on first access; subsequent calls return the cached value.
+/// Idempotent: a no-op once the runtime is initialized.
+///
+/// # Errors
+///
+/// Returns an error if the runtime fails to build.
+pub fn init_runtime() -> anyhow::Result<()> {
+    if TOKIO_RUNTIME.get().is_some() {
+        return Ok(());
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to build the compression-coordinator Tokio runtime")?;
+    let _ = TOKIO_RUNTIME.set(rt);
+    Ok(())
+}
+
+/// Initializes the process-wide Spider task executor config from `CLP_CONFIG_PATH`.
+///
+/// Idempotent: a no-op once the config is initialized.
+///
+/// # Errors
+///
+/// Returns an error if `CLP_CONFIG_PATH` is unset or not valid Unicode, or if the YAML file at that
+/// path cannot be read or parsed.
+pub fn init_config() -> anyhow::Result<()> {
+    if SPIDER_TASK_EXECUTOR_CONFIG.get().is_some() {
+        return Ok(());
+    }
+    let cfg = load_spider_task_executor_config_from_env()?;
+    let _ = SPIDER_TASK_EXECUTOR_CONFIG.set(cfg);
+    Ok(())
+}
+
+/// Returns the process-wide Spider task executor config.
 ///
 /// # Returns
 ///
@@ -18,11 +52,13 @@ pub mod s3_compression;
 ///
 /// # Panics
 ///
-/// Panics if `CLP_CONFIG_PATH` is unset or not valid Unicode, or if the YAML file at that path
-/// cannot be read or parsed.
+/// Panics if the config has not been initialized by the TDL package init hook.
 #[must_use]
 pub fn spider_task_executor_config() -> &'static SpiderTaskExecutorConfig {
-    &SPIDER_TASK_EXECUTOR_CONFIG
+    SPIDER_TASK_EXECUTOR_CONFIG.get().expect(
+        "Spider task executor config not initialized; the TDL package init hook must run before \
+         any task",
+    )
 }
 
 /// Returns the process-wide Tokio runtime the compression tasks use to drive async S3 I/O.
@@ -33,27 +69,22 @@ pub fn spider_task_executor_config() -> &'static SpiderTaskExecutorConfig {
 ///
 /// # Panics
 ///
-/// Panics if the runtime failed to build on first access.
+/// Panics if the runtime has not been initialized by the TDL package init hook.
 #[must_use]
 pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
-    &TOKIO_RUNTIME
+    TOKIO_RUNTIME
+        .get()
+        .expect("Tokio runtime not initialized; the TDL package init hook must run before any task")
 }
 
 /// The env var holding the path to the Spider task executor config YAML.
 const CLP_CONFIG_PATH_ENV_VAR: &str = "CLP_CONFIG_PATH";
 
-/// Process-wide multi-threaded Tokio runtime, built on first access.
-static TOKIO_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("failed to build the compression-coordinator Tokio runtime")
-});
+/// Process-wide multi-threaded Tokio runtime, initialized by [`init_runtime`].
+static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
-/// Process-wide cache of the Spider task executor config, populated on first access from
-/// [`load_spider_task_executor_config_from_env`].
-static SPIDER_TASK_EXECUTOR_CONFIG: LazyLock<SpiderTaskExecutorConfig> =
-    LazyLock::new(load_spider_task_executor_config_from_env);
+/// Process-wide cache of the Spider task executor config, initialized by [`init_config`].
+static SPIDER_TASK_EXECUTOR_CONFIG: OnceLock<SpiderTaskExecutorConfig> = OnceLock::new();
 
 /// Loads the [`SpiderTaskExecutorConfig`] from the YAML file at the path named by
 /// [`CLP_CONFIG_PATH_ENV_VAR`].
@@ -62,17 +93,16 @@ static SPIDER_TASK_EXECUTOR_CONFIG: LazyLock<SpiderTaskExecutorConfig> =
 ///
 /// The deserialized [`SpiderTaskExecutorConfig`].
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if [`CLP_CONFIG_PATH_ENV_VAR`] is unset or not valid Unicode, or if the YAML file at that
-/// path cannot be read or parsed.
-fn load_spider_task_executor_config_from_env() -> SpiderTaskExecutorConfig {
-    let path = std::env::var(CLP_CONFIG_PATH_ENV_VAR).unwrap_or_else(|e| {
-        panic!("failed to read the `{CLP_CONFIG_PATH_ENV_VAR}` environment variable: {e}")
-    });
-    clp_rust_utils::serde::yaml::from_path(&path).unwrap_or_else(|e| {
-        panic!("failed to load the Spider task executor config from `{path}`: {e}")
-    })
+/// Returns an error if [`CLP_CONFIG_PATH_ENV_VAR`] is unset or not valid Unicode, or if the YAML
+/// file at that path cannot be read or parsed.
+fn load_spider_task_executor_config_from_env() -> anyhow::Result<SpiderTaskExecutorConfig> {
+    let path = std::env::var(CLP_CONFIG_PATH_ENV_VAR).with_context(|| {
+        format!("failed to read the `{CLP_CONFIG_PATH_ENV_VAR}` environment variable")
+    })?;
+    clp_rust_utils::serde::yaml::from_path(&path)
+        .with_context(|| format!("failed to load the Spider task executor config from `{path}`"))
 }
 
 /// Uploads a local file to S3 with a single `PutObject` (mirror of Python's `s3_put`).
