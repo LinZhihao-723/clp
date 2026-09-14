@@ -39,6 +39,7 @@ from clp_py_utils.clp_config import (
     LOG_INGESTOR_COMPONENT_NAME,
     MCP_SERVER_COMPONENT_NAME,
     OTEL_COLLECTOR_COMPONENT_NAME,
+    QUERY_COORDINATOR_COMPONENT_NAME,
     QUERY_JOBS_TABLE_NAME,
     QUERY_SCHEDULER_COMPONENT_NAME,
     QUERY_WORKER_COMPONENT_NAME,
@@ -621,6 +622,13 @@ class BaseController(ABC):
             ),
         }
 
+        # Image config
+        if worker.container_image_ref is not None:
+            env_vars |= {
+                "CLP_SPIDER_WORKER_CONTAINER_IMAGE_REF": worker.container_image_ref,
+                "SPIDER_PULL_POLICY": "missing",
+            }
+
         return env_vars
 
     def _set_up_env_for_compression_coordinator(self) -> EnvVarsDict:
@@ -645,6 +653,32 @@ class BaseController(ABC):
         # Runtime config
         env_vars |= {
             "CLP_COMPRESSION_COORDINATOR_LOGGING_LEVEL": coordinator_config.logging_level,
+        }
+
+        return env_vars
+
+    def _set_up_env_for_query_coordinator(self) -> EnvVarsDict:
+        """
+        Sets up environment variables for the query coordinator component.
+
+        :return: Dictionary of environment variables necessary to launch the component.
+        """
+        component_name = QUERY_COORDINATOR_COMPONENT_NAME
+        coordinator_config = self._clp_config.query_coordinator
+        if (
+            CompressionOrchestration.SPIDER != self._clp_config.package.scheduler
+            or coordinator_config is None
+        ):
+            logger.info("%s is not configured, skipping environment setup...", component_name)
+            return EnvVarsDict()
+
+        logger.info("Setting up environment for %s...", component_name)
+
+        env_vars = EnvVarsDict()
+
+        # Runtime config
+        env_vars |= {
+            "CLP_QUERY_COORDINATOR_LOGGING_LEVEL": coordinator_config.logging_level,
         }
 
         return env_vars
@@ -1298,6 +1332,7 @@ class DockerComposeController(BaseController):
         env_vars |= self._set_up_env_for_otel_collector()
         env_vars |= self._set_up_env_for_compression_scheduler()
         env_vars |= self._set_up_env_for_compression_coordinator()
+        env_vars |= self._set_up_env_for_query_coordinator()
         env_vars |= self._set_up_env_for_spider()
         env_vars |= self._set_up_env_for_query_scheduler()
         env_vars |= self._set_up_env_for_compression_worker(num_workers)

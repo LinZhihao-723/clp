@@ -38,6 +38,7 @@ RESULTS_CACHE_COMPONENT_NAME = "results_cache"
 OTEL_COLLECTOR_COMPONENT_NAME = "otel-collector"
 COMPRESSION_COORDINATOR_COMPONENT_NAME = "compression_coordinator"
 COMPRESSION_SCHEDULER_COMPONENT_NAME = "compression_scheduler"
+QUERY_COORDINATOR_COMPONENT_NAME = "query_coordinator"
 QUERY_SCHEDULER_COMPONENT_NAME = "query_scheduler"
 PRESTO_COORDINATOR_COMPONENT_NAME = "presto-coordinator"
 COMPRESSION_WORKER_COMPONENT_NAME = "compression_worker"
@@ -827,6 +828,7 @@ class SpiderLiveness(BaseModel):
 
 
 class SpiderWorker(BaseModel):
+    container_image_ref: NonEmptyStr | None = None
     replicas: PositiveInt | None = None
     log_level: LoggingLevelRust | None = None
     connection_pool_size: PositiveInt | None = None
@@ -877,6 +879,33 @@ class CompressionCoordinator(BaseModel):
     termination_timeout_secs: PositiveInt = 30
     commit_task_soft_timeout_secs: PositiveInt = 45
     commit_task_hard_timeout_secs: PositiveInt = 60
+
+
+class QueryCoordinator(BaseModel):
+    logging_level: LoggingLevelRust = "INFO"
+    resource_group: SpiderResourceGroup = SpiderResourceGroup(name="query-coordinator")
+    job_polling_interval_millisecs: PositiveInt = 100
+    max_concurrent_jobs: PositiveInt = 1000
+    max_datasets_per_query: PositiveInt | None = 10
+    result_polling: PollingBackoff = PollingBackoff(
+        init_backoff_millisecs=100, max_backoff_millisecs=1000
+    )
+    database_connection_pool_size: PositiveInt = 10
+    termination_timeout_secs: PositiveInt = 30
+    search_task_max_num_instances: PositiveInt = 2
+    search_task_max_retry: NonNegativeInt = 1
+    search_task_soft_timeout_secs: PositiveInt = 600
+    search_task_hard_timeout_secs: PositiveInt = 1200
+
+    @model_validator(mode="after")
+    def validate_search_task_timeouts(self):
+        if self.search_task_hard_timeout_secs <= self.search_task_soft_timeout_secs:
+            msg = (
+                "`search_task_hard_timeout_secs` must be greater than"
+                " `search_task_soft_timeout_secs`."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class Presto(BaseModel):
@@ -932,6 +961,7 @@ class ClpConfig(BaseModel):
     log_ingestor: LogIngestor | None = LogIngestor()
     spider: Spider | None = None
     compression_coordinator: CompressionCoordinator | None = None
+    query_coordinator: QueryCoordinator | None = None
     credentials_file_path: SerializablePath = CLP_DEFAULT_CREDENTIALS_FILE_PATH
 
     mcp_server: McpServer | None = None
@@ -1128,8 +1158,8 @@ class ClpConfig(BaseModel):
     @model_validator(mode="after")
     def validate_compression_orchestration_config(self):
         if CompressionOrchestration.SPIDER != self.package.scheduler:
-            # Neither service is deployed in this mode, so no `spider` or
-            # `compression_coordinator` config check is necessary.
+            # None of the Spider services are deployed in this mode, so no `spider`,
+            # `compression_coordinator` or `query_coordinator` config check is necessary.
             return self
         if self.spider is None:
             msg = (
@@ -1137,11 +1167,31 @@ class ClpConfig(BaseModel):
                 f" `{CompressionOrchestration.SPIDER}`."
             )
             raise ValueError(msg)
-        if self.compression_coordinator is None:
+        if self.query_coordinator is None:
             msg = (
-                "`compression_coordinator` must be configured when `package.scheduler` is"
+                "`query_coordinator` must be configured when `package.scheduler` is"
                 f" `{CompressionOrchestration.SPIDER}`."
             )
+            raise ValueError(msg)
+        if self.compression_coordinator is not None:
+            msg = (
+                "`compression_coordinator` isn't deployed when `package.scheduler` is"
+                f" `{CompressionOrchestration.SPIDER}` and must be null."
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_query_coordinator_config(self):
+        if self.query_coordinator is None:
+            return self
+        if self.package.storage_engine != StorageEngine.CLP_S:
+            msg = (
+                f"query-coordinator is only compatible with storage engine `{StorageEngine.CLP_S}`."
+            )
+            raise ValueError(msg)
+        if self.spider is None:
+            msg = "query-coordinator requires Spider to be configured."
             raise ValueError(msg)
         return self
 

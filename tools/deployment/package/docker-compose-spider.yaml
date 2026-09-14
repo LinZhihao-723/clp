@@ -47,10 +47,10 @@ services:
       file: "docker-compose-all.yaml"
       service: "compression-worker"
 
-  compression-coordinator:
+  query-coordinator:
     extends:
       file: "docker-compose-all.yaml"
-      service: "compression-coordinator"
+      service: "query-coordinator"
 
   webui:
     extends:
@@ -66,21 +66,6 @@ services:
     extends:
       file: "docker-compose-all.yaml"
       service: "api-server"
-
-  query-scheduler:
-    extends:
-      file: "docker-compose-all.yaml"
-      service: "query-scheduler"
-
-  query-worker:
-    extends:
-      file: "docker-compose-all.yaml"
-      service: "query-worker"
-
-  reducer:
-    extends:
-      file: "docker-compose-all.yaml"
-      service: "reducer"
 
   mcp-server:
     extends:
