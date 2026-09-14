@@ -40,6 +40,9 @@ pub enum QueryJobOutcome {
         /// The error reported by Spider.
         error_message: String,
     },
+
+    /// Spider cancelled the job without a cancellation request from the coordinator.
+    UnexpectedlyCancelled,
 }
 
 /// Drives CLP query jobs on a Spider (Huntsman) cluster.

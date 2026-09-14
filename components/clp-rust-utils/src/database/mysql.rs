@@ -8,7 +8,7 @@ use crate::clp_config::package::credentials::Database as DatabaseCredentials;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// impl_sqlx_type!(IngestedS3ObjectMetadataStatus => str);
 /// ```
 #[macro_export]

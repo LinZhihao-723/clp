@@ -62,9 +62,9 @@ impl QueryJobSubmitter for SpiderClient {
     ///
     /// Returns an error if:
     ///
+    /// * Forwards [`SpiderClient::get_job_state`]'s return values on failure.
     /// * Forwards [`SpiderClient::start_job`]'s return values on failure, except
     ///   [`ClientError::InvalidJobState`].
-    /// * Forwards [`SpiderClient::get_job_state`]'s return values on failure.
     ///
     /// # Panics
     ///
@@ -77,24 +77,27 @@ impl QueryJobSubmitter for SpiderClient {
     ) -> Result<QueryJobOutcome, Error> {
         const POLL_BACKOFF_FACTOR: u32 = 2;
 
-        match self.start_job(spider_job_id).await {
-            Ok(_) | Err(ClientError::InvalidJobState(_)) => {}
-            Err(error) => return Err(error.into()),
+        // Spider rejects `start_job` for a job that has already started or has been evicted from
+        // the storage cache after terminating, so only a not-yet-started job may be started.
+        let mut state = self.get_job_state(spider_job_id).await?;
+        if JobState::Ready == state {
+            match self.start_job(spider_job_id).await {
+                Ok(started_state) => state = started_state,
+                Err(ClientError::InvalidJobState(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
 
         let mut backoff = initial_poll_backoff.min(max_poll_backoff);
-        let terminal_state = loop {
-            let state = self.get_job_state(spider_job_id).await?;
-            if state.is_terminal() {
-                break state;
-            }
+        while !state.is_terminal() {
             tokio::time::sleep(backoff).await;
             backoff = backoff
                 .saturating_mul(POLL_BACKOFF_FACTOR)
                 .min(max_poll_backoff);
-        };
+            state = self.get_job_state(spider_job_id).await?;
+        }
 
-        Ok(match terminal_state {
+        Ok(match state {
             JobState::Succeeded => QueryJobOutcome::Succeeded,
             JobState::Failed => {
                 let error_message = match self.get_job_error(spider_job_id).await {
@@ -110,7 +113,7 @@ impl QueryJobSubmitter for SpiderClient {
                 };
                 QueryJobOutcome::Failed { error_message }
             }
-            JobState::Cancelled => todo!("query job cancellation is not implemented"),
+            JobState::Cancelled => QueryJobOutcome::UnexpectedlyCancelled,
             _ => unreachable!("a terminal Spider state must have a terminal outcome"),
         })
     }

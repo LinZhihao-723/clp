@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::clp_config::AwsAuthentication;
 use crate::clp_config::S3Config;
 use crate::dataset::resolve_dataset_name;
+use crate::types::non_empty_string::ExpectedNonEmpty;
 
 /// Mirror of `clp_py_utils.clp_config.ClpConfig`.
 ///
@@ -33,6 +34,7 @@ pub struct Config {
     pub telemetry: Telemetry,
     pub spider: Option<Spider>,
     pub compression_coordinator: Option<CompressionCoordinator>,
+    pub query_coordinator: Option<QueryCoordinator>,
 }
 
 impl Default for Config {
@@ -52,6 +54,7 @@ impl Default for Config {
             telemetry: Telemetry::default(),
             spider: None,
             compression_coordinator: None,
+            query_coordinator: None,
         }
     }
 }
@@ -280,6 +283,21 @@ pub struct ResultsCache {
     pub db_name: String,
 }
 
+impl ResultsCache {
+    /// Mirror of `clp_py_utils.clp_config.ResultsCache.get_uri`.
+    ///
+    /// # Returns
+    ///
+    /// The `MongoDB` URI of the results cache database (`mongodb://<host>:<port>/<db_name>`).
+    #[must_use]
+    pub fn uri(&self) -> NonEmptyString {
+        NonEmptyString::from_string(format!(
+            "mongodb://{}:{}/{}",
+            self.host, self.port, self.db_name
+        ))
+    }
+}
+
 impl Default for ResultsCache {
     fn default() -> Self {
         Self {
@@ -361,6 +379,7 @@ pub struct ArchiveOutput {
     pub target_encoded_file_size: u64,
     pub target_segment_size: u64,
     pub compression_level: u8,
+    pub retention_period: Option<NonZeroU32>,
 }
 
 impl ArchiveOutput {
@@ -406,6 +425,7 @@ impl Default for ArchiveOutput {
             target_encoded_file_size: 256 * 1024 * 1024,
             target_segment_size: 256 * 1024 * 1024,
             compression_level: 3,
+            retention_period: None,
         }
     }
 }
@@ -491,14 +511,27 @@ impl Default for Telemetry {
     }
 }
 
-/// Query coordinator configuration.
+/// Mirror of `clp_py_utils.clp_config.QueryCoordinator`.
+///
+/// # NOTE
+///
+/// * This type is partially defined: unused fields are omitted and discarded through
+///   deserialization.
+/// * The default values must be kept in sync with the Python definition.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(default)]
 pub struct QueryCoordinator {
     pub resource_group: SpiderResourceGroup,
     pub job_polling_interval_millisecs: NonZeroU64,
     pub max_concurrent_jobs: NonZeroUsize,
+    pub max_datasets_per_query: Option<NonZeroUsize>,
     pub result_polling: PollingBackoff,
+    pub database_connection_pool_size: NonZeroU32,
+    pub termination_timeout_secs: NonZeroU64,
+    pub search_task_max_num_instances: NonZeroU32,
+    pub search_task_max_retry: u32,
+    pub search_task_soft_timeout_secs: NonZeroU64,
+    pub search_task_hard_timeout_secs: NonZeroU64,
 }
 
 impl Default for QueryCoordinator {
@@ -512,12 +545,27 @@ impl Default for QueryCoordinator {
                 .expect("default jobs poll delay should not be zero"),
             max_concurrent_jobs: NonZeroUsize::new(1000)
                 .expect("default maximum number of concurrent jobs should not be zero"),
+            max_datasets_per_query: Some(
+                NonZeroUsize::new(10)
+                    .expect("default maximum number of datasets per query should not be zero"),
+            ),
             result_polling: PollingBackoff {
                 init_backoff_millisecs: NonZeroU64::new(100)
                     .expect("default result polling init backoff should not be zero"),
                 max_backoff_millisecs: NonZeroU64::new(1000)
                     .expect("default result polling max backoff should not be zero"),
             },
+            database_connection_pool_size: NonZeroU32::new(10)
+                .expect("default database connection pool size should not be zero"),
+            termination_timeout_secs: NonZeroU64::new(30)
+                .expect("default termination timeout should not be zero"),
+            search_task_max_num_instances: NonZeroU32::new(2)
+                .expect("default search task max number of instances should not be zero"),
+            search_task_max_retry: 1,
+            search_task_soft_timeout_secs: NonZeroU64::new(600)
+                .expect("default search task soft timeout should not be zero"),
+            search_task_hard_timeout_secs: NonZeroU64::new(1200)
+                .expect("default search task hard timeout should not be zero"),
         }
     }
 }
@@ -606,13 +654,118 @@ fn default_archive_staging_directory() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::path::Path;
 
     use super::ArchiveOutput;
     use super::ArchiveOutputStorage;
+    use super::Config;
     use super::Database;
     use super::LogsInput;
+    use super::QueryCoordinator;
     use super::SpiderTaskExecutorConfig;
+
+    #[test]
+    fn deserialize_documented_query_coordinator_config_as_defaults() {
+        const CONFIG_YAML: &str = r#"
+query_coordinator:
+  logging_level: "INFO"
+  resource_group: {name: "query-coordinator"}
+  job_polling_interval_millisecs: 100
+  max_concurrent_jobs: 1000
+  max_datasets_per_query: 10
+  result_polling: {init_backoff_millisecs: 100, max_backoff_millisecs: 1000}
+  database_connection_pool_size: 10
+  termination_timeout_secs: 30
+  search_task_max_num_instances: 2
+  search_task_max_retry: 1
+  search_task_soft_timeout_secs: 600
+  search_task_hard_timeout_secs: 1200
+"#;
+
+        let config = yaml_serde::from_str::<Config>(CONFIG_YAML)
+            .expect("failed to deserialize `Config` from YAML");
+
+        assert_eq!(config.query_coordinator, Some(QueryCoordinator::default()));
+    }
+
+    #[test]
+    fn deserialize_query_coordinator_config_overriding_every_default() {
+        use std::num::NonZeroU64;
+        use std::num::NonZeroUsize;
+
+        use non_empty_string::NonEmptyString;
+
+        use super::PollingBackoff;
+        use super::SpiderResourceGroup;
+        use crate::types::non_empty_string::ExpectedNonEmpty;
+
+        const CONFIG_YAML: &str = r#"
+query_coordinator:
+  resource_group: {name: "custom-query-coordinator"}
+  job_polling_interval_millisecs: 200
+  max_concurrent_jobs: 20
+  max_datasets_per_query: null
+  result_polling: {init_backoff_millisecs: 300, max_backoff_millisecs: 4000}
+  database_connection_pool_size: 5
+  termination_timeout_secs: 60
+  search_task_max_num_instances: 3
+  search_task_max_retry: 4
+  search_task_soft_timeout_secs: 700
+  search_task_hard_timeout_secs: 800
+"#;
+
+        let config = yaml_serde::from_str::<Config>(CONFIG_YAML)
+            .expect("failed to deserialize `Config` from YAML");
+
+        let expected = QueryCoordinator {
+            resource_group: SpiderResourceGroup {
+                name: NonEmptyString::from_static_str("custom-query-coordinator"),
+            },
+            job_polling_interval_millisecs: NonZeroU64::new(200).expect("200 is nonzero"),
+            max_concurrent_jobs: NonZeroUsize::new(20).expect("20 is nonzero"),
+            max_datasets_per_query: None,
+            result_polling: PollingBackoff {
+                init_backoff_millisecs: NonZeroU64::new(300).expect("300 is nonzero"),
+                max_backoff_millisecs: NonZeroU64::new(4000).expect("4000 is nonzero"),
+            },
+            database_connection_pool_size: NonZeroU32::new(5).expect("5 is nonzero"),
+            termination_timeout_secs: NonZeroU64::new(60).expect("60 is nonzero"),
+            search_task_max_num_instances: NonZeroU32::new(3).expect("3 is nonzero"),
+            search_task_max_retry: 4,
+            search_task_soft_timeout_secs: NonZeroU64::new(700).expect("700 is nonzero"),
+            search_task_hard_timeout_secs: NonZeroU64::new(800).expect("800 is nonzero"),
+        };
+        assert_eq!(config.query_coordinator, Some(expected));
+    }
+
+    #[test]
+    fn deserialize_archive_output_retention_period() {
+        let with_retention_period = yaml_serde::from_str::<ArchiveOutput>("retention_period: 60")
+            .expect("failed to deserialize `ArchiveOutput` from YAML");
+        let without_retention_period = yaml_serde::from_str::<ArchiveOutput>("{}")
+            .expect("failed to deserialize `ArchiveOutput` from YAML");
+
+        assert_eq!(with_retention_period.retention_period, NonZeroU32::new(60));
+        assert_eq!(without_retention_period.retention_period, None);
+        assert!(yaml_serde::from_str::<ArchiveOutput>("retention_period: 0").is_err());
+    }
+
+    #[test]
+    fn results_cache_uri_names_host_port_and_database() {
+        use super::ResultsCache;
+
+        let results_cache = ResultsCache {
+            host: "results-cache".to_owned(),
+            port: 27018,
+            db_name: "custom-query-results".to_owned(),
+        };
+
+        assert_eq!(
+            results_cache.uri().as_str(),
+            "mongodb://results-cache:27018/custom-query-results"
+        );
+    }
 
     #[test]
     fn deserialize_logs_input_s3_config() {
