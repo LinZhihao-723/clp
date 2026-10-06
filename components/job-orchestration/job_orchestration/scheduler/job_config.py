@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from enum import auto
 from typing import Literal
 
-from clp_py_utils.clp_config import S3Config
+from clp_py_utils.clp_config import NonEmptyStr, Port, S3Config
 from pydantic import BaseModel, field_validator
 from strenum import LowercaseStrEnum
 
@@ -84,6 +85,17 @@ class AggregationConfig(BaseModel):
     count_by_time_bucket_size: int | None = None  # Milliseconds
 
 
+class NetworkOutput(BaseModel):
+    host: NonEmptyStr
+    port: Port
+    session_token: str
+
+    @field_validator("session_token")
+    @classmethod
+    def validate_session_token(cls, value: str) -> str:
+        return str(uuid.UUID(value))
+
+
 class QueryJobConfig(BaseModel):
     pass
 
@@ -109,15 +121,6 @@ class SearchJobConfig(QueryJobConfig):
     end_timestamp: int | None = None
     ignore_case: bool = False
     path_filter: str | None = None
-    # Tuple of (host, port)
-    network_address: tuple[str, int] | None = None
+    network_output: NetworkOutput | None = None
     aggregation_config: AggregationConfig | None = None
     write_to_file: bool = False
-
-    @field_validator("network_address")
-    @classmethod
-    def validate_network_address(cls, value):
-        if value is not None and (value[1] < 1 or value[1] > 65535):
-            raise ValueError("Port must be in the range [1, 65535]")
-
-        return value

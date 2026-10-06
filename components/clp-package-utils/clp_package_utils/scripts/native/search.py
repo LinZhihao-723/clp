@@ -7,6 +7,7 @@ import logging
 import pathlib
 import socket
 import sys
+import uuid
 
 import msgpack
 import psutil
@@ -15,10 +16,15 @@ from clp_py_utils.clp_config import (
     CLP_DEFAULT_CONFIG_FILE_RELATIVE_PATH,
     Database,
     ResultsCache,
+    StorageEngine,
 )
 from clp_py_utils.sql_adapter import SqlAdapter
 from job_orchestration.scheduler.constants import QueryJobStatus, QueryJobType
-from job_orchestration.scheduler.job_config import AggregationConfig, SearchJobConfig
+from job_orchestration.scheduler.job_config import (
+    AggregationConfig,
+    NetworkOutput,
+    SearchJobConfig,
+)
 
 from clp_package_utils.general import (
     get_clp_home,
@@ -43,7 +49,7 @@ def create_and_monitor_job_in_db(
     end_timestamp: int | None,
     ignore_case: bool,
     path_filter: str | None,
-    network_address: tuple[str, int] | None,
+    network_output: NetworkOutput | None,
     do_count_aggregation: bool | None,
     count_by_time_bucket_size: int | None,
 ):
@@ -55,7 +61,7 @@ def create_and_monitor_job_in_db(
         ignore_case=ignore_case,
         max_num_results=0,  # unlimited number of results
         path_filter=path_filter,
-        network_address=network_address,
+        network_output=network_output,
     )
     if do_count_aggregation is not None:
         search_config.aggregation_config = AggregationConfig(
@@ -85,10 +91,11 @@ def create_and_monitor_job_in_db(
         logger.error(f"job {job_id} finished with unexpected status: {job_status}")
 
 
-def get_worker_connection_handler(raw_output: bool):
+def get_worker_connection_handler(raw_output: bool, storage_engine: str):
     async def worker_connection_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
             unpacker = msgpack.Unpacker()
+            archive_id = None
             while True:
                 # Read some data from the worker and feed it to msgpack
                 buf = await reader.read(1024)
@@ -97,13 +104,20 @@ def get_worker_connection_handler(raw_output: bool):
                     return
                 unpacker.feed(buf)
 
-                # Print out any messages we can decode in the form of ORIG_PATH: MSG, or simply MSG
-                # if raw output is enabled.
+                # Print out any messages we can decode in the form of ORIG_PATH: MSG for clo, or
+                # ARCHIVE_ID TIMESTAMP: MSG for clp-s, or simply MSG if raw output is enabled.
                 for unpacked in unpacker:
-                    if raw_output:
-                        print(f"{unpacked[1]}", end="")
+                    if StorageEngine.CLP_S != storage_engine:
+                        if raw_output:
+                            print(f"{unpacked[1]}", end="")
+                        else:
+                            print(f"{unpacked[2]}: {unpacked[1]}", end="")
+                    elif archive_id is None:
+                        archive_id = unpacked[3]
+                    elif raw_output:
+                        print(f"{unpacked[2]}", end="")
                     else:
-                        print(f"{unpacked[2]}: {unpacked[1]}", end="")
+                        print(f"{archive_id} {unpacked[1]}: {unpacked[2]}", end="")
         except asyncio.CancelledError:
             return
         finally:
@@ -122,6 +136,7 @@ async def do_search_without_aggregation(
     ignore_case: bool,
     path_filter: str | None,
     raw_output: bool,
+    storage_engine: str,
 ):
     host = _get_ipv4_address()
     if host is None:
@@ -130,13 +145,14 @@ async def do_search_without_aggregation(
     logger.debug(f"Listening on {host} for search results.")
 
     server = await asyncio.start_server(
-        client_connected_cb=get_worker_connection_handler(raw_output),
+        client_connected_cb=get_worker_connection_handler(raw_output, storage_engine),
         host=host,
         port=0,
         family=socket.AF_INET,
     )
 
     port = int(server.sockets[0].getsockname()[1])
+    network_output = NetworkOutput(host=host, port=port, session_token=str(uuid.uuid4()))
     server_task = asyncio.ensure_future(server.serve_forever())
 
     db_monitor_task = asyncio.ensure_future(
@@ -150,7 +166,7 @@ async def do_search_without_aggregation(
             end_timestamp,
             ignore_case,
             path_filter,
-            (host, port),
+            network_output,
             None,
             None,
         )
@@ -190,6 +206,7 @@ async def do_search(
     do_count_aggregation: bool | None,
     count_by_time_bucket_size: int | None,
     raw_output: bool,
+    storage_engine: str,
 ):
     if do_count_aggregation is None and count_by_time_bucket_size is None:
         await do_search_without_aggregation(
@@ -202,6 +219,7 @@ async def do_search(
             ignore_case,
             path_filter,
             raw_output,
+            storage_engine,
         )
     else:
         await run_function_in_process(
@@ -327,6 +345,7 @@ def main(argv):
                 parsed_args.count,
                 parsed_args.count_by_time,
                 parsed_args.raw,
+                clp_config.package.storage_engine,
             )
         )
     except asyncio.CancelledError:

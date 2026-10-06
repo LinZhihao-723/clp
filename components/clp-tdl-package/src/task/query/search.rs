@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::io::Read;
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -17,13 +18,26 @@ use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::s3::generate_s3_url;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
+use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use non_empty_string::NonEmptyString;
+use uuid::Uuid;
 
 use crate::common::clp_home;
 use crate::common::runtime;
 use crate::task::utils::clp_binary_path;
 use crate::task::utils::s3_credential_env;
+
+/// The archive that a query task searches.
+pub(super) struct ArchiveToSearch {
+    pub(super) id: ArchiveId,
+
+    /// The archive's dataset, or `None` for the default dataset.
+    pub(super) dataset: Option<NonEmptyString>,
+
+    /// The archive's position among the archives that the query job searches.
+    pub(super) task_index: QueryTaskIndex,
+}
 
 /// Searches one archive with clp-s, handles the search results according to the given
 /// `output_handle`.
@@ -36,8 +50,7 @@ use crate::task::utils::s3_credential_env;
 /// Returns an error if:
 ///
 /// * The configured storage engine is not [`StorageEngine::ClpS`].
-/// * `output_handle` is not [`OutputHandle::ResultsCache`]. The current implementation only
-///   supports result cache output streaming.
+/// * `output_handle` is [`OutputHandle::File`], which the current implementation doesn't support.
 /// * Forwards [`resolve_archive_input`]'s return values on failure.
 /// * Forwards [`run_clp_s_search`]'s return values on failure.
 pub(super) fn search(
@@ -45,18 +58,17 @@ pub(super) fn search(
     config: &SpiderTaskExecutorConfig,
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
-    archive_id: ArchiveId,
-    dataset: Option<&str>,
+    archive: &ArchiveToSearch,
     output_handle: &OutputHandle,
 ) -> anyhow::Result<()> {
     if StorageEngine::ClpS != config.package.storage_engine {
         anyhow::bail!("the clp-s query task requires the `clp-s` storage engine");
     }
-    let OutputHandle::ResultsCache { uri } = output_handle else {
+    if matches!(output_handle, OutputHandle::File) {
         anyhow::bail!("unsupported query output handler");
-    };
+    }
 
-    let dataset = resolve_dataset_name(dataset);
+    let dataset = resolve_dataset_name(archive.dataset.as_ref().map(NonEmptyString::as_str));
 
     tracing::info!(
         job_id = % ctx.job_id,
@@ -64,13 +76,14 @@ pub(super) fn search(
         task_instance_id = % ctx.task_instance_id,
         query_job_id = % query_job_id,
         dataset = % dataset,
-        archive_id = % archive_id,
+        archive_id = % archive.id,
+        task_index = archive.task_index,
         "clp-s query task started.",
     );
 
     let clp_home = clp_home();
     let (archive_selector, credential_env) =
-        resolve_archive_input(&runtime(), clp_home, config, dataset, archive_id).inspect_err(
+        resolve_archive_input(&runtime(), clp_home, config, dataset, archive.id).inspect_err(
             |e| {
                 tracing::error!(
                     job_id = % ctx.job_id,
@@ -82,13 +95,28 @@ pub(super) fn search(
                 );
             },
         )?;
-    let args = build_clp_s_search_args_for_result_cache(
-        &archive_selector,
-        clp_s_query_option,
-        uri.as_str(),
-        query_job_id,
-        dataset,
-    );
+    let args = match output_handle {
+        OutputHandle::ResultsCache { uri } => build_clp_s_search_args_for_result_cache(
+            &archive_selector,
+            clp_s_query_option,
+            uri.as_str(),
+            query_job_id,
+            dataset,
+        ),
+        OutputHandle::Network {
+            host,
+            port,
+            session_token,
+        } => build_clp_s_search_args_for_network(
+            &archive_selector,
+            clp_s_query_option,
+            host.as_str(),
+            *port,
+            *session_token,
+            archive.task_index,
+        ),
+        OutputHandle::File => unreachable!("the file output handle is rejected above"),
+    };
     run_clp_s_search(&clp_binary_path(clp_home, "clp-s"), args, &credential_env)?;
 
     tracing::info!(
@@ -178,6 +206,61 @@ fn build_clp_s_search_args_for_result_cache(
     query_job_id: QueryJobId,
     dataset: &str,
 ) -> Vec<OsString> {
+    let mut args = build_clp_s_search_query_args(archive_selector, clp_s_query_option);
+    args.extend([
+        OsString::from("results-cache"),
+        OsString::from("--uri"),
+        OsString::from(result_cache_uri),
+        OsString::from("--collection"),
+        OsString::from(query_job_id.to_string()),
+    ]);
+    if let Some(max_num_results) = clp_s_query_option.max_num_results {
+        args.push(OsString::from("--max-num-results"));
+        args.push(OsString::from(max_num_results.to_string()));
+    }
+    args.extend([OsString::from("--dataset"), OsString::from(dataset)]);
+    args
+}
+
+/// Builds the clp-s command-line arguments for a single-archive search streaming to a network
+/// destination.
+///
+/// # Returns
+///
+/// The ordered clp-s arguments.
+fn build_clp_s_search_args_for_network(
+    archive_selector: &ArchiveSelector,
+    clp_s_query_option: &ClpSQueryOption,
+    host: &str,
+    port: NonZeroU16,
+    session_token: Uuid,
+    task_index: QueryTaskIndex,
+) -> Vec<OsString> {
+    let mut args = build_clp_s_search_query_args(archive_selector, clp_s_query_option);
+    args.extend([
+        OsString::from("network"),
+        OsString::from("--host"),
+        OsString::from(host),
+        OsString::from("--port"),
+        OsString::from(port.to_string()),
+        OsString::from("--session-token"),
+        OsString::from(session_token.to_string()),
+        OsString::from("--task-index"),
+        OsString::from(task_index.to_string()),
+    ]);
+    args
+}
+
+/// Builds the clp-s command-line arguments that select the archive and the query to run on it,
+/// shared by every output handler.
+///
+/// # Returns
+///
+/// The ordered clp-s arguments, which the caller completes with an output handler.
+fn build_clp_s_search_query_args(
+    archive_selector: &ArchiveSelector,
+    clp_s_query_option: &ClpSQueryOption,
+) -> Vec<OsString> {
     let mut args = vec![OsString::from("s")];
     match archive_selector {
         ArchiveSelector::Directory { path, archive_id } => {
@@ -204,19 +287,6 @@ fn build_clp_s_search_args_for_result_cache(
     if clp_s_query_option.ignore_case {
         args.push(OsString::from("--ignore-case"));
     }
-
-    args.extend([
-        OsString::from("results-cache"),
-        OsString::from("--uri"),
-        OsString::from(result_cache_uri),
-        OsString::from("--collection"),
-        OsString::from(query_job_id.to_string()),
-    ]);
-    if let Some(max_num_results) = clp_s_query_option.max_num_results {
-        args.push(OsString::from("--max-num-results"));
-        args.push(OsString::from(max_num_results.to_string()));
-    }
-    args.extend([OsString::from("--dataset"), OsString::from(dataset)]);
     args
 }
 
@@ -292,6 +362,7 @@ fn run_clp_s_search(
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::num::NonZeroU16;
     use std::num::NonZeroU32;
     use std::path::Path;
     use std::path::PathBuf;
@@ -315,11 +386,14 @@ mod tests {
     use spider_tdl::TaskContext;
 
     use super::ArchiveSelector;
+    use super::ArchiveToSearch;
+    use super::build_clp_s_search_args_for_network;
     use super::build_clp_s_search_args_for_result_cache;
     use super::resolve_archive_input;
     use super::search;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
+    const SESSION_TOKEN: &str = "6f1d3b52-8a4e-4c1b-9f6e-2d7a5c0b9e13";
 
     /// # Returns
     ///
@@ -547,6 +621,81 @@ mod tests {
     }
 
     #[test]
+    fn build_clp_s_search_args_for_network_fs_with_timestamps_and_ignore_case() {
+        let clp_s_query_option = ClpSQueryOption {
+            query_string: NonEmptyString::from_static_str("level: \"ERROR\""),
+            max_num_results: Some(NonZeroU32::new(7).expect("7 is nonzero")),
+            begin_timestamp_millisecs: Some(1_310_138_944_000),
+            end_timestamp_millisecs: Some(1_311_208_074_120),
+            ignore_case: true,
+        };
+
+        assert_eq!(
+            build_clp_s_search_args_for_network(
+                &directory_selector(),
+                &clp_s_query_option,
+                "10.0.0.7",
+                NonZeroU16::new(40_123).expect("40,123 is nonzero"),
+                SESSION_TOKEN.parse().expect("valid session token UUID"),
+                5,
+            ),
+            vec![
+                OsString::from("s"),
+                OsString::from("/archives/ds1"),
+                OsString::from("--archive-id"),
+                OsString::from(ARCHIVE_ID),
+                OsString::from("level: \"ERROR\""),
+                OsString::from("--tge"),
+                OsString::from("1310138944000"),
+                OsString::from("--tle"),
+                OsString::from("1311208074120"),
+                OsString::from("--ignore-case"),
+                OsString::from("network"),
+                OsString::from("--host"),
+                OsString::from("10.0.0.7"),
+                OsString::from("--port"),
+                OsString::from("40123"),
+                OsString::from("--session-token"),
+                OsString::from(SESSION_TOKEN),
+                OsString::from("--task-index"),
+                OsString::from("5"),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_clp_s_search_args_for_network_s3_uses_object_url_and_no_archive_id() {
+        let url = format!("https://bucket.s3.amazonaws.com/LIB1/ds1/{ARCHIVE_ID}");
+
+        assert_eq!(
+            build_clp_s_search_args_for_network(
+                &ArchiveSelector::ObjectUrl(url.clone()),
+                &unbounded_query_option(),
+                "clp-host",
+                NonZeroU16::new(18_000).expect("18,000 is nonzero"),
+                SESSION_TOKEN.parse().expect("valid session token UUID"),
+                0,
+            ),
+            vec![
+                OsString::from("s"),
+                OsString::from(url),
+                OsString::from("--auth"),
+                OsString::from("s3"),
+                OsString::from("level: \"ERROR\""),
+                OsString::from("network"),
+                OsString::from("--host"),
+                OsString::from("clp-host"),
+                OsString::from("--port"),
+                OsString::from("18000"),
+                OsString::from("--session-token"),
+                OsString::from(SESSION_TOKEN),
+                OsString::from("--task-index"),
+                OsString::from("0"),
+            ]
+        );
+    }
+
+    #[test]
     fn resolve_archive_input_fs_joins_dataset_and_returns_no_credentials() -> anyhow::Result<()> {
         let runtime = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
         let config = SpiderTaskExecutorConfig {
@@ -683,8 +832,11 @@ mod tests {
             &config,
             42,
             &unbounded_query_option(),
-            ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
-            None,
+            &ArchiveToSearch {
+                id: ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
+                dataset: None,
+                task_index: 0,
+            },
             &OutputHandle::File,
         )
         .expect_err("the file output handler is unsupported");
@@ -702,8 +854,11 @@ mod tests {
             &config,
             42,
             &unbounded_query_option(),
-            ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
-            None,
+            &ArchiveToSearch {
+                id: ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
+                dataset: None,
+                task_index: 0,
+            },
             &OutputHandle::ResultsCache {
                 uri: NonEmptyString::from_static_str(
                     "mongodb://results-cache:27017/clp-query-results",

@@ -10,11 +10,11 @@ use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::clp_config::package::config::StreamOutputStorage;
 use clp_rust_utils::clp_config::package::credentials::Credentials;
 use clp_rust_utils::database::mysql::create_clp_db_mysql_pool;
+use clp_rust_utils::database::mysql::submit_query_job;
 use clp_rust_utils::job_config::AggregationConfig;
 pub use clp_rust_utils::job_config::CompressionJobStatus;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
 use clp_rust_utils::job_config::QueryJobStatus;
-use clp_rust_utils::job_config::QueryJobType;
 use clp_rust_utils::job_config::SearchJobConfig;
 use futures::Stream;
 use futures::StreamExt;
@@ -287,8 +287,12 @@ impl Client {
     ///
     /// * [`ClientError::InvalidInput`] if `count_by_time_bucket_size_millisecs` is set and is `<=
     ///   0`.
-    /// * Forwards [`rmp_serde::to_vec_named`]'s return values on failure.
-    /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
+    /// * Forwards [`submit_query_job`]'s return values on failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`submit_query_job`] returns a negative query job ID, which the table's
+    /// auto-incremented ID column rules out.
     pub async fn submit_query(&self, query_config: QueryConfig) -> Result<u64, ClientError> {
         let count_by_time_bucket_size = query_config.count_by_time_bucket_size_millisecs;
         if let Some(bucket_size) = count_by_time_bucket_size
@@ -318,17 +322,9 @@ impl Client {
             search_job_config.write_to_file = false;
         }
 
-        let query_job_type_i32: i32 = QueryJobType::SearchOrAggregation.into();
-        let query_result = sqlx::query(&format!(
-            "INSERT INTO `{QUERY_JOBS_TABLE_NAME}` (`job_config`, `type`) VALUES (?, ?)"
-        ))
-        .bind(rmp_serde::to_vec_named(&search_job_config)?)
-        .bind(query_job_type_i32)
-        .execute(&self.sql_pool)
-        .await?;
-
-        let search_job_id = query_result.last_insert_id();
-        Ok(search_job_id)
+        let search_job_id = submit_query_job(&self.sql_pool, &search_job_config).await?;
+        Ok(u64::try_from(search_job_id)
+            .expect("auto-incremented query job IDs should be non-negative"))
     }
 
     /// Asynchronously fetches the results of a completed search job.

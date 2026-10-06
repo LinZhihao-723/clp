@@ -200,14 +200,22 @@ def _make_command_and_env_vars(
         if aggregation_config.count_by_time_bucket_size is not None:
             command.append("--count-by-time")
             command.append(str(aggregation_config.count_by_time_bucket_size))
-    elif search_config.network_address is not None:
+    elif search_config.network_output is not None:
+        network_output = search_config.network_output
         # fmt: off
         command.extend((
             "network",
-            "--host", search_config.network_address[0],
-            "--port", str(search_config.network_address[1])
+            "--host", network_output.host,
+            "--port", str(network_output.port),
         ))
         # fmt: on
+        if StorageEngine.CLP_S == storage_engine:
+            # fmt: off
+            command.extend((
+                "--session-token", network_output.session_token,
+                "--task-index", str(task_id),
+            ))
+            # fmt: on
     elif search_config.write_to_file:
         output_directory = worker_config.stream_output.get_directory() / job_id
         output_directory.mkdir(exist_ok=True)

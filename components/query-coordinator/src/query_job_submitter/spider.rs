@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
+use clp_rust_utils::task_io::query::QueryTaskIndex;
 use spider_client::SpiderClient;
 use spider_client::error::ClientError;
 use spider_core::job::JobState;
@@ -144,7 +145,7 @@ fn build_query_task_graph(
     let query_option_input = inputs.create_shared_input_payload(clp_s_query_option)?;
     let output_handle_input = inputs.create_shared_input_payload(output_handle)?;
     let mut dataset_inputs = HashMap::new();
-    for (archive, execution_policy) in archives_to_search {
+    for (task_index, (archive, execution_policy)) in (0..).zip(archives_to_search) {
         graph.insert_task(TaskDescriptor {
             tdl_context: TdlContext {
                 package: CLP_TDL_PACKAGE_NAME.to_owned(),
@@ -161,6 +162,9 @@ fn build_query_task_graph(
                 )?),
                 DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name("NonEmptyString")?),
                 DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name("OutputHandle")?),
+                // Spider has no unsigned integer type. A task index is below the number of tasks,
+                // so it always fits in `int64`.
+                DataTypeDescriptor::Value(ValueTypeDescriptor::int64()),
             ],
             outputs: vec![],
             input_sources: None,
@@ -177,7 +181,82 @@ fn build_query_task_graph(
         inputs.append_shared_task_input(dataset_input)?;
         inputs.append_task_input(&archive.id)?;
         inputs.append_shared_task_input(output_handle_input)?;
+        inputs.append_task_input::<QueryTaskIndex>(&task_index)?;
     }
 
     Ok((graph, inputs.build()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU16;
+
+    use clp_rust_utils::task_io::query::ClpSQueryOption;
+    use clp_rust_utils::task_io::query::OutputHandle;
+    use clp_rust_utils::task_io::query::QueryTaskIndex;
+    use clp_rust_utils::types::ArchiveId;
+    use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
+    use non_empty_string::NonEmptyString;
+    use spider_core::task::ExecutionPolicy;
+    use spider_core::types::io::TaskGraphInputEntry;
+
+    use super::build_query_task_graph;
+    use crate::query_job_submitter::ArchiveMetadata;
+
+    #[test]
+    fn build_query_task_graph_appends_archive_positions_as_task_indices() -> anyhow::Result<()> {
+        const ARCHIVE_IDS: [&str; 3] = [
+            "018e90e5-8b2a-4a61-a2fc-cac799936caf",
+            "5b0f8c2e-3d41-4a8e-9c7b-1e2f3a4b5c6d",
+            "c3d2e1f0-a9b8-4c7d-8e6f-5a4b3c2d1e0f",
+        ];
+
+        let archives_to_search = ARCHIVE_IDS
+            .iter()
+            .zip([Some("ds1"), Some("ds2"), Some("ds1")])
+            .map(|(archive_id, dataset)| {
+                let archive = ArchiveMetadata {
+                    id: archive_id.parse::<ArchiveId>()?,
+                    dataset: dataset.map(NonEmptyString::from_static_str),
+                    uncompressed_size: 0,
+                    end_timestamp: 0,
+                };
+                Ok((archive, ExecutionPolicy::default()))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let clp_s_query_option = ClpSQueryOption {
+            query_string: NonEmptyString::from_static_str("*Transmitted*"),
+            max_num_results: None,
+            begin_timestamp_millisecs: None,
+            end_timestamp_millisecs: None,
+            ignore_case: false,
+        };
+        let output_handle = OutputHandle::Network {
+            host: NonEmptyString::from_static_str("10.0.0.7"),
+            port: NonZeroU16::new(40_123).expect("40,123 is nonzero"),
+            session_token: "6f1d3b52-8a4e-4c1b-9f6e-2d7a5c0b9e13".parse()?,
+        };
+
+        let (graph, inputs) =
+            build_query_task_graph(42, &clp_s_query_option, &output_handle, archives_to_search)?;
+
+        assert_eq!(graph.get_num_tasks(), ARCHIVE_IDS.len());
+        let positional_inputs = inputs.get_positional_inputs();
+        assert_eq!(
+            positional_inputs.len(),
+            graph.get_task_graph_input_indices().len()
+        );
+        let task_indices = positional_inputs
+            .chunks(positional_inputs.len() / ARCHIVE_IDS.len())
+            .map(|task_inputs| match task_inputs.last() {
+                Some(TaskGraphInputEntry::ValuePayload(payload)) => {
+                    Ok(rmp_serde::from_slice::<QueryTaskIndex>(payload)?)
+                }
+                entry => anyhow::bail!("unexpected task index input entry: {entry:?}"),
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(task_indices, vec![0, 1, 2]);
+
+        Ok(())
+    }
 }

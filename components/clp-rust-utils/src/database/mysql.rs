@@ -1,8 +1,13 @@
+use const_format::formatcp;
 use secrecy::ExposeSecret;
 use strum::IntoEnumIterator;
 
 use crate::clp_config::package::config::Database as DatabaseConfig;
 use crate::clp_config::package::credentials::Database as DatabaseCredentials;
+use crate::job_config::QUERY_JOBS_TABLE_NAME;
+use crate::job_config::QueryJobId;
+use crate::job_config::QueryJobType;
+use crate::job_config::SearchJobConfig;
 
 /// Implements [`sqlx::Type<sqlx::MySql>`] for `$ty` by delegating to `$delegate`.
 ///
@@ -72,4 +77,38 @@ pub async fn create_clp_db_mysql_pool(
         .max_connections(max_connections)
         .connect_with(mysql_options)
         .await?)
+}
+
+/// Submits a search job by inserting it into the CLP DB's query jobs table.
+///
+/// # Returns
+///
+/// The ID of the submitted query job on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// * Forwards [`rmp_serde::to_vec_named`]'s return values on failure.
+/// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
+///
+/// # Panics
+///
+/// Panics if the ID of the inserted row doesn't fit in [`QueryJobId`], which the table's `INT` ID
+/// column rules out.
+pub async fn submit_query_job(
+    db_pool: &sqlx::MySqlPool,
+    search_job_config: &SearchJobConfig,
+) -> Result<QueryJobId, crate::Error> {
+    const QUERY: &str =
+        formatcp!("INSERT INTO `{QUERY_JOBS_TABLE_NAME}` (`job_config`, `type`) VALUES (?, ?)");
+
+    let query_result = sqlx::query(QUERY)
+        .bind(rmp_serde::to_vec_named(search_job_config)?)
+        .bind(QueryJobType::SearchOrAggregation)
+        .execute(db_pool)
+        .await?;
+
+    Ok(QueryJobId::try_from(query_result.last_insert_id())
+        .expect("the `INT` ID column should bound every query job ID to `QueryJobId`'s range"))
 }
