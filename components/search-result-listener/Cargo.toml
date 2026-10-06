@@ -1,0 +1,30 @@
+[package]
+name = "search-result-listener"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lib]
+name = "search_result_listener"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clp-rust-utils = { workspace = true }
+const_format = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+if-addrs = { workspace = true }
+non-empty-string = { workspace = true }
+rmp = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
