@@ -207,6 +207,7 @@ pub struct ApiServer {
     pub port: u16,
     pub query_job_polling: QueryJobPollingConfig,
     pub default_max_num_query_results: u32,
+    pub search_result_listener: SearchResultListener,
 }
 
 impl Default for ApiServer {
@@ -216,6 +217,31 @@ impl Default for ApiServer {
             port: 3001,
             query_job_polling: QueryJobPollingConfig::default(),
             default_max_num_query_results: 1000,
+            search_result_listener: SearchResultListener::default(),
+        }
+    }
+}
+
+/// Mirror of `clp_py_utils.clp_config.SearchResultListener`.
+///
+/// # NOTE
+///
+/// * The default values must be kept in sync with the Python definition.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(default)]
+pub struct SearchResultListener {
+    /// The port that the listener binds to on every interface.
+    pub port: u16,
+
+    /// The host that search tasks connect to. When `None`, the listener detects the host itself.
+    pub advertised_host: Option<NonEmptyString>,
+}
+
+impl Default for SearchResultListener {
+    fn default() -> Self {
+        Self {
+            port: 3003,
+            advertised_host: None,
         }
     }
 }
@@ -250,12 +276,14 @@ impl Default for QueryJobPollingConfig {
 #[serde(default)]
 pub struct Package {
     pub storage_engine: StorageEngine,
+    pub scheduler: CompressionOrchestration,
 }
 
 impl Default for Package {
     fn default() -> Self {
         Self {
             storage_engine: StorageEngine::Clp,
+            scheduler: CompressionOrchestration::Celery,
         }
     }
 }
@@ -267,6 +295,16 @@ pub enum StorageEngine {
     Clp,
     #[serde(rename = "clp-s")]
     ClpS,
+}
+
+/// Mirror of `clp_py_utils.clp_config.CompressionOrchestration`, which selects the scheduler that
+/// runs both compression and query jobs.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+pub enum CompressionOrchestration {
+    #[serde(rename = "celery")]
+    Celery,
+    #[serde(rename = "spider")]
+    Spider,
 }
 
 /// Mirror of `clp_py_utils.clp_config.ResultsCache`.
@@ -634,8 +672,11 @@ mod tests {
 
     use super::ArchiveOutput;
     use super::ArchiveOutputStorage;
+    use super::CompressionOrchestration;
+    use super::Config;
     use super::Database;
     use super::LogsInput;
+    use super::SearchResultListener;
     use super::SpiderTaskExecutorConfig;
 
     #[test]
@@ -823,6 +864,69 @@ mod tests {
             .expect("failed to deserialize `Database` from JSON");
 
         assert_eq!(db.table_prefix, "clp_");
+    }
+
+    #[test]
+    fn deserialize_spider_scheduler_and_search_result_listener() {
+        use non_empty_string::NonEmptyString;
+
+        use crate::types::non_empty_string::ExpectedNonEmpty;
+
+        let config_json = serde_json::json!({
+            "package": {
+                "storage_engine": "clp-s",
+                "scheduler": "spider",
+            },
+            "api_server": {
+                "host": "api_server",
+                "port": 3001,
+                "search_result_listener": {
+                    "port": 4003,
+                    "advertised_host": "api_server",
+                },
+            },
+        });
+
+        let config = serde_json::from_value::<Config>(config_json)
+            .expect("failed to deserialize `Config` from JSON");
+
+        assert_eq!(config.package.scheduler, CompressionOrchestration::Spider);
+        assert_eq!(
+            config
+                .api_server
+                .expect("the API server config should be present")
+                .search_result_listener,
+            SearchResultListener {
+                port: 4003,
+                advertised_host: Some(NonEmptyString::from_static_str("api_server")),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_defaults_to_celery_and_an_undetected_listener_host() {
+        let config_json = serde_json::json!({
+            "package": {
+                "storage_engine": "clp-s",
+            },
+            "api_server": {
+                "search_result_listener": {
+                    "advertised_host": null,
+                },
+            },
+        });
+
+        let config = serde_json::from_value::<Config>(config_json)
+            .expect("failed to deserialize `Config` from JSON");
+
+        assert_eq!(config.package.scheduler, CompressionOrchestration::Celery);
+        assert_eq!(
+            config
+                .api_server
+                .expect("the API server config should be present")
+                .search_result_listener,
+            SearchResultListener::default()
+        );
     }
 
     #[test]

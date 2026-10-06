@@ -18,6 +18,14 @@ telemetry:
 #  query_job_polling:
 #    initial_backoff_ms: 100
 #    max_backoff_ms: 5000
+#
+#  # The listener that receives the results of streaming searches (`POST /query/stream`) from the
+#  # search tasks. Only used when `package.scheduler` is "spider".
+#  search_result_listener:
+#    port: 3003
+#
+#    # The host that the search tasks connect to. Defaults to the API server's container hostname.
+#    advertised_host: null
 
 ## log-ingestor config. Currently, the config is applicable only if `logs_input.type` is "s3".
 #log_ingestor:

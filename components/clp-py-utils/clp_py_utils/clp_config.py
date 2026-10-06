@@ -756,6 +756,17 @@ class QueryJobPollingConfig(BaseModel):
     max_backoff_ms: int = Field(default=5000, alias="max_backoff")
 
 
+class SearchResultListener(BaseModel):
+    DEFAULT_PORT: ClassVar[int] = 3003
+
+    port: Port = DEFAULT_PORT
+    advertised_host: DomainStr | None = None
+
+    def transform_for_container(self):
+        if self.advertised_host is None:
+            self.advertised_host = API_SERVER_COMPONENT_NAME
+
+
 class ApiServer(BaseModel):
     DEFAULT_PORT: ClassVar[int] = 3001
 
@@ -763,10 +774,12 @@ class ApiServer(BaseModel):
     port: Port = DEFAULT_PORT
     query_job_polling: QueryJobPollingConfig = QueryJobPollingConfig()
     default_max_num_query_results: int = 1000
+    search_result_listener: SearchResultListener = SearchResultListener()
 
     def transform_for_container(self):
         self.host = API_SERVER_COMPONENT_NAME
         self.port = self.DEFAULT_PORT
+        self.search_result_listener.transform_for_container()
 
 
 class LogIngestor(BaseModel):

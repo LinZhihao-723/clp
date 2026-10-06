@@ -6,6 +6,7 @@ use crate::clp_config::package::config::Database as DatabaseConfig;
 use crate::clp_config::package::credentials::Database as DatabaseCredentials;
 use crate::job_config::QUERY_JOBS_TABLE_NAME;
 use crate::job_config::QueryJobId;
+use crate::job_config::QueryJobStatus;
 use crate::job_config::QueryJobType;
 use crate::job_config::SearchJobConfig;
 
@@ -108,4 +109,35 @@ pub async fn submit_query_job(
 
     let query_job_id = query_result.last_insert_id();
     QueryJobId::try_from(query_job_id).map_err(|_| crate::Error::QueryJobIdOutOfRange(query_job_id))
+}
+
+/// Requests the cancellation of a query job by marking it as [`QueryJobStatus::Cancelling`], if it
+/// is [`QueryJobStatus::Pending`] or [`QueryJobStatus::Running`].
+///
+/// # Returns
+///
+/// Whether the query job was marked on success. A query job that doesn't exist or is in any other
+/// status isn't marked.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
+pub async fn cancel_query_job(
+    db_pool: &sqlx::MySqlPool,
+    query_job_id: QueryJobId,
+) -> Result<bool, crate::Error> {
+    const QUERY: &str = formatcp!(
+        "UPDATE `{QUERY_JOBS_TABLE_NAME}` SET `status` = ? WHERE `id` = ? AND `status` IN (?, ?)"
+    );
+
+    let query_result = sqlx::query(QUERY)
+        .bind(QueryJobStatus::Cancelling)
+        .bind(query_job_id)
+        .bind(QueryJobStatus::Pending)
+        .bind(QueryJobStatus::Running)
+        .execute(db_pool)
+        .await?;
+    Ok(0 != query_result.rows_affected())
 }
