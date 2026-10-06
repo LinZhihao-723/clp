@@ -89,13 +89,10 @@ pub async fn create_clp_db_mysql_pool(
 ///
 /// Returns an error if:
 ///
+/// * [`crate::Error::QueryJobIdOutOfRange`] if the ID of the inserted row doesn't fit in
+///   [`QueryJobId`].
 /// * Forwards [`rmp_serde::to_vec_named`]'s return values on failure.
 /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
-///
-/// # Panics
-///
-/// Panics if the ID of the inserted row doesn't fit in [`QueryJobId`], which the table's `INT` ID
-/// column rules out.
 pub async fn submit_query_job(
     db_pool: &sqlx::MySqlPool,
     search_job_config: &SearchJobConfig,
@@ -109,6 +106,6 @@ pub async fn submit_query_job(
         .execute(db_pool)
         .await?;
 
-    Ok(QueryJobId::try_from(query_result.last_insert_id())
-        .expect("the `INT` ID column should bound every query job ID to `QueryJobId`'s range"))
+    let query_job_id = query_result.last_insert_id();
+    QueryJobId::try_from(query_job_id).map_err(|_| crate::Error::QueryJobIdOutOfRange(query_job_id))
 }

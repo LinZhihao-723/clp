@@ -291,8 +291,8 @@ impl Client {
     ///
     /// # Panics
     ///
-    /// Panics if [`submit_query_job`] returns a negative query job ID, which the table's
-    /// auto-incremented ID column rules out.
+    /// Panics if [`submit_query_job`] returns a negative query job ID, which it never does since it
+    /// converts the ID from the inserted row's unsigned ID.
     pub async fn submit_query(&self, query_config: QueryConfig) -> Result<u64, ClientError> {
         let count_by_time_bucket_size = query_config.count_by_time_bucket_size_millisecs;
         if let Some(bucket_size) = count_by_time_bucket_size
@@ -324,7 +324,7 @@ impl Client {
 
         let search_job_id = submit_query_job(&self.sql_pool, &search_job_config).await?;
         Ok(u64::try_from(search_job_id)
-            .expect("auto-incremented query job IDs should be non-negative"))
+            .expect("`submit_query_job` should only return non-negative query job IDs"))
     }
 
     /// Asynchronously fetches the results of a completed search job.
