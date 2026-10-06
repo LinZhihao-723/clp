@@ -7,6 +7,7 @@ use std::time::Duration;
 use bytes::BytesMut;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 use tokio_util::task::task_tracker::TaskTrackerToken;
 
 use crate::SearchResult;
@@ -75,7 +76,8 @@ pub async fn serve(
             peer_addr = % peer_addr,
             session_token = % handshake.session_token,
             task_index = handshake.task_index,
-            "Stopped reading an idle connection after its job terminated."
+            "Stopped reading a connection that claimed no result within the grace period after \
+             its job terminated."
         ),
         Ok(End::ResultStreamClosed) => tracing::debug!(
             peer_addr = % peer_addr,
@@ -106,7 +108,8 @@ enum End {
     /// The search task closed the connection after its last result.
     Eof,
 
-    /// The session's job terminated, and the connection then stayed idle for the grace period.
+    /// The session's job terminated, and the connection then waited on its socket for the grace
+    /// period without claiming a result.
     DrainTimedOut,
 
     /// The session's consumer dropped the result stream.
@@ -162,8 +165,10 @@ impl Connection {
     /// Claims each result the connection streams, and sends the claimed results to the session's
     /// consumer.
     ///
-    /// Reading stops at EOF. Once the session's job has terminated, it also stops when the socket
-    /// stays idle for the session's grace period. Delivering a claimed result is never cut short.
+    /// Reading stops at EOF. Once the session's job has terminated, it also stops when the
+    /// connection has waited on its socket for the session's grace period without claiming a
+    /// result. Delivering a claimed result is never cut short, and doesn't count toward the grace
+    /// period.
     ///
     /// # Returns
     ///
@@ -195,12 +200,14 @@ impl Connection {
             .into());
         }
 
+        let mut read_time_since_last_claim = Duration::ZERO;
         loop {
             while let Some(frame) = ResultFrame::decode(&mut buffer)? {
                 if Claim::Duplicate == self.cursor.try_claim(frame.result_index)? {
                     self.stats.num_duplicates_dropped += 1;
                     continue;
                 }
+                read_time_since_last_claim = Duration::ZERO;
                 let result = SearchResult {
                     archive_id,
                     timestamp: frame.timestamp,
@@ -214,14 +221,18 @@ impl Connection {
 
             buffer.reserve(READ_BUFFER_CAPACITY);
             let num_bytes_read = if self.session.draining.is_cancelled() {
+                let read_started_at = Instant::now();
                 let Ok(read_result) = tokio::time::timeout(
-                    self.session.drain_grace_period,
+                    self.session
+                        .drain_grace_period
+                        .saturating_sub(read_time_since_last_claim),
                     stream.read_buf(&mut buffer),
                 )
                 .await
                 else {
                     return Ok(End::DrainTimedOut);
                 };
+                read_time_since_last_claim += read_started_at.elapsed();
                 read_result?
             } else {
                 tokio::select! {

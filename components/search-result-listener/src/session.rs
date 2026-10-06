@@ -40,8 +40,8 @@ pub struct SessionConfig {
     /// their sockets.
     pub channel_capacity: NonZeroUsize,
 
-    /// How long a connection may stay idle once its job has terminated before the session stops
-    /// reading from it.
+    /// How long a connection may wait on its socket without claiming a result once its job has
+    /// terminated, before the session stops reading from it.
     pub drain_grace_period: Duration,
 }
 

@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::time::Duration;
+use std::time::Instant;
 
 use clp_rust_utils::job_config::NetworkOutput;
 use clp_rust_utils::job_config::QueryJobId;
@@ -168,6 +169,27 @@ impl FakeClpS {
             ));
         }
         self.send(&bytes).await;
+    }
+
+    /// Resends the results at `result_indices` of task `task_index` in a cycle, one every
+    /// `interval`, until the listener closes the connection.
+    async fn resend_results_until_closed(
+        mut self,
+        task_index: u64,
+        result_indices: Range<u64>,
+        interval: Duration,
+    ) {
+        for result_index in result_indices.cycle() {
+            let bytes = encode_result(
+                result_index,
+                timestamp(result_index),
+                &message(task_index, result_index),
+            );
+            if self.stream.write_all(&bytes).await.is_err() {
+                return;
+            }
+            sleep(interval).await;
+        }
     }
 
     /// Waits until the listener closes the connection without sending anything.
@@ -628,6 +650,48 @@ async fn results_still_arriving_reach_a_slow_consumer_after_the_grace_period() {
     attempt_task
         .await
         .expect("the attempt should stream every result");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stale_attempt_resending_duplicates_is_cut_off_after_the_grace_period() {
+    const NUM_RESULTS: u64 = 5;
+
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut stale_attempt = harness.connect().await;
+    stale_attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, 0..NUM_RESULTS).await;
+    drop(attempt);
+    let mut results = Vec::new();
+    for _ in 0..NUM_RESULTS {
+        results.push(harness.next_result().await);
+    }
+    let stale_attempt_task = tokio::spawn(stale_attempt.resend_results_until_closed(
+        0,
+        0..NUM_RESULTS,
+        BASE_SESSION_CONFIG.drain_grace_period / 4,
+    ));
+
+    let finish_started_at = Instant::now();
+    let (remaining_results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
+    let finish_duration = finish_started_at.elapsed();
+    results.extend(remaining_results);
+
+    assert!(
+        finish_duration < BASE_SESSION_CONFIG.drain_grace_period * 5,
+        "the session took {finish_duration:?} to finish"
+    );
+    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..NUM_RESULTS));
+    assert_eq!(outcome.stats.num_results_emitted, NUM_RESULTS);
+    timeout(TIMEOUT, stale_attempt_task)
+        .await
+        .expect("the listener should close the stale attempt's connection")
+        .expect("the stale attempt shouldn't panic");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
