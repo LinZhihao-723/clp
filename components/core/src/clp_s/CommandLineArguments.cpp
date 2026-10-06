@@ -824,7 +824,7 @@ CommandLineArguments::parse_arguments(int argc, char const** argv) {
                     "Token identifying the network destination's session to stream results to"
             )(
                     "task-index",
-                    po::value<uint64_t>(&network_options.task_index)->value_name("INDEX"),
+                    po::value<uint64_t>(&network_options.task_idx)->value_name("INDEX"),
                     "Index of the search task within its query job"
             );
             // clang-format on
@@ -911,7 +911,8 @@ CommandLineArguments::parse_arguments(int argc, char const** argv) {
                           << " (default) - Output to stdout" << std::endl;
                 std::cerr << "  " << cFileOutputHandlerName << " - Output to a file" << std::endl;
                 std::cerr << "  " << cNetworkOutputHandlerName
-                          << " - Output to a network destination" << std::endl;
+                          << " - Output to a network destination (single archive only)"
+                          << std::endl;
                 std::cerr << "  " << cResultsCacheOutputHandlerName
                           << " - Output to the results cache" << std::endl;
                 std::cerr << "  " << cReducerOutputHandlerName << " - Output to the reducer"
@@ -943,10 +944,13 @@ CommandLineArguments::parse_arguments(int argc, char const** argv) {
                           << std::endl;
                 std::cerr << std::endl;
 
-                std::cerr << "  # Search archives in archives-dir for logs matching a KQL query"
-                             R"( "level: INFO" and output to a network destination)"
+                std::cerr << "  # Search the archive with the given ID in archives-dir for logs"
+                             R"( matching a KQL query "level: INFO" and output to a network)"
+                             " destination"
                           << std::endl;
-                std::cerr << "  " << m_program_name << R"( s archives-dir "level: INFO")"
+                std::cerr << "  " << m_program_name
+                          << R"( s archives-dir --archive-id 0192f7a4-3c1e-4b8d-9a6f-2e5d7c8b1a40)"
+                             R"( "level: INFO")"
                           << " " << cNetworkOutputHandlerName
                           << " --host localhost"
                              " --port 18000"

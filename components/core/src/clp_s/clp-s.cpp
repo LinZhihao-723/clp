@@ -311,7 +311,7 @@ bool search_archive(
                                     options.host,
                                     options.port,
                                     options.session_token,
-                                    options.task_index
+                                    options.task_idx
                             );
                         },
                         [&](CommandLineArguments::ReducerOutputHandlerOptions const&) -> void {

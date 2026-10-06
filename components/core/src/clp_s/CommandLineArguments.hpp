@@ -50,7 +50,7 @@ public:
         std::string host;
         int port{};
         std::string session_token;
-        uint64_t task_index{};
+        uint64_t task_idx{};
     };
 
     struct ReducerOutputHandlerOptions {

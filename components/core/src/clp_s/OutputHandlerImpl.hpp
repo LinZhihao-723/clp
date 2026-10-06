@@ -102,18 +102,7 @@ public:
     static constexpr uint8_t cProtocolVersion{1};
 
     // Constructors
-    NetworkOutputHandler(
-            std::string host,
-            int port,
-            std::string session_token,
-            uint64_t task_index
-    );
-
-    // Delete copy & move constructors and assignment operators
-    NetworkOutputHandler(NetworkOutputHandler const&) = delete;
-    NetworkOutputHandler(NetworkOutputHandler&&) = delete;
-    auto operator=(NetworkOutputHandler const&) -> NetworkOutputHandler& = delete;
-    auto operator=(NetworkOutputHandler&&) -> NetworkOutputHandler& = delete;
+    NetworkOutputHandler(std::string host, int port, std::string session_token, uint64_t task_idx);
 
     // Destructor
     ~NetworkOutputHandler() override {
@@ -122,50 +111,60 @@ public:
         }
     }
 
+    // Delete copy & move constructors and assignment operators
+    NetworkOutputHandler(NetworkOutputHandler const&) = delete;
+    NetworkOutputHandler(NetworkOutputHandler&&) = delete;
+    auto operator=(NetworkOutputHandler const&) -> NetworkOutputHandler& = delete;
+    auto operator=(NetworkOutputHandler&&) -> NetworkOutputHandler& = delete;
+
     // Methods inherited from OutputHandler
     /**
      * Sends a result to the network destination.
+     *
      * @param message
      * @param timestamp
      * @param archive_id
      * @param log_event_idx Unused.
      * @throw OperationFailed if connecting or sending to the network destination fails.
      */
-    void write(
+    auto write(
             std::string_view message,
             epochtime_t timestamp,
             std::string_view archive_id,
             int64_t log_event_idx
-    ) override;
+    ) -> void override;
 
     /**
      * Unsupported, since every result must carry its timestamp and archive ID.
+     *
      * @param message
      * @throw OperationFailed unconditionally.
      */
-    void write(std::string_view message) override;
+    auto write(std::string_view message) -> void override;
 
 private:
     // Methods
     /**
      * Connects to the network destination.
+     *
      * @throw OperationFailed if the connection fails.
      */
-    void connect();
+    auto connect() -> void;
 
     /**
      * Sends the serialized messages in the buffer to the network destination, and then clears the
      * buffer.
+     *
      * @throw OperationFailed if sending fails.
      */
-    void send_buffer();
+    auto send_buffer() -> void;
 
     // Variables
     std::string m_host;
     std::string m_port;
     std::string m_session_token;
-    uint64_t m_task_index{};
-    uint64_t m_next_result_index{};
+    uint64_t m_task_idx{};
+    uint64_t m_next_result_idx{};
     int m_socket_fd{-1};
     msgpack::sbuffer m_buffer;
 };

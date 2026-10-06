@@ -10,8 +10,9 @@
 #include <span>
 #include <string>
 
+#include <clp/ErrorCode.hpp>
+
 #include "../Defs.h"
-#include "../ErrorCode.hpp"
 #include "SocketOperationFailed.hpp"
 
 namespace clp::networking {
