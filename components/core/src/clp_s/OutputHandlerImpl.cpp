@@ -1,8 +1,11 @@
 #include "OutputHandlerImpl.hpp"
 
+#include <cerrno>
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <bsoncxx/builder/basic/document.hpp>
@@ -18,11 +21,13 @@
 #include <clp_s/MongoDBUtils.hpp>
 #include <clp_s/ResultsCacheUtils.hpp>
 
+#include "../clp/ErrorCode.hpp"
 #include "../clp/networking/socket_utils.hpp"
 #include "../reducer/CountOperator.hpp"
 #include "../reducer/network_utils.hpp"
 #include "../reducer/Record.hpp"
 #include "archive_constants.hpp"
+#include "ErrorCode.hpp"
 #include "search/OutputHandler.hpp"
 #include "TraceableException.hpp"
 
@@ -43,33 +48,64 @@ void FileOutputHandler::write(
 }
 
 NetworkOutputHandler::NetworkOutputHandler(
-        string const& host,
+        string host,
         int port,
-        bool should_output_timestamp
+        string session_token,
+        uint64_t task_index
 )
-        : ::clp_s::search::OutputHandler(should_output_timestamp, true) {
-    m_socket_fd = clp::networking::connect_to_server(host, std::to_string(port));
-    if (-1 == m_socket_fd) {
-        SPDLOG_ERROR("Failed to connect to the server, errno={}", errno);
-        throw OperationFailed(ErrorCode::ErrorCodeFailureNetwork, __FILENAME__, __LINE__);
-    }
-}
+        : ::clp_s::search::OutputHandler{true, true},
+          m_host{std::move(host)},
+          m_port{std::to_string(port)},
+          m_session_token{std::move(session_token)},
+          m_task_index{task_index} {}
 
 void NetworkOutputHandler::write(
         string_view message,
         epochtime_t timestamp,
         string_view archive_id,
-        int64_t log_event_idx
+        [[maybe_unused]] int64_t log_event_idx
 ) {
-    static constexpr string_view cOrigFilePathPlaceholder{""};
-    msgpack::type::tuple<epochtime_t, string, string, string, int64_t> const
-            src(timestamp, message, cOrigFilePathPlaceholder, archive_id, log_event_idx);
-    msgpack::sbuffer m;
-    msgpack::pack(m, src);
+    constexpr uint32_t cNumHandshakeFields{4};
+    constexpr uint32_t cNumResultFields{3};
 
-    if (-1 == send(m_socket_fd, m.data(), m.size(), 0)) {
+    msgpack::packer<msgpack::sbuffer> packer{m_buffer};
+    if (-1 == m_socket_fd) {
+        connect();
+        packer.pack_array(cNumHandshakeFields);
+        packer.pack_uint8(cProtocolVersion);
+        packer.pack(m_session_token);
+        packer.pack_uint64(m_task_index);
+        packer.pack(archive_id);
+    }
+    packer.pack_array(cNumResultFields);
+    packer.pack_uint64(m_next_result_index);
+    packer.pack_int64(timestamp);
+    packer.pack(message);
+    send_buffer();
+    ++m_next_result_index;
+}
+
+void NetworkOutputHandler::write([[maybe_unused]] string_view message) {
+    SPDLOG_ERROR("The network output handler requires each result's metadata.");
+    throw OperationFailed(ErrorCode::ErrorCodeUnsupported, __FILENAME__, __LINE__);
+}
+
+void NetworkOutputHandler::connect() {
+    m_socket_fd = clp::networking::connect_to_server(m_host, m_port);
+    if (-1 == m_socket_fd) {
+        SPDLOG_ERROR("Failed to connect to {}:{}, errno={}", m_host, m_port, errno);
         throw OperationFailed(ErrorCode::ErrorCodeFailureNetwork, __FILENAME__, __LINE__);
     }
+}
+
+void NetworkOutputHandler::send_buffer() {
+    if (clp::ErrorCode_Success
+        != clp::networking::try_send(m_socket_fd, m_buffer.data(), m_buffer.size()))
+    {
+        SPDLOG_ERROR("Failed to send search results to {}:{}, errno={}", m_host, m_port, errno);
+        throw OperationFailed(ErrorCode::ErrorCodeFailureNetwork, __FILENAME__, __LINE__);
+    }
+    m_buffer.clear();
 }
 
 ResultsCacheOutputHandler::ResultsCacheOutputHandler(

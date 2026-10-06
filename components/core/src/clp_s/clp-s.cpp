@@ -309,7 +309,9 @@ bool search_archive(
                                 -> void {
                             output_handler = std::make_unique<clp_s::NetworkOutputHandler>(
                                     options.host,
-                                    options.port
+                                    options.port,
+                                    options.session_token,
+                                    options.task_index
                             );
                         },
                         [&](CommandLineArguments::ReducerOutputHandlerOptions const&) -> void {
@@ -396,7 +398,12 @@ bool search_archive(
             std::move(output_handler),
             command_line_arguments.get_ignore_case()
     );
-    auto const success{output.filter()};
+    bool success{false};
+    try {
+        success = output.filter();
+    } catch (std::exception const& e) {
+        SPDLOG_ERROR("Failed to filter archive - {}", e.what());
+    }
     if (nullptr != telemetry_span) {
         if (false == success) {
             telemetry_span->set_error("archive filtering failed");

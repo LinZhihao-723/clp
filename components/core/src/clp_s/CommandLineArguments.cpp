@@ -1,6 +1,7 @@
 #include "CommandLineArguments.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -816,6 +817,15 @@ CommandLineArguments::parse_arguments(int argc, char const** argv) {
                     "port",
                     po::value<int>(&network_options.port)->value_name("PORT"),
                     "Network destination port"
+            )(
+                    "session-token",
+                    po::value<std::string>(
+                        &network_options.session_token)->value_name("TOKEN"),
+                    "Token identifying the network destination's session to stream results to"
+            )(
+                    "task-index",
+                    po::value<uint64_t>(&network_options.task_index)->value_name("INDEX"),
+                    "Index of the search task within its query job"
             );
             // clang-format on
 
@@ -940,6 +950,8 @@ CommandLineArguments::parse_arguments(int argc, char const** argv) {
                           << " " << cNetworkOutputHandlerName
                           << " --host localhost"
                              " --port 18000"
+                             " --session-token 6f1c3f0e-3b8a-4c1e-9d2a-7f5e4b3a2c10"
+                             " --task-index 0"
                           << std::endl;
                 std::cerr << std::endl;
 
@@ -1151,6 +1163,26 @@ void CommandLineArguments::parse_network_dest_output_handler_options(
     }
     if (network_options.port <= 0) {
         throw std::invalid_argument("port must be greater than zero.");
+    }
+
+    if (parsed_options.count("session-token") == 0) {
+        throw std::invalid_argument("session-token must be specified.");
+    }
+    if (network_options.session_token.empty()) {
+        throw std::invalid_argument("session-token cannot be an empty string.");
+    }
+
+    if (parsed_options.count("task-index") == 0) {
+        throw std::invalid_argument("task-index must be specified.");
+    }
+
+    if (m_input_paths.size() > 1) {
+        throw std::invalid_argument(
+                fmt::format(
+                        "The {} output handler only supports searching a single archive.",
+                        cNetworkOutputHandlerName
+                )
+        );
     }
 }
 
