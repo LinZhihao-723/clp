@@ -24,10 +24,14 @@ use search_result_listener::ResultStream;
 use search_result_listener::SearchResult;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionOutcome;
+use tokio::signal::unix::SignalKind;
+use tokio::signal::unix::signal;
 use tracing_subscriber::EnvFilter;
 
 const DATABASE_CONNECTION_POOL_SIZE: u32 = 1;
 const JOB_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SIGINT_EXIT_CODE: u8 = 130;
+const SIGTERM_EXIT_CODE: u8 = 143;
 
 /// Command-line arguments for `clp-streaming-search`.
 #[derive(Debug, Parser)]
@@ -71,9 +75,29 @@ async fn main() -> ExitCode {
     let args = Cli::parse();
     set_up_logging();
 
-    match search(args).await {
-        Ok(QueryJobStatus::Succeeded) => ExitCode::SUCCESS,
-        Ok(_) | Err(_) => ExitCode::FAILURE,
+    let signals = signal(SignalKind::interrupt())
+        .and_then(|sigint| Ok((sigint, signal(SignalKind::terminate())?)));
+    let (mut sigint, mut sigterm) = match signals {
+        Ok(signals) => signals,
+        Err(e) => {
+            tracing::error!(error = % e, "Failed to listen for SIGINT and SIGTERM.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    tokio::select! {
+        result = search(args) => match result {
+            Ok(QueryJobStatus::Succeeded) => ExitCode::SUCCESS,
+            Ok(_) | Err(_) => ExitCode::FAILURE,
+        },
+        _ = sigint.recv() => {
+            tracing::warn!("Interrupted; the submitted query job, if any, keeps running.");
+            ExitCode::from(SIGINT_EXIT_CODE)
+        }
+        _ = sigterm.recv() => {
+            tracing::warn!("Terminated; the submitted query job, if any, keeps running.");
+            ExitCode::from(SIGTERM_EXIT_CODE)
+        }
     }
 }
 
