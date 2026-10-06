@@ -46,7 +46,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Submits a new search job and streams its results back as Server-Sent Events (SSE) in the same response. Only available when the package runs queries on Spider. If the client disconnects before the job terminates, the job is marked as cancelling. */
+        /** @description Submits a new search job and streams its results back as Server-Sent Events (SSE) in the same response. Only available when the package runs queries on Spider. If the client disconnects before the `end` event, or the job's status can no longer be tracked, the job is marked as cancelling. */
         post: operations["stream_query"];
         delete?: never;
         options?: never;
@@ -369,7 +369,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description The query config is invalid, or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`. */
+            /** @description The query config is invalid (e.g., an empty `query_string`, an empty `datasets`, or an invalid dataset name), or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`. */
             400: {
                 headers: {
                     [name: string]: unknown;

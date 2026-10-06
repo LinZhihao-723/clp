@@ -17,6 +17,7 @@ use clp_rust_utils::database::mysql::cancel_query_job;
 use clp_rust_utils::database::mysql::create_clp_db_mysql_pool;
 use clp_rust_utils::database::mysql::submit_query_job;
 use clp_rust_utils::dataset::CLP_DEFAULT_DATASET_NAME;
+use clp_rust_utils::dataset::VALID_DATASET_NAME_REGEX;
 use clp_rust_utils::job_config::AggregationConfig;
 pub use clp_rust_utils::job_config::CompressionJobStatus;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
@@ -239,6 +240,8 @@ impl QueryConfig {
     ///
     /// * [`ClientError::InvalidInput`] if:
     ///   * `query_string` is empty.
+    ///   * `datasets` is empty.
+    ///   * A dataset name in `datasets` doesn't match [`VALID_DATASET_NAME_REGEX`].
     ///   * `time_range_begin_millisecs` is greater than `time_range_end_millisecs`.
     ///   * `max_num_results` isn't 0, since a streaming search streams every result.
     ///   * `buffer_results_in_mongodb` is set, since a streaming search doesn't buffer its results.
@@ -249,6 +252,22 @@ impl QueryConfig {
             return Err(ClientError::InvalidInput(
                 "query_string must not be empty".to_owned(),
             ));
+        }
+        let datasets = self
+            .datasets
+            .unwrap_or_else(|| vec![CLP_DEFAULT_DATASET_NAME.to_owned()]);
+        if datasets.is_empty() {
+            return Err(ClientError::InvalidInput(
+                "datasets must not be empty".to_owned(),
+            ));
+        }
+        if let Some(dataset) = datasets
+            .iter()
+            .find(|dataset| !VALID_DATASET_NAME_REGEX.is_match(dataset))
+        {
+            return Err(ClientError::InvalidInput(format!(
+                "datasets contains an invalid dataset name: `{dataset}`"
+            )));
         }
         if let (Some(time_range_begin), Some(time_range_end)) = (
             self.time_range_begin_millisecs,
@@ -281,10 +300,7 @@ impl QueryConfig {
         }
 
         Ok(SearchJobConfig {
-            datasets: Some(
-                self.datasets
-                    .unwrap_or_else(|| vec![CLP_DEFAULT_DATASET_NAME.to_owned()]),
-            ),
+            datasets: Some(datasets),
             query_string: self.query_string,
             begin_timestamp: self.time_range_begin_millisecs,
             end_timestamp: self.time_range_end_millisecs,

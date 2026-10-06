@@ -48,6 +48,9 @@ pub enum ClientError {
 
     #[error("`search_result_listener::Error`: {0}")]
     ResultListener(#[from] search_result_listener::Error),
+
+    #[error("`tokio::task::JoinError`: {0}")]
+    TaskJoin(#[from] tokio::task::JoinError),
 }
 
 /// Empty trait to mark errors that indicate malformed data.

@@ -188,7 +188,8 @@ struct QueryResultsUri {
     path = "/query/stream",
     description = "Submits a new search job and streams its results back as Server-Sent Events \
         (SSE) in the same response. Only available when the package runs queries on Spider. If \
-        the client disconnects before the job terminates, the job is marked as cancelling.",
+        the client disconnects before the `end` event, or the job's status can no longer be \
+        tracked, the job is marked as cancelling.",
     request_body(
         content = QueryConfig,
         example = json!({
@@ -217,7 +218,8 @@ struct QueryResultsUri {
         ),
         (
             status = BAD_REQUEST,
-            description = "The query config is invalid, or sets an option that streaming search \
+            description = "The query config is invalid (e.g., an empty `query_string`, an empty \
+                `datasets`, or an invalid dataset name), or sets an option that streaming search \
                 doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or \
                 `count_by_time_bucket_size_millisecs`."
         ),
@@ -557,13 +559,13 @@ async fn compression_usage(
 /// Generic errors for request handlers.
 #[derive(Error, Debug)]
 enum HandlerError {
-    #[error("Internal server error")]
+    #[error("internal server error")]
     InternalServer,
-    #[error("Not found")]
+    #[error("not found")]
     NotFound,
-    #[error("Bad request: {0}")]
+    #[error("bad request: {0}")]
     BadRequest(String),
-    #[error("Not implemented: {0}")]
+    #[error("not implemented: {0}")]
     NotImplemented(String),
 }
 
@@ -907,7 +909,7 @@ mod tests {
 
 #[cfg(test)]
 mod stream_query_tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
     use std::ops::Range;
@@ -937,6 +939,7 @@ mod stream_query_tests {
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
+    use tokio::sync::Semaphore;
     use tokio::time::sleep;
     use tokio::time::timeout;
     use tower::ServiceExt;
@@ -959,23 +962,16 @@ mod stream_query_tests {
         state: Arc<Mutex<FakeQueryJobTableState>>,
     }
 
-    #[derive(Default)]
-    struct FakeQueryJobTableState {
-        jobs: HashMap<QueryJobId, FakeQueryJob>,
-        cancel_requests: Vec<QueryJobId>,
-    }
-
-    struct FakeQueryJob {
-        search_job_config: SearchJobConfig,
-        status: QueryJobStatus,
-    }
-
     impl FakeQueryJobTable {
         /// # Returns
         ///
-        /// The number of submitted query jobs.
-        fn num_jobs(&self) -> usize {
-            self.lock().jobs.len()
+        /// The configs of the submitted query jobs, ordered by query job ID.
+        fn search_job_configs(&self) -> Vec<SearchJobConfig> {
+            self.lock()
+                .jobs
+                .values()
+                .map(|job| job.search_job_config.clone())
+                .collect()
         }
 
         /// # Returns
@@ -1029,6 +1025,42 @@ mod stream_query_tests {
                 .status = status;
         }
 
+        /// Makes every later poll of a query job's status fail, leaving the job's status unchanged.
+        fn fail_status_polls(&self) {
+            self.lock().should_fail_status_polls = true;
+        }
+
+        /// Makes every later submission insert its query job, then wait for a permit of the
+        /// returned semaphore before returning the job's ID.
+        ///
+        /// # Returns
+        ///
+        /// The semaphore that releases the held submissions, which has no permits.
+        fn hold_submissions(&self) -> Arc<Semaphore> {
+            let submission_gate = Arc::new(Semaphore::new(0));
+            self.lock().submission_gate = Some(submission_gate.clone());
+            submission_gate
+        }
+
+        /// Waits until at least one query job has been submitted.
+        ///
+        /// # Returns
+        ///
+        /// The configs of the submitted query jobs, ordered by query job ID.
+        async fn wait_for_search_job_configs(&self) -> Vec<SearchJobConfig> {
+            timeout(TIMEOUT, async {
+                loop {
+                    let search_job_configs = self.search_job_configs();
+                    if !search_job_configs.is_empty() {
+                        return search_job_configs;
+                    }
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("a query job should be submitted")
+        }
+
         /// Waits until the cancellation of at least one query job has been requested.
         ///
         /// # Returns
@@ -1048,6 +1080,10 @@ mod stream_query_tests {
             .expect("the query job's cancellation should be requested")
         }
 
+        /// # Returns
+        ///
+        /// The guard of the fake's state.
+        ///
         /// # Panics
         ///
         /// Panics if the state lock is poisoned.
@@ -1059,26 +1095,6 @@ mod stream_query_tests {
     }
 
     #[async_trait]
-    impl JobStatusSource for FakeQueryJobTable {
-        fn poll_interval(&self) -> Duration {
-            Duration::from_millis(10)
-        }
-
-        async fn get_status(
-            &self,
-            query_job_id: QueryJobId,
-        ) -> Result<QueryJobStatus, search_result_listener::Error> {
-            self.lock()
-                .jobs
-                .get(&query_job_id)
-                .map(|job| job.status)
-                .ok_or(search_result_listener::Error::QueryJobNotFound(
-                    query_job_id,
-                ))
-        }
-    }
-
-    #[async_trait]
     impl QueryJobTable for FakeQueryJobTable {
         type StatusSource = Self;
 
@@ -1086,17 +1102,25 @@ mod stream_query_tests {
             &self,
             search_job_config: &SearchJobConfig,
         ) -> Result<QueryJobId, ClientError> {
-            let mut state = self.lock();
-            let query_job_id = QueryJobId::try_from(state.jobs.len() + 1)
-                .expect("the number of test query jobs should fit in `QueryJobId`");
-            state.jobs.insert(
-                query_job_id,
-                FakeQueryJob {
-                    search_job_config: search_job_config.clone(),
-                    status: QueryJobStatus::Pending,
-                },
-            );
-            drop(state);
+            let (query_job_id, submission_gate) = {
+                let mut state = self.lock();
+                let query_job_id = QueryJobId::try_from(state.jobs.len() + 1)
+                    .expect("the number of test query jobs should fit in `QueryJobId`");
+                state.jobs.insert(
+                    query_job_id,
+                    FakeQueryJob {
+                        search_job_config: search_job_config.clone(),
+                        status: QueryJobStatus::Pending,
+                    },
+                );
+                (query_job_id, state.submission_gate.clone())
+            };
+            if let Some(submission_gate) = submission_gate {
+                let _permit = submission_gate
+                    .acquire()
+                    .await
+                    .expect("the submission gate shouldn't be closed");
+            }
             Ok(query_job_id)
         }
 
@@ -1122,6 +1146,41 @@ mod stream_query_tests {
         }
     }
 
+    #[async_trait]
+    impl JobStatusSource for FakeQueryJobTable {
+        fn poll_interval(&self) -> Duration {
+            Duration::from_millis(10)
+        }
+
+        async fn get_status(
+            &self,
+            query_job_id: QueryJobId,
+        ) -> Result<QueryJobStatus, search_result_listener::Error> {
+            let state = self.lock();
+            if state.should_fail_status_polls {
+                return Err(search_result_listener::Error::Io(std::io::Error::other(
+                    "the status poll failed",
+                )));
+            }
+            state.jobs.get(&query_job_id).map(|job| job.status).ok_or(
+                search_result_listener::Error::QueryJobNotFound(query_job_id),
+            )
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeQueryJobTableState {
+        jobs: BTreeMap<QueryJobId, FakeQueryJob>,
+        cancel_requests: Vec<QueryJobId>,
+        should_fail_status_polls: bool,
+        submission_gate: Option<Arc<Semaphore>>,
+    }
+
+    struct FakeQueryJob {
+        search_job_config: SearchJobConfig,
+        status: QueryJobStatus,
+    }
+
     /// A streaming search app on a loopback result listener, whose query jobs the test controls.
     struct Harness {
         app: axum::Router,
@@ -1129,6 +1188,15 @@ mod stream_query_tests {
     }
 
     impl Harness {
+        /// Starts a streaming search app on a loopback result listener.
+        ///
+        /// # Returns
+        ///
+        /// The started harness.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the loopback listener can't be bound.
         async fn start() -> Self {
             let listener = ResultListener::bind(ListenerConfig {
                 bind_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
@@ -1175,6 +1243,14 @@ mod stream_query_tests {
         }
 
         /// Connects a simulated search task to the session of the query job `query_job_id`.
+        ///
+        /// # Returns
+        ///
+        /// The simulated search task, connected to the session and past its handshake.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the query job doesn't exist or has no network output.
         async fn connect(&self, query_job_id: QueryJobId) -> FakeClpS {
             let network_output = self
                 .query_job_table
@@ -1186,7 +1262,7 @@ mod stream_query_tests {
     }
 
     /// An event read from a Server-Sent Events stream.
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq)]
     struct SseEvent {
         name: Option<String>,
         data: serde_json::Value,
@@ -1199,6 +1275,9 @@ mod stream_query_tests {
     }
 
     impl SseReader {
+        /// # Returns
+        ///
+        /// A reader of `response`'s events.
         fn new(response: Response) -> Self {
             Self {
                 body: response.into_body(),
@@ -1251,6 +1330,14 @@ mod stream_query_tests {
 
     impl FakeClpS {
         /// Connects to the listener named by `network_output` and sends the handshake.
+        ///
+        /// # Returns
+        ///
+        /// The simulated search task, connected and past its handshake.
+        ///
+        /// # Panics
+        ///
+        /// Panics if connecting or sending the handshake fails.
         async fn connect(network_output: &NetworkOutput) -> Self {
             let mut stream =
                 TcpStream::connect((network_output.host.as_str(), network_output.port.get()))
@@ -1292,6 +1379,10 @@ mod stream_query_tests {
 
     /// Builds an app that serves streaming searches through `streaming_search`, the way the API
     /// server's route does.
+    ///
+    /// # Returns
+    ///
+    /// A router serving `POST /query/stream`.
     fn streaming_search_app(
         streaming_search: Option<Arc<StreamingSearch<FakeQueryJobTable>>>,
     ) -> axum::Router {
@@ -1367,6 +1458,11 @@ mod stream_query_tests {
                 "max_num_results",
             ),
             (json!({"query_string": ""}), "query_string"),
+            (json!({"query_string": "*", "datasets": []}), "datasets"),
+            (
+                json!({"query_string": "*", "datasets": ["default", "my-logs"]}),
+                "my-logs",
+            ),
             (
                 json!({
                     "query_string": "*",
@@ -1390,7 +1486,10 @@ mod stream_query_tests {
                 "the error should name `{rejected_field}`: {body}"
             );
         }
-        assert_eq!(harness.query_job_table.num_jobs(), 0);
+        assert_eq!(
+            harness.query_job_table.search_job_configs(),
+            [] as [SearchJobConfig; 0]
+        );
     }
 
     #[tokio::test]
@@ -1491,8 +1590,9 @@ mod stream_query_tests {
                 "num_protocol_errors": 0
             })
         );
-        assert!(
-            events.next_event().await.is_none(),
+        assert_eq!(
+            events.next_event().await,
+            None,
             "the response should end after the `end` event"
         );
     }
@@ -1587,6 +1687,73 @@ mod stream_query_tests {
             harness.query_job_table.status(query_job_id),
             QueryJobStatus::Succeeded
         );
+    }
+
+    #[tokio::test]
+    async fn dropping_the_request_during_its_submission_cancels_the_submitted_job() {
+        let harness = Harness::start().await;
+        let submission_gate = harness.query_job_table.hold_submissions();
+        let app = harness.app.clone();
+        let query_config = json!({"query_string": "*"});
+        let request = tokio::spawn(async move { post_query_stream(&app, &query_config).await });
+        harness.query_job_table.wait_for_search_job_configs().await;
+
+        request.abort();
+        assert!(
+            request
+                .await
+                .expect_err("the request should be pending on its submission")
+                .is_cancelled()
+        );
+        submission_gate.add_permits(1);
+
+        assert_eq!(
+            harness.query_job_table.wait_for_cancel_requests().await,
+            [1]
+        );
+        assert_eq!(
+            harness.query_job_table.status(1),
+            QueryJobStatus::Cancelling
+        );
+    }
+
+    #[tokio::test]
+    async fn failing_to_track_the_job_ends_the_response_with_an_error_and_cancels_the_job_once() {
+        let harness = Harness::start().await;
+        let (mut events, query_job_id) = harness.start_search().await;
+        harness
+            .query_job_table
+            .set_status(query_job_id, QueryJobStatus::Running);
+
+        harness.query_job_table.fail_status_polls();
+        let error_event = events
+            .next_event()
+            .await
+            .expect("an `error` event should arrive");
+
+        assert_eq!(
+            error_event,
+            SseEvent {
+                name: Some("error".to_owned()),
+                data: json!({"message": "failed to wait for the query job to terminate"}),
+            }
+        );
+        assert_eq!(
+            harness.query_job_table.wait_for_cancel_requests().await,
+            [query_job_id]
+        );
+        assert_eq!(
+            harness.query_job_table.status(query_job_id),
+            QueryJobStatus::Cancelling
+        );
+        assert_eq!(
+            events.next_event().await,
+            None,
+            "the response should end after the `error` event"
+        );
+        drop(events);
+        sleep(Duration::from_millis(200)).await;
+        assert_eq!(harness.query_job_table.cancel_requests(), [query_job_id]);
     }
 
     #[tokio::test]

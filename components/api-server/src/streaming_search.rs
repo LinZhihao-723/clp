@@ -130,6 +130,9 @@ impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
 
     /// Submits a search job whose search tasks stream their results to this server.
     ///
+    /// Dropping the returned future once it has been polled doesn't stop the job's submission: the
+    /// submitted job's cancellation is requested instead.
+    ///
     /// # Returns
     ///
     /// The stream of the search's events on success.
@@ -138,6 +141,7 @@ impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
     ///
     /// Returns an error if:
     ///
+    /// * [`ClientError::TaskJoin`] if the task that submits the search job panics or is cancelled.
     /// * Forwards [`QueryConfig::into_streaming_search_job_config`]'s return values on failure.
     /// * Forwards [`QueryJobTable::submit`]'s return values on failure.
     pub async fn submit(
@@ -147,21 +151,25 @@ impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
         let mut search_job_config = query_config.into_streaming_search_job_config()?;
         let session = self.listener.open_session(SessionConfig::default());
         search_job_config.network_output = Some(session.network_output().clone());
-        let query_job_id = self.query_job_table.submit(&search_job_config).await?;
-        tracing::debug!(
-            query_job_id,
-            session_token = % session.token(),
-            "Inserted the streaming search's query job."
-        );
+        let query_job_table = self.query_job_table.clone();
+        tokio::spawn(async move {
+            let query_job_id = query_job_table.submit(&search_job_config).await?;
+            tracing::debug!(
+                query_job_id,
+                session_token = % session.token(),
+                "Inserted the streaming search's query job."
+            );
 
-        let (results, outcome) = session.run(query_job_id, self.query_job_table.status_source());
-        Ok(SearchStream {
-            query_job_id,
-            results,
-            have_results_ended: false,
-            outcome: Some(outcome),
-            query_job_table: self.query_job_table.clone(),
+            let (results, outcome) = session.run(query_job_id, query_job_table.status_source());
+            Ok(SearchStream {
+                query_job_id,
+                results,
+                have_results_ended: false,
+                outcome: Some(outcome),
+                query_job_table,
+            })
         })
+        .await?
     }
 }
 
@@ -178,7 +186,8 @@ pub enum SearchEvent {
 
 /// The events of a streaming search: each of its results as it arrives, then its end.
 ///
-/// Dropping the stream before its results have ended requests the cancellation of its query job.
+/// Dropping the stream before its end, or ending it because its query job's status can no longer be
+/// tracked, requests the cancellation of its query job.
 ///
 /// # Type Parameters
 ///
@@ -199,6 +208,24 @@ impl<QueryJobTableType: QueryJobTable> SearchStream<QueryJobTableType> {
     pub const fn query_job_id(&self) -> QueryJobId {
         self.query_job_id
     }
+
+    /// Requests the cancellation of the search's query job in a background task, which then waits
+    /// for the search's `outcome`, if given.
+    fn spawn_cancellation(&self, outcome: Option<OutcomeFuture>) {
+        let query_job_id = self.query_job_id;
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                query_job_id,
+                "Couldn't cancel the query job of a streaming search outside a runtime."
+            );
+            return;
+        };
+        runtime.spawn(cancel_and_wait(
+            self.query_job_table.clone(),
+            query_job_id,
+            outcome,
+        ));
+    }
 }
 
 impl<QueryJobTableType: QueryJobTable> Stream for SearchStream<QueryJobTableType> {
@@ -217,45 +244,31 @@ impl<QueryJobTableType: QueryJobTable> Stream for SearchStream<QueryJobTableType
         };
         let outcome = ready!(Pin::new(outcome).poll(cx));
         this.outcome = None;
+        if outcome.is_err() {
+            this.spawn_cancellation(None);
+        }
         Poll::Ready(Some(SearchEvent::End(outcome)))
     }
 }
 
 impl<QueryJobTableType: QueryJobTable> Drop for SearchStream<QueryJobTableType> {
     fn drop(&mut self) {
-        if self.have_results_ended {
-            return;
-        }
-        let outcome = self
-            .outcome
-            .take()
-            .expect("the outcome should be kept until the results have ended");
-        let query_job_id = self.query_job_id;
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            tracing::warn!(
-                query_job_id,
-                "Couldn't cancel the query job of a dropped streaming search outside a runtime."
-            );
+        let Some(outcome) = self.outcome.take() else {
             return;
         };
         tracing::info!(
-            query_job_id,
-            "A streaming search was dropped before its query job terminated; cancelling the query \
-             job."
+            query_job_id = self.query_job_id,
+            "A streaming search was dropped before its end; cancelling its query job."
         );
-        runtime.spawn(cancel_and_wait(
-            self.query_job_table.clone(),
-            query_job_id,
-            outcome,
-        ));
+        self.spawn_cancellation(Some(outcome));
     }
 }
 
 /// The delay between two consecutive polls of a streaming search's query job status.
 const JOB_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Requests the cancellation of the query job of a dropped streaming search, then waits for the
-/// search's outcome, logging each step's result.
+/// Requests the cancellation of a streaming search's query job, then waits for the search's
+/// `outcome`, if given, logging each step's result.
 ///
 /// # Type Parameters
 ///
@@ -263,7 +276,7 @@ const JOB_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 async fn cancel_and_wait<QueryJobTableType: QueryJobTable>(
     query_job_table: QueryJobTableType,
     query_job_id: QueryJobId,
-    outcome: OutcomeFuture,
+    outcome: Option<OutcomeFuture>,
 ) {
     match query_job_table.cancel(query_job_id).await {
         Ok(true) => tracing::info!(query_job_id, "Marked the query job as cancelling."),
@@ -278,6 +291,9 @@ async fn cancel_and_wait<QueryJobTableType: QueryJobTable>(
         ),
     }
 
+    let Some(outcome) = outcome else {
+        return;
+    };
     match outcome.await {
         Ok(SessionOutcome { status, stats }) => tracing::info!(
             query_job_id,
