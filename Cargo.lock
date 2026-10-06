@@ -101,6 +101,7 @@ version = "0.13.1-dev"
 dependencies = [
  "anyhow",
  "async-stream",
+ "async-trait",
  "aws-sdk-s3",
  "axum",
  "chrono",
@@ -115,6 +116,7 @@ dependencies = [
  "opentelemetry-otlp",
  "pin-project-lite",
  "rmp-serde",
+ "search-result-listener",
  "secrecy",
  "serde",
  "serde_json",

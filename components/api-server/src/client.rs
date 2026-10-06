@@ -1,24 +1,33 @@
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_stream::stream;
 use chrono::DateTime;
 use chrono::TimeZone;
 use chrono::Utc;
 use clp_rust_utils::aws::AWS_DEFAULT_REGION;
+use clp_rust_utils::clp_config::package::config::CompressionOrchestration;
 use clp_rust_utils::clp_config::package::config::Config;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::clp_config::package::config::StreamOutputStorage;
 use clp_rust_utils::clp_config::package::credentials::Credentials;
+use clp_rust_utils::database::mysql::cancel_query_job;
 use clp_rust_utils::database::mysql::create_clp_db_mysql_pool;
 use clp_rust_utils::database::mysql::submit_query_job;
+use clp_rust_utils::dataset::CLP_DEFAULT_DATASET_NAME;
 use clp_rust_utils::job_config::AggregationConfig;
 pub use clp_rust_utils::job_config::CompressionJobStatus;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
+use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
 use clp_rust_utils::job_config::SearchJobConfig;
 use futures::Stream;
 use futures::StreamExt;
 use pin_project_lite::pin_project;
+use search_result_listener::ListenerConfig;
+use search_result_listener::ResultListener;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::Row;
@@ -26,6 +35,8 @@ use utoipa::IntoParams;
 use utoipa::ToSchema;
 
 pub use crate::error::ClientError;
+use crate::streaming_search::MariaDbQueryJobTable;
+use crate::streaming_search::StreamingSearch;
 
 /// Default job statuses to include when the caller does not specify `job_status`.
 /// Covers all terminal states that consumed compute resources (succeeded, failed, killed).
@@ -214,6 +225,75 @@ pub struct QueryConfig {
     pub count_by_time_bucket_size_millisecs: Option<i64>,
 }
 
+impl QueryConfig {
+    /// Converts the config into the config of a search job whose search tasks stream their results
+    /// back, leaving the job's network output unset.
+    ///
+    /// # Returns
+    ///
+    /// The search job config on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ClientError::InvalidInput`] if:
+    ///   * `query_string` is empty.
+    ///   * `time_range_begin_millisecs` is greater than `time_range_end_millisecs`.
+    ///   * `max_num_results` isn't 0, since a streaming search streams every result.
+    ///   * `buffer_results_in_mongodb` is set, since a streaming search doesn't buffer its results.
+    ///   * `count_by_time_bucket_size_millisecs` is set, since a streaming search doesn't support
+    ///     aggregations.
+    pub fn into_streaming_search_job_config(self) -> Result<SearchJobConfig, ClientError> {
+        if self.query_string.is_empty() {
+            return Err(ClientError::InvalidInput(
+                "query_string must not be empty".to_owned(),
+            ));
+        }
+        if let (Some(time_range_begin), Some(time_range_end)) = (
+            self.time_range_begin_millisecs,
+            self.time_range_end_millisecs,
+        ) && time_range_begin > time_range_end
+        {
+            return Err(ClientError::InvalidInput(
+                "time_range_begin_millisecs must be <= time_range_end_millisecs".to_owned(),
+            ));
+        }
+        if 0 != self.max_num_results {
+            return Err(ClientError::InvalidInput(
+                "max_num_results must be 0 for a streaming search, which streams every result"
+                    .to_owned(),
+            ));
+        }
+        if self.buffer_results_in_mongodb {
+            return Err(ClientError::InvalidInput(
+                "buffer_results_in_mongodb must be false for a streaming search, which doesn't \
+                 buffer its results"
+                    .to_owned(),
+            ));
+        }
+        if self.count_by_time_bucket_size_millisecs.is_some() {
+            return Err(ClientError::InvalidInput(
+                "count_by_time_bucket_size_millisecs must be unset for a streaming search, which \
+                 doesn't support aggregations"
+                    .to_owned(),
+            ));
+        }
+
+        Ok(SearchJobConfig {
+            datasets: Some(
+                self.datasets
+                    .unwrap_or_else(|| vec![CLP_DEFAULT_DATASET_NAME.to_owned()]),
+            ),
+            query_string: self.query_string,
+            begin_timestamp: self.time_range_begin_millisecs,
+            end_timestamp: self.time_range_end_millisecs,
+            ignore_case: self.ignore_case,
+            ..SearchJobConfig::default()
+        })
+    }
+}
+
 impl From<QueryConfig> for SearchJobConfig {
     fn from(value: QueryConfig) -> Self {
         Self {
@@ -235,11 +315,17 @@ pub struct Client {
     mongodb_client: mongodb::Client,
     sql_pool: sqlx::Pool<sqlx::MySql>,
     config: Config,
+
+    /// `None` unless the package runs queries on Spider.
+    streaming_search: Option<Arc<StreamingSearch<MariaDbQueryJobTable>>>,
 }
 
 impl Client {
     /// Factory method to create a new client with active connections to both `MySQL` and `MongoDB`
     /// databases.
+    ///
+    /// If the package runs queries on Spider, the client also listens for the results of streaming
+    /// searches.
     ///
     /// # Returns
     ///
@@ -252,10 +338,11 @@ impl Client {
     /// * [`ClientError::ConfigIsNone`] if `config.api_server` is `None`.
     /// * Forwards [`create_clp_db_mysql_pool`]'s errors on failure.
     /// * Forwards [`mongodb::Client::with_uri_str`]'s errors on failure.
+    /// * Forwards [`ResultListener::bind`]'s errors on failure.
     pub async fn connect(config: &Config, credentials: &Credentials) -> Result<Self, ClientError> {
-        if config.api_server.is_none() {
+        let Some(api_server_config) = &config.api_server else {
             return Err(ClientError::ConfigIsNone);
-        }
+        };
 
         let sql_pool =
             create_clp_db_mysql_pool(&config.database, &credentials.database, 10).await?;
@@ -266,11 +353,42 @@ impl Client {
         );
         let mongo_client = mongodb::Client::with_uri_str(mongo_uri).await?;
 
+        let streaming_search = match config.package.scheduler {
+            CompressionOrchestration::Celery => None,
+            CompressionOrchestration::Spider => {
+                let listener_config = &api_server_config.search_result_listener;
+                let listener = ResultListener::bind(ListenerConfig {
+                    bind_addr: SocketAddr::from((Ipv4Addr::UNSPECIFIED, listener_config.port)),
+                    advertised_host: listener_config.advertised_host.clone(),
+                    ..ListenerConfig::default()
+                })
+                .await?;
+                tracing::info!(
+                    advertised_host = % listener.advertised_host(),
+                    port = listener.port(),
+                    "Listening for the results of streaming searches."
+                );
+                Some(Arc::new(StreamingSearch::new(
+                    listener,
+                    MariaDbQueryJobTable::new(sql_pool.clone()),
+                )))
+            }
+        };
+
         Ok(Self {
             config: config.clone(),
             mongodb_client: mongo_client,
             sql_pool,
+            streaming_search,
         })
+    }
+
+    /// # Returns
+    ///
+    /// The runner of streaming searches, or `None` if the package doesn't run queries on Spider.
+    #[must_use]
+    pub fn streaming_search(&self) -> Option<&StreamingSearch<MariaDbQueryJobTable>> {
+        self.streaming_search.as_deref()
     }
 
     /// Submits a search or aggregation query as a job. The job is a count-by-time aggregation
@@ -423,19 +541,12 @@ impl Client {
     ///
     /// * [`ClientError::SearchJobNotFound`] if no matching job was found (e.g., the job doesn't
     ///   exist or is not in a cancellable state).
-    /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
+    /// * Forwards [`cancel_query_job`]'s return values on failure.
     pub async fn cancel_search_job(&self, search_job_id: u64) -> Result<(), ClientError> {
-        let result = sqlx::query(&format!(
-            "UPDATE `{QUERY_JOBS_TABLE_NAME}` SET status = ? WHERE id = ? AND status IN (?, ?)"
-        ))
-        .bind::<i32>(QueryJobStatus::Cancelling.into())
-        .bind(search_job_id)
-        .bind::<i32>(QueryJobStatus::Pending.into())
-        .bind::<i32>(QueryJobStatus::Running.into())
-        .execute(&self.sql_pool)
-        .await?;
-
-        if result.rows_affected() == 0 {
+        let Ok(query_job_id) = QueryJobId::try_from(search_job_id) else {
+            return Err(ClientError::SearchJobNotFound(search_job_id));
+        };
+        if !cancel_query_job(&self.sql_pool, query_job_id).await? {
             return Err(ClientError::SearchJobNotFound(search_job_id));
         }
 

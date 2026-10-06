@@ -77,6 +77,54 @@
         }
       }
     },
+    "/query/stream": {
+      "post": {
+        "tags": [],
+        "description": "Submits a new search job and streams its results back as Server-Sent Events (SSE) in the same response. Only available when the package runs queries on Spider. If the client disconnects before the job terminates, the job is marked as cancelling.",
+        "operationId": "stream_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryConfig"
+              },
+              "example": {
+                "query_string": "*",
+                "datasets": [
+                  "default"
+                ],
+                "time_range_begin_millisecs": 0,
+                "time_range_end_millisecs": 17356896,
+                "ignore_case": true
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream of the search: first a `job` event whose data is a `StreamingSearchJob`, then one unnamed event per result whose data is a `StreamingSearchResult`, and finally an `end` event whose data is a `StreamingSearchEnd`, sent once the job has terminated. If the job's status can't be tracked, an `error` event whose data is a `StreamingSearchError` replaces the `end` event.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: job\ndata: {\"query_job_id\":1}\n\ndata: {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: {\"status\":\"Succeeded\",\"num_results_emitted\":1,\"num_duplicates_dropped\":0,\"num_protocol_errors\":0}\n\n"
+              }
+            }
+          },
+          "400": {
+            "description": "The query config is invalid, or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`."
+          },
+          "500": {
+            "description": ""
+          },
+          "501": {
+            "description": "The package doesn't run queries on Spider."
+          }
+        }
+      }
+    },
     "/query/{search_job_id}": {
       "delete": {
         "tags": [],
@@ -369,6 +417,19 @@
         },
         "additionalProperties": false
       },
+      "QueryJobStatus": {
+        "type": "string",
+        "description": "Mirror of `job_orchestration.scheduler.constants.QueryJobStatus`. Must be kept in sync.",
+        "enum": [
+          "Pending",
+          "Running",
+          "Succeeded",
+          "Failed",
+          "Cancelling",
+          "Cancelled",
+          "Killed"
+        ]
+      },
       "QueryResultsUri": {
         "type": "object",
         "required": [
@@ -381,6 +442,91 @@
           }
         },
         "additionalProperties": false
+      },
+      "StreamingSearchEnd": {
+        "type": "object",
+        "description": "The data of a streaming search's `end` event: the terminal status of the search's query job,\nand the search's statistics.",
+        "required": [
+          "status",
+          "num_results_emitted",
+          "num_duplicates_dropped",
+          "num_protocol_errors"
+        ],
+        "properties": {
+          "num_duplicates_dropped": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number of results dropped because a retried search task had already streamed them.",
+            "minimum": 0
+          },
+          "num_protocol_errors": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number of connections from search tasks closed because they violated the wire protocol.",
+            "minimum": 0
+          },
+          "num_results_emitted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number of results streamed.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/QueryJobStatus",
+            "description": "The terminal status of the search's query job."
+          }
+        }
+      },
+      "StreamingSearchError": {
+        "type": "object",
+        "description": "The data of a streaming search's `error` event.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "A description of the error."
+          }
+        }
+      },
+      "StreamingSearchJob": {
+        "type": "object",
+        "description": "The data of a streaming search's `job` event.",
+        "required": [
+          "query_job_id"
+        ],
+        "properties": {
+          "query_job_id": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The ID of the search's query job."
+          }
+        }
+      },
+      "StreamingSearchResult": {
+        "type": "object",
+        "description": "The data of a streaming search's result event.",
+        "required": [
+          "archive_id",
+          "timestamp",
+          "message"
+        ],
+        "properties": {
+          "archive_id": {
+            "type": "string",
+            "description": "The ID of the archive that contains the result."
+          },
+          "message": {
+            "type": "string",
+            "description": "The result's log message, without its trailing newline."
+          },
+          "timestamp": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The result's timestamp (epoch milliseconds)."
+          }
+        }
       }
     }
   }

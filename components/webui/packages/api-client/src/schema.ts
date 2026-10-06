@@ -37,6 +37,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/query/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Submits a new search job and streams its results back as Server-Sent Events (SSE) in the same response. Only available when the package runs queries on Spider. If the client disconnects before the job terminates, the job is marked as cancelling. */
+        post: operations["stream_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/query/{search_job_id}": {
         parameters: {
             query?: never;
@@ -176,9 +193,62 @@ export interface components {
              */
             time_range_end_millisecs?: number | null;
         };
+        /**
+         * @description Mirror of `job_orchestration.scheduler.constants.QueryJobStatus`. Must be kept in sync.
+         * @enum {string}
+         */
+        QueryJobStatus: "Pending" | "Running" | "Succeeded" | "Failed" | "Cancelling" | "Cancelled" | "Killed";
         QueryResultsUri: {
             /** @description The uri to get the query results. */
             query_results_uri: string;
+        };
+        /**
+         * @description The data of a streaming search's `end` event: the terminal status of the search's query job,
+         *     and the search's statistics.
+         */
+        StreamingSearchEnd: {
+            /**
+             * Format: int64
+             * @description The number of results dropped because a retried search task had already streamed them.
+             */
+            num_duplicates_dropped: number;
+            /**
+             * Format: int64
+             * @description The number of connections from search tasks closed because they violated the wire protocol.
+             */
+            num_protocol_errors: number;
+            /**
+             * Format: int64
+             * @description The number of results streamed.
+             */
+            num_results_emitted: number;
+            /** @description The terminal status of the search's query job. */
+            status: components["schemas"]["QueryJobStatus"];
+        };
+        /** @description The data of a streaming search's `error` event. */
+        StreamingSearchError: {
+            /** @description A description of the error. */
+            message: string;
+        };
+        /** @description The data of a streaming search's `job` event. */
+        StreamingSearchJob: {
+            /**
+             * Format: int32
+             * @description The ID of the search's query job.
+             */
+            query_job_id: number;
+        };
+        /** @description The data of a streaming search's result event. */
+        StreamingSearchResult: {
+            /** @description The ID of the archive that contains the result. */
+            archive_id: string;
+            /** @description The result's log message, without its trailing newline. */
+            message: string;
+            /**
+             * Format: int64
+             * @description The result's timestamp (epoch milliseconds).
+             */
+            timestamp: number;
         };
     };
     responses: never;
@@ -250,6 +320,70 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stream_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "query_string": "*",
+                 *       "datasets": [
+                 *         "default"
+                 *       ],
+                 *       "time_range_begin_millisecs": 0,
+                 *       "time_range_end_millisecs": 17356896,
+                 *       "ignore_case": true
+                 *     }
+                 */
+                "application/json": components["schemas"]["QueryConfig"];
+            };
+        };
+        responses: {
+            /** @description Server-Sent Events stream of the search: first a `job` event whose data is a `StreamingSearchJob`, then one unnamed event per result whose data is a `StreamingSearchResult`, and finally an `end` event whose data is a `StreamingSearchEnd`, sent once the job has terminated. If the job's status can't be tracked, an `error` event whose data is a `StreamingSearchError` replaces the `end` event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example event: job
+                     *     data: {"query_job_id":1}
+                     *
+                     *     data: {"archive_id":"018e90e5-8b2a-4a61-a2fc-cac799936caf","timestamp":1633036800000,"message":"Example log message"}
+                     *
+                     *     event: end
+                     *     data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0}
+                     */
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The query config is invalid, or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The package doesn't run queries on Spider. */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
