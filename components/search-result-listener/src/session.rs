@@ -5,6 +5,7 @@ use std::num::NonZeroU16;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::task::Context;
@@ -75,6 +76,9 @@ pub struct SessionStats {
 
     /// The number of the session's connections closed because they violated the wire protocol.
     pub num_protocol_errors: u64,
+
+    /// The number of claimed results discarded because the consumer had dropped the result stream.
+    pub num_results_discarded: u64,
 }
 
 /// The outcome of a session whose query job has terminated.
@@ -127,7 +131,9 @@ impl Session {
     ///
     /// A tuple containing:
     ///
-    /// * The stream of the job's results, which must be consumed for the session to complete.
+    /// * The stream of the job's results, which must be consumed for the session to complete unless
+    ///   it is dropped. Dropping it doesn't stop the session, which then discards the job's
+    ///   remaining results.
     /// * A future that resolves to the session's outcome once the stream has ended. Dropping it
     ///   doesn't stop the session.
     pub fn run<JobStatusSourceType: JobStatusSource + 'static>(
@@ -181,9 +187,12 @@ impl Session {
             draining: CancellationToken::new(),
             drain_grace_period: config.drain_grace_period,
             connections: TaskTracker::new(),
+            has_joined_connection: AtomicBool::new(false),
+            has_claimed_result: AtomicBool::new(false),
             num_results_emitted: AtomicU64::new(0),
             num_duplicates_dropped: AtomicU64::new(0),
             num_protocol_errors: AtomicU64::new(0),
+            num_results_discarded: AtomicU64::new(0),
         });
         assert!(
             sessions.insert(token, Arc::clone(&state)).is_none(),
@@ -206,6 +215,7 @@ impl Session {
 /// The stream of a session's results.
 ///
 /// The stream ends once the session's job has terminated and its connections have drained.
+/// Dropping the stream earlier doesn't end the session.
 pub struct ResultStream {
     results_receiver: mpsc::Receiver<SearchResult>,
 }
@@ -243,12 +253,35 @@ pub struct State {
 
     pub drain_grace_period: Duration,
     pub connections: TaskTracker,
+    has_joined_connection: AtomicBool,
+    has_claimed_result: AtomicBool,
     num_results_emitted: AtomicU64,
     num_duplicates_dropped: AtomicU64,
     num_protocol_errors: AtomicU64,
+    num_results_discarded: AtomicU64,
 }
 
 impl State {
+    /// Records that a connection has joined the session.
+    ///
+    /// # Returns
+    ///
+    /// Whether the connection is the first to join the session.
+    pub fn record_joined_connection(&self) -> bool {
+        !self.has_joined_connection.swap(true, Ordering::Relaxed)
+    }
+
+    /// Records that a connection has claimed one of the session's results.
+    ///
+    /// # Returns
+    ///
+    /// Whether the result is the first that the session's connections have claimed.
+    pub fn record_claimed_result(&self) -> bool {
+        // The load keeps every claim after the first from writing to the shared flag.
+        !self.has_claimed_result.load(Ordering::Relaxed)
+            && !self.has_claimed_result.swap(true, Ordering::Relaxed)
+    }
+
     /// Adds the statistics of a finished connection to the session's statistics.
     pub fn record(&self, stats: &SessionStats) {
         self.num_results_emitted
@@ -257,6 +290,8 @@ impl State {
             .fetch_add(stats.num_duplicates_dropped, Ordering::Relaxed);
         self.num_protocol_errors
             .fetch_add(stats.num_protocol_errors, Ordering::Relaxed);
+        self.num_results_discarded
+            .fetch_add(stats.num_results_discarded, Ordering::Relaxed);
     }
 
     /// # Returns
@@ -267,6 +302,7 @@ impl State {
             num_results_emitted: self.num_results_emitted.load(Ordering::Relaxed),
             num_duplicates_dropped: self.num_duplicates_dropped.load(Ordering::Relaxed),
             num_protocol_errors: self.num_protocol_errors.load(Ordering::Relaxed),
+            num_results_discarded: self.num_results_discarded.load(Ordering::Relaxed),
         }
     }
 }

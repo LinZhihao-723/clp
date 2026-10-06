@@ -125,6 +125,7 @@ async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
                 num_results_emitted: num_expected,
                 num_duplicates_dropped: 2 * num_expected,
                 num_protocol_errors: 0,
+                num_results_discarded: 0,
             },
         "unexpected statistics: {:?}",
         outcome.stats

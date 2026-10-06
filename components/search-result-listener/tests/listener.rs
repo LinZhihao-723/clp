@@ -56,7 +56,10 @@ struct Harness {
     _listener: ResultListener,
     network_output: NetworkOutput,
     status_source: FakeJobStatusSource,
-    results: ResultStream,
+
+    /// `None` once the test has dropped the result stream.
+    results: Option<ResultStream>,
+
     outcome: OutcomeFuture,
 }
 
@@ -74,7 +77,7 @@ impl Harness {
             _listener: listener,
             network_output,
             status_source,
-            results,
+            results: Some(results),
             outcome,
         }
     }
@@ -88,7 +91,7 @@ impl Harness {
     ///
     /// The next result the session emits.
     async fn next_result(&mut self) -> SearchResult {
-        timeout(TIMEOUT, self.results.next())
+        timeout(TIMEOUT, self.results().next())
             .await
             .expect("a result should arrive")
             .expect("the result stream shouldn't end yet")
@@ -102,20 +105,39 @@ impl Harness {
     async fn finish(&mut self, status: QueryJobStatus) -> (Vec<SearchResult>, SessionOutcome) {
         self.status_source.set(Some(status));
         let results = self.collect_results().await;
-        let outcome = timeout(TIMEOUT, &mut self.outcome)
-            .await
-            .expect("the outcome should resolve")
-            .expect("the session should succeed");
-        (results, outcome)
+        (results, self.outcome().await)
     }
 
     /// # Returns
     ///
     /// The remaining results, once the result stream has ended.
     async fn collect_results(&mut self) -> Vec<SearchResult> {
-        timeout(TIMEOUT, (&mut self.results).collect::<Vec<_>>())
+        timeout(TIMEOUT, self.results().collect::<Vec<_>>())
             .await
             .expect("the result stream should end")
+    }
+
+    /// # Returns
+    ///
+    /// The session's outcome, once it resolves.
+    async fn outcome(&mut self) -> SessionOutcome {
+        timeout(TIMEOUT, &mut self.outcome)
+            .await
+            .expect("the outcome should resolve")
+            .expect("the session should succeed")
+    }
+
+    /// # Returns
+    ///
+    /// The session's result stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the test has dropped the result stream.
+    const fn results(&mut self) -> &mut ResultStream {
+        self.results
+            .as_mut()
+            .expect("the result stream shouldn't have been dropped")
     }
 }
 
@@ -190,6 +212,24 @@ impl FakeClpS {
             }
             sleep(interval).await;
         }
+    }
+
+    /// Checks that the listener keeps the connection open, then sends EOF and waits until the
+    /// listener closes the connection without sending anything.
+    async fn expect_open_until_eof(mut self) {
+        const OPEN_CHECK_DURATION: Duration = Duration::from_millis(200);
+
+        let mut byte = [0_u8; 1];
+        let read_result = timeout(OPEN_CHECK_DURATION, self.stream.read(&mut byte)).await;
+        assert!(
+            read_result.is_err(),
+            "the listener shouldn't end the connection before EOF: {read_result:?}"
+        );
+        self.stream
+            .shutdown()
+            .await
+            .expect("sending EOF to the listener should succeed");
+        self.expect_closed_by_listener().await;
     }
 
     /// Waits until the listener closes the connection without sending anything.
@@ -341,6 +381,7 @@ async fn sequential_retry_drops_the_results_already_emitted() {
             num_results_emitted: 6,
             num_duplicates_dropped: 3,
             num_protocol_errors: 0,
+            num_results_discarded: 0,
         }
     );
 }
@@ -376,6 +417,7 @@ async fn overlapping_attempts_emit_each_result_once() {
             num_results_emitted: 6,
             num_duplicates_dropped: 6,
             num_protocol_errors: 0,
+            num_results_discarded: 0,
         }
     );
 }
@@ -406,6 +448,7 @@ async fn index_gap_closes_the_connection_without_moving_the_cursor() {
             num_results_emitted: 4,
             num_duplicates_dropped: 1,
             num_protocol_errors: 1,
+            num_results_discarded: 0,
         }
     );
 }
@@ -510,6 +553,7 @@ async fn archive_id_mismatch_is_rejected() {
             num_results_emitted: 2,
             num_duplicates_dropped: 0,
             num_protocol_errors: 1,
+            num_results_discarded: 0,
         }
     );
 }
@@ -539,6 +583,7 @@ async fn malformed_result_frame_closes_the_connection() {
             num_results_emitted: 2,
             num_duplicates_dropped: 0,
             num_protocol_errors: 1,
+            num_results_discarded: 0,
         }
     );
 }
@@ -574,6 +619,7 @@ async fn result_cut_off_by_a_disconnect_is_never_claimed() {
             num_results_emitted: 4,
             num_duplicates_dropped: 2,
             num_protocol_errors: 0,
+            num_results_discarded: 0,
         }
     );
 }
@@ -840,4 +886,119 @@ async fn sessions_on_one_listener_receive_only_their_own_results() {
             .expect("the session should succeed");
         assert_eq!(outcome.stats.num_protocol_errors, 0);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn results_after_the_result_stream_is_dropped_are_read_and_discarded() {
+    const NUM_RESULTS: u64 = 1000;
+    const NUM_RESULTS_RECEIVED: u64 = 2;
+
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, 0..NUM_RESULTS_RECEIVED).await;
+    let mut results = Vec::new();
+    for _ in 0..NUM_RESULTS_RECEIVED {
+        results.push(harness.next_result().await);
+    }
+    harness.results = None;
+
+    attempt
+        .send_results(0, NUM_RESULTS_RECEIVED..NUM_RESULTS)
+        .await;
+    attempt.expect_open_until_eof().await;
+    harness.status_source.set(Some(QueryJobStatus::Succeeded));
+    let outcome = harness.outcome().await;
+
+    assert_eq!(
+        results,
+        expected_results(0, ARCHIVE_ID, 0..NUM_RESULTS_RECEIVED)
+    );
+    assert_eq!(
+        outcome,
+        SessionOutcome {
+            status: QueryJobStatus::Succeeded,
+            stats: SessionStats {
+                num_results_emitted: NUM_RESULTS_RECEIVED,
+                num_duplicates_dropped: 0,
+                num_protocol_errors: 0,
+                num_results_discarded: NUM_RESULTS - NUM_RESULTS_RECEIVED,
+            },
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn connection_blocked_on_a_full_channel_keeps_reading_once_the_result_stream_is_dropped() {
+    const NUM_RESULTS: u64 = 100;
+
+    let session_config = SessionConfig {
+        channel_capacity: NonZeroUsize::MIN,
+        ..BASE_SESSION_CONFIG
+    };
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, 0..NUM_RESULTS).await;
+    // Give the listener time to fill the channel and block on sending the next result.
+    sleep(Duration::from_millis(200)).await;
+
+    harness.results = None;
+    attempt.expect_open_until_eof().await;
+    harness.status_source.set(Some(QueryJobStatus::Succeeded));
+    let outcome = harness.outcome().await;
+
+    assert_eq!(
+        outcome.stats,
+        SessionStats {
+            num_results_emitted: session_config.channel_capacity.get() as u64,
+            num_duplicates_dropped: 0,
+            num_protocol_errors: 0,
+            num_results_discarded: NUM_RESULTS - session_config.channel_capacity.get() as u64,
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dropping_the_result_stream_keeps_the_session_open_until_the_job_terminates() {
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    harness.results = None;
+
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, 0..3).await;
+    attempt.expect_open_until_eof().await;
+    let mut retry = harness.connect().await;
+    retry
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    retry.send_results(0, 0..5).await;
+    retry.expect_open_until_eof().await;
+    harness.status_source.set(Some(QueryJobStatus::Succeeded));
+    let outcome = harness.outcome().await;
+
+    assert_eq!(
+        outcome,
+        SessionOutcome {
+            status: QueryJobStatus::Succeeded,
+            stats: SessionStats {
+                num_results_emitted: 0,
+                num_duplicates_dropped: 3,
+                num_protocol_errors: 0,
+                num_results_discarded: 5,
+            },
+        }
+    );
+    let mut late_attempt = harness.connect().await;
+    late_attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    late_attempt.send_results(0, 0..3).await;
+    late_attempt.expect_closed_by_listener().await;
 }

@@ -69,8 +69,26 @@ pub async fn serve(
             return;
         }
     };
+    if connection.session.record_joined_connection() {
+        tracing::debug!(
+            peer_addr = % peer_addr,
+            session_token = % handshake.session_token,
+            task_index = handshake.task_index,
+            "Accepted the session's first connection."
+        );
+    }
 
-    match connection.run(&handshake, &mut stream, buffer).await {
+    let end = connection.run(&handshake, &mut stream, buffer).await;
+    if 0 != connection.stats.num_results_discarded {
+        tracing::debug!(
+            peer_addr = % peer_addr,
+            session_token = % handshake.session_token,
+            task_index = handshake.task_index,
+            num_results_discarded = connection.stats.num_results_discarded,
+            "Discarded the results of a connection since the session's result stream was dropped."
+        );
+    }
+    match end {
         Ok(End::Eof) => {}
         Ok(End::DrainTimedOut) => tracing::debug!(
             peer_addr = % peer_addr,
@@ -78,12 +96,6 @@ pub async fn serve(
             task_index = handshake.task_index,
             "Stopped reading a connection that claimed no result within the grace period after \
              its job terminated."
-        ),
-        Ok(End::ResultStreamClosed) => tracing::debug!(
-            peer_addr = % peer_addr,
-            session_token = % handshake.session_token,
-            task_index = handshake.task_index,
-            "Closing a connection since the session's result stream was dropped."
         ),
         Err(e) => {
             if matches!(e, ConnectionError::Protocol(_)) {
@@ -111,9 +123,6 @@ enum End {
     /// The session's job terminated, and the connection then waited on its socket for the grace
     /// period without claiming a result.
     DrainTimedOut,
-
-    /// The session's consumer dropped the result stream.
-    ResultStreamClosed,
 }
 
 /// A connection that joined a session, streaming the results of one attempt of a task.
@@ -163,7 +172,7 @@ impl Connection {
     }
 
     /// Claims each result the connection streams, and sends the claimed results to the session's
-    /// consumer.
+    /// consumer, or discards them once the consumer has dropped the result stream.
     ///
     /// Reading stops at EOF. Once the session's job has terminated, it also stops when the
     /// connection has waited on its socket for the session's grace period without claiming a
@@ -208,15 +217,23 @@ impl Connection {
                     continue;
                 }
                 read_time_since_last_claim = Duration::ZERO;
+                if self.session.record_claimed_result() {
+                    tracing::debug!(
+                        session_token = % handshake.session_token,
+                        task_index = handshake.task_index,
+                        "Claimed the session's first result."
+                    );
+                }
                 let result = SearchResult {
                     archive_id,
                     timestamp: frame.timestamp,
                     message: frame.message,
                 };
-                if self.session.results_sender.send(result).await.is_err() {
-                    return Ok(End::ResultStreamClosed);
+                if self.session.results_sender.send(result).await.is_ok() {
+                    self.stats.num_results_emitted += 1;
+                } else {
+                    self.stats.num_results_discarded += 1;
                 }
-                self.stats.num_results_emitted += 1;
             }
 
             buffer.reserve(READ_BUFFER_CAPACITY);
