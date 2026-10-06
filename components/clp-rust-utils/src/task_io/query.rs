@@ -6,9 +6,9 @@ use std::num::NonZeroU32;
 use non_empty_string::NonEmptyString;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::job_config::NetworkOutput;
+use crate::job_config::SessionToken;
 
 /// The index of a query task within its query job.
 pub type QueryTaskIndex = u64;
@@ -52,7 +52,7 @@ pub enum OutputHandle {
     Network {
         host: NonEmptyString,
         port: NonZeroU16,
-        session_token: Uuid,
+        session_token: SessionToken,
     },
 }
 

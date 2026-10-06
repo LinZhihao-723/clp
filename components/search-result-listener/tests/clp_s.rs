@@ -49,12 +49,17 @@ async fn clp_s_attempts_of_one_task_emit_each_result_once() -> anyhow::Result<()
 /// Returns an error if:
 ///
 /// * [`anyhow::Error`] if:
-///   * The archive's directory name isn't a valid archive ID.
+///   * clp-s's own output has no results.
 ///   * The listener's results or statistics differ from clp-s's own output.
 /// * Forwards [`compress`]'s return values on failure.
+/// * Forwards [`str::parse`]'s return values on failure.
 /// * Forwards [`search_to_stdout`]'s return values on failure.
-/// * Forwards [`search_to_listener`]'s return values on failure.
 /// * Forwards [`ResultListener::bind`]'s return values on failure.
+/// * Forwards [`search_to_listener`]'s return values on failure.
+/// * Forwards [`tokio::time::timeout`]'s return values on failure.
+/// * Forwards [`search_result_listener::OutcomeFuture`]'s return values on failure.
+/// * Forwards [`serde_json::from_str`]'s return values on failure.
+/// * Forwards [`u64::try_from`]'s return values on failure.
 async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
     let archives_dir = work_dir.join("archives");
     let archive_name = compress(clp_s, work_dir, &archives_dir).await?;
@@ -139,9 +144,11 @@ async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
 /// Returns an error if:
 ///
 /// * [`anyhow::Error`] if the compression doesn't produce exactly one archive.
+/// * Forwards [`std::fmt::Write::write_fmt`]'s return values on failure.
 /// * Forwards [`std::fs::write`]'s return values on failure.
 /// * Forwards [`run_clp_s`]'s return values on failure.
 /// * Forwards [`std::fs::read_dir`]'s return values on failure.
+/// * Forwards [`std::fs::ReadDir::next`]'s return values on failure.
 async fn compress(clp_s: &Path, work_dir: &Path, archives_dir: &Path) -> anyhow::Result<String> {
     let mut records = String::new();
     for record_index in 0..NUM_RECORDS {

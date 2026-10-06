@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::error!(error = % e, "Failed to load the configuration file.");
     })?;
 
-    let database_credentials = read_database_credentials()?;
+    let database_credentials = package::credentials::Database::from_env()?;
 
     let coordinator_config = config.query_coordinator.ok_or_else(|| {
         tracing::error!("Query coordinator configuration is missing.");
@@ -66,39 +66,6 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(coordinator_config.termination_timeout_secs.get()),
     )
     .await
-}
-
-/// Reads the CLP database credentials from the `CLP_DB_USER` and `CLP_DB_PASS` environment
-/// variables.
-///
-/// # Returns
-///
-/// The database credentials on success.
-///
-/// # Errors
-///
-/// Returns an error if:
-///
-/// * Forwards [`std::env::var`]'s return values on failure.
-fn read_database_credentials() -> anyhow::Result<package::credentials::Database> {
-    Ok(package::credentials::Database {
-        password: secrecy::SecretString::new(
-            std::env::var("CLP_DB_PASS")
-                .inspect_err(|e| {
-                    tracing::error!(
-                        error = % e,
-                        "Failed to read the database password from `CLP_DB_PASS`."
-                    );
-                })?
-                .into_boxed_str(),
-        ),
-        user: std::env::var("CLP_DB_USER").inspect_err(|e| {
-            tracing::error!(
-                error = % e,
-                "Failed to read the database user from `CLP_DB_USER`."
-            );
-        })?,
-    })
 }
 
 /// Runs the coordinator until it returns or a shutdown signal arrives, then requests a graceful

@@ -15,13 +15,13 @@ use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::dataset::resolve_dataset_name;
 use clp_rust_utils::job_config::QueryJobId;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::s3::generate_s3_url;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use non_empty_string::NonEmptyString;
-use uuid::Uuid;
 
 use crate::common::clp_home;
 use crate::common::runtime;
@@ -233,7 +233,7 @@ fn build_clp_s_search_args_for_network(
     clp_s_query_option: &ClpSQueryOption,
     host: &str,
     port: NonZeroU16,
-    session_token: Uuid,
+    session_token: SessionToken,
     task_index: QueryTaskIndex,
 ) -> Vec<OsString> {
     let mut args = build_clp_s_search_query_args(archive_selector, clp_s_query_option);

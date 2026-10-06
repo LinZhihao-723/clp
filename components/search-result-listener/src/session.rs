@@ -14,6 +14,7 @@ use std::time::Duration;
 use clp_rust_utils::job_config::NetworkOutput;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use dashmap::DashMap;
@@ -26,7 +27,6 @@ use tokio_util::task::TaskTracker;
 
 use crate::Error;
 use crate::JobStatusSource;
-use crate::SessionToken;
 use crate::cursor::TaskCursor;
 use crate::listener::AcceptBarrier;
 
@@ -121,7 +121,7 @@ impl Session {
     ///
     /// # Type Parameters
     ///
-    /// * `StatusSource` - The source of the query job's status.
+    /// * `JobStatusSourceType` - The source of the query job's status.
     ///
     /// # Returns
     ///
@@ -130,10 +130,10 @@ impl Session {
     /// * The stream of the job's results, which must be consumed for the session to complete.
     /// * A future that resolves to the session's outcome once the stream has ended. Dropping it
     ///   doesn't stop the session.
-    pub fn run<StatusSource: JobStatusSource + 'static>(
+    pub fn run<JobStatusSourceType: JobStatusSource + 'static>(
         self,
         query_job_id: QueryJobId,
-        status_source: StatusSource,
+        status_source: JobStatusSourceType,
     ) -> (ResultStream, OutcomeFuture) {
         let Self {
             registration,
@@ -167,7 +167,7 @@ impl Session {
     ///
     /// Panics if the fresh token is already registered, which a random UUID rules out.
     pub(crate) fn open(
-        sessions: &Arc<Registry>,
+        sessions: Arc<Registry>,
         accept_barrier: AcceptBarrier,
         advertised_host: NonEmptyString,
         port: NonZeroU16,
@@ -190,10 +190,7 @@ impl Session {
             "a fresh session token should not be registered"
         );
         Self {
-            registration: Registration {
-                sessions: Arc::clone(sessions),
-                token,
-            },
+            registration: Registration { sessions, token },
             accept_barrier,
             state,
             results_receiver,
@@ -288,6 +285,10 @@ impl Drop for Registration {
 
 /// Drives a running session: waits for its job to terminate, then shuts the session down.
 ///
+/// # Type Parameters
+///
+/// * `JobStatusSourceType` - The source of the query job's status.
+///
 /// # Returns
 ///
 /// The session's outcome on success.
@@ -298,12 +299,12 @@ impl Drop for Registration {
 ///
 /// * Forwards [`wait_for_terminal_status`]'s return values on failure, after shutting the session
 ///   down.
-async fn drive<StatusSource: JobStatusSource>(
+async fn drive<JobStatusSourceType: JobStatusSource>(
     registration: Registration,
     accept_barrier: AcceptBarrier,
     state: Arc<State>,
     query_job_id: QueryJobId,
-    status_source: StatusSource,
+    status_source: JobStatusSourceType,
 ) -> Result<SessionOutcome, Error> {
     let status = wait_for_terminal_status(&status_source, query_job_id).await;
 

@@ -963,7 +963,6 @@ dependencies = [
  "futures",
  "non-empty-string",
  "search-result-listener",
- "secrecy",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1018,7 +1017,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -3329,7 +3327,6 @@ dependencies = [
  "const_format",
  "non-empty-string",
  "rmp-serde",
- "secrecy",
  "serde",
  "spider-client",
  "spider-core",

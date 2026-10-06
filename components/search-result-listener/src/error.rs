@@ -3,11 +3,10 @@
 use std::time::Duration;
 
 use clp_rust_utils::job_config::QueryJobId;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use clp_rust_utils::types::ParseArchiveIdError;
-
-use crate::SessionToken;
 
 /// Errors returned by the search result listener.
 #[derive(Debug, thiserror::Error)]

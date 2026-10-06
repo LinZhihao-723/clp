@@ -5,6 +5,7 @@
 
 use bytes::Buf;
 use bytes::BytesMut;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use rmp::decode::Bytes;
@@ -12,7 +13,6 @@ use rmp::decode::NumValueReadError;
 use rmp::decode::ValueReadError;
 use rmp::decode::bytes::BytesReadError;
 
-use crate::SessionToken;
 use crate::error::ProtocolError;
 
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -160,6 +160,10 @@ impl From<NumValueReadError<BytesReadError>> for DecodeError {
 /// Decodes one frame from the front of `buffer` with `decode`, consuming the frame's bytes only if
 /// it decodes completely.
 ///
+/// # Type Parameters
+///
+/// * `FrameType` - The type of the frame that `decode` produces.
+///
 /// # Returns
 ///
 /// On success:
@@ -172,10 +176,10 @@ impl From<NumValueReadError<BytesReadError>> for DecodeError {
 /// Returns an error if:
 ///
 /// * Forwards the [`ProtocolError`] of an invalid frame from `decode`.
-fn decode_frame<Frame>(
+fn decode_frame<FrameType>(
     buffer: &mut BytesMut,
-    decode: impl FnOnce(&mut Bytes<'_>) -> Result<Frame, DecodeError>,
-) -> Result<Option<Frame>, ProtocolError> {
+    decode: impl FnOnce(&mut Bytes<'_>) -> Result<FrameType, DecodeError>,
+) -> Result<Option<FrameType>, ProtocolError> {
     let mut reader = Bytes::new(buffer);
     match decode(&mut reader) {
         Ok(frame) => {
@@ -242,11 +246,11 @@ fn read_str<'buffer>(
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
+    use clp_rust_utils::job_config::SessionToken;
     use clp_rust_utils::types::ArchiveId;
 
     use super::Handshake;
     use super::ResultFrame;
-    use crate::SessionToken;
     use crate::error::ProtocolError;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";

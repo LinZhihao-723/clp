@@ -114,7 +114,7 @@ async fn main() -> ExitCode {
 ///
 /// * [`anyhow::Error`] if the begin time is later than the end time.
 /// * Forwards [`yaml::from_path`]'s return values on failure.
-/// * Forwards [`read_database_credentials`]'s return values on failure.
+/// * Forwards [`package::credentials::Database::from_env`]'s return values on failure.
 /// * Forwards [`create_clp_db_mysql_pool`]'s return values on failure.
 /// * Forwards [`ResultListener::bind`]'s return values on failure.
 /// * Forwards [`submit_query_job`]'s return values on failure.
@@ -135,7 +135,7 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
     let config: package::config::Config = yaml::from_path(&args.config).inspect_err(|e| {
         tracing::error!(error = % e, "Failed to load the configuration file.");
     })?;
-    let database_credentials = read_database_credentials()?;
+    let database_credentials = package::credentials::Database::from_env()?;
     let db_pool = create_clp_db_mysql_pool(
         &config.database,
         &database_credentials,
@@ -222,39 +222,6 @@ fn set_up_logging() {
         .with_ansi(std::io::stderr().is_terminal())
         .with_target(false)
         .init();
-}
-
-/// Reads the CLP database credentials from the `CLP_DB_USER` and `CLP_DB_PASS` environment
-/// variables.
-///
-/// # Returns
-///
-/// The database credentials on success.
-///
-/// # Errors
-///
-/// Returns an error if:
-///
-/// * Forwards [`std::env::var`]'s return values on failure.
-fn read_database_credentials() -> anyhow::Result<package::credentials::Database> {
-    Ok(package::credentials::Database {
-        password: secrecy::SecretString::new(
-            std::env::var("CLP_DB_PASS")
-                .inspect_err(|e| {
-                    tracing::error!(
-                        error = % e,
-                        "Failed to read the database password from `CLP_DB_PASS`."
-                    );
-                })?
-                .into_boxed_str(),
-        ),
-        user: std::env::var("CLP_DB_USER").inspect_err(|e| {
-            tracing::error!(
-                error = % e,
-                "Failed to read the database user from `CLP_DB_USER`."
-            );
-        })?,
-    })
 }
 
 /// Prints each result to stdout as it arrives, writing each result with a single write.

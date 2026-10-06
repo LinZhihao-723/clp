@@ -150,7 +150,7 @@ impl ResultListener {
     #[must_use]
     pub fn open_session(&self, config: SessionConfig) -> Session {
         Session::open(
-            &self.sessions,
+            Arc::clone(&self.sessions),
             self.accept_barrier.clone(),
             self.advertised_host.clone(),
             self.port,
@@ -202,10 +202,10 @@ impl PendingHandshake {
     /// # Returns
     ///
     /// The newly created counter entry.
-    fn new(num_pending_handshakes: &Arc<watch::Sender<usize>>) -> Self {
+    fn new(num_pending_handshakes: Arc<watch::Sender<usize>>) -> Self {
         num_pending_handshakes.send_modify(|num_pending| *num_pending += 1);
         Self {
-            num_pending_handshakes: Arc::clone(num_pending_handshakes),
+            num_pending_handshakes,
         }
     }
 }
@@ -247,6 +247,7 @@ impl AcceptLoop {
                 () = shutdown.cancelled() => return,
                 Some(reply_sender) = barrier_requests.recv() => {
                     self.accept_queued_connections();
+                    // A failure means the waiting session was dropped, so no one needs the reply.
                     let _ = reply_sender.send(());
                 }
                 accepted = self.tcp_listener.accept() => match accepted {
@@ -292,7 +293,7 @@ impl AcceptLoop {
             peer_addr,
             Arc::clone(&self.sessions),
             self.handshake_timeout,
-            PendingHandshake::new(&self.num_pending_handshakes),
+            PendingHandshake::new(Arc::clone(&self.num_pending_handshakes)),
         ));
     }
 }

@@ -21,6 +21,3 @@ pub use session::Session;
 pub use session::SessionConfig;
 pub use session::SessionOutcome;
 pub use session::SessionStats;
-
-/// The token that identifies a session to the search tasks streaming results to it.
-pub type SessionToken = uuid::Uuid;

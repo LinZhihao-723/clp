@@ -13,6 +13,9 @@ pub const QUERY_JOBS_TABLE_NAME: &str = "query_jobs";
 
 pub type QueryJobId = i32;
 
+/// The token that identifies a session to the search tasks streaming results to it.
+pub type SessionToken = Uuid;
+
 /// Mirror of `job_orchestration.scheduler.job_config.AggregationConfig`. Must be kept in sync.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -30,9 +33,8 @@ pub struct AggregationConfig {
 pub struct NetworkOutput {
     pub host: NonEmptyString,
     pub port: NonZeroU16,
-    /// Serialized in its hyphenated text form.
     #[serde(with = "uuid::serde::hyphenated")]
-    pub session_token: Uuid,
+    pub session_token: SessionToken,
 }
 
 /// Mirror of `job_orchestration.scheduler.job_config.SearchJobConfig`. Must be kept in sync.
