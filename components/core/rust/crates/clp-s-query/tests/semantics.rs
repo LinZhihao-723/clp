@@ -1,4 +1,4 @@
-//! The search semantics of design report §8.1 (`docs/semantics.md`), rule by rule, through the
+//! The search semantics of design report §8.1 (`docs/design.md` Part 2), rule by rule, through the
 //! reference evaluator over JSON records, with the in-scope divergences from C++ as positive cases.
 
 use clp_s_query::ColumnPattern;

@@ -12,11 +12,13 @@ Scope:
   top-k;
 - archives read from local files, memory or S3, plus an in-process Spider search task.
 
-Design and status: [`docs/DESIGN.md`](docs/DESIGN.md) (architecture and decisions),
-[`docs/semantics.md`](docs/semantics.md) (search semantics),
-[`docs/CONFORMANCE.md`](docs/CONFORMANCE.md) (conformance review),
-[`docs/PERF-M3.md`](docs/PERF-M3.md) (indicative performance) and
-[`tests/README.md`](tests/README.md) (the C++ ground-truth corpus).
+Documentation:
+
+- [`docs/design.md`](docs/design.md): architecture, decisions and search semantics.
+- [`docs/prototyping-and-benchmark.md`](docs/prototyping-and-benchmark.md): conformance against
+  the C++ `clp-s` and indicative query performance.
+- [`docs/api-overview.md`](docs/api-overview.md): the public archive iteration API.
+- [`tests/README.md`](tests/README.md): the C++ ground-truth corpus.
 
 ## Crates
 

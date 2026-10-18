@@ -112,7 +112,7 @@ index prunes and C++ returns nothing).
   that is pruned because the query is logically false or because it has no authoritative timestamp
   column to bound (C++ exits 1).
 - **Duplicate keys inside array objects** reach only their first member, as in C++
-  (`docs/semantics.md` §2); the reference evaluators keep the last member, and no fixture has one.
+  (`docs/design.md` Part 2 §2); the reference evaluators keep the last member, and no fixture has one.
 
 ## Per-query results
 

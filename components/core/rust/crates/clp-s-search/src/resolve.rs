@@ -62,7 +62,7 @@ impl<'tree> ColumnResolver<'tree> {
         Self { tree, timestamps }
     }
 
-    /// Resolves a filter column (search semantics, `docs/semantics.md` §2): keys descend into
+    /// Resolves a filter column (search semantics, `docs/design.md` Part 2 §2): keys descend into
     /// objects, `*` matches zero or more object levels, arrays are transparent at every step, and
     /// bare values reach every non-metadata leaf of every namespace.
     ///

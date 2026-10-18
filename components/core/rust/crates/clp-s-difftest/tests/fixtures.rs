@@ -1,4 +1,4 @@
-//! Fixture equivalence (`docs/DESIGN.md` §11.2): the C++ `clp-s` as the reader under test (the
+//! Fixture equivalence (`docs/design.md` §11.2): the C++ `clp-s` as the reader under test (the
 //! harness self-test) must reproduce every fixture `x` oracle byte-for-byte in canonical form and
 //! read the rejection fixtures (the rejection is the Rust reader's scope, not the format's); the
 //! Rust library must reproduce every oracle up to registered divergences and reject the rejection

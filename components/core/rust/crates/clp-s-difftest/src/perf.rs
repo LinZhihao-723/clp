@@ -1,4 +1,4 @@
-//! The query-performance report (`docs/DESIGN.md` §11.5): wall time and peak RSS of C++ `clp-s` and
+//! The query-performance report (`docs/design.md` §11.5): wall time and peak RSS of C++ `clp-s` and
 //! `clp-s-rs` on every dataset query and on `x`, measured with `/usr/bin/time`.
 
 use std::path::Path;
@@ -315,7 +315,7 @@ fn cpp_search_arguments(
 
 /// # Returns
 ///
-/// The `clp-s-rs search` command line of a case (`docs/DESIGN.md` §9).
+/// The `clp-s-rs search` command line of a case (`docs/design.md` §9).
 fn rust_search_arguments(
     binary: &Path,
     archive: &Path,
