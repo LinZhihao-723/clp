@@ -1,0 +1,2 @@
+{"rid":"r26","ts":1700000026000,"level":"INFO","msg":"p is digit string","p":"18"}
+{"rid":"r18","ts":1700000018000,"level":"INFO","msg":"polymorphic p int","p":18}

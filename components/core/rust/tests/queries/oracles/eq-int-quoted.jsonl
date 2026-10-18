@@ -1,0 +1,2 @@
+{"rid":"r37","ts":1700000037000,"level":"INFO","msg":"int as string","n":"5"}
+{"rid":"r05","level":"ERROR","msg":"no timestamp on this one","n":5,"f":5.0,"b":false}

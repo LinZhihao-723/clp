@@ -1,0 +1,2 @@
+{"i":-1,"f":-1.5,"b":true,"n":null,"s":"-1","c":"neg -1 value"}
+{"i":-1,"f":2.2250738585072014e-308,"b":true,"n":null,"s":"u64-max","c":"u64 max wraps to -1"}

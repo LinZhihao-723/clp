@@ -1,0 +1,30 @@
+{"id": 0, "v": "plain", "c": "has a space"}
+{"id": 1, "v": "", "c": " "}
+{"id": 2, "v": "trailing-free", "c": "  leading spaces"}
+{"id": 3, "v": "x", "c": "trailing space "}
+{"id": 4, "v": "caf\u00e9", "c": "unicode caf\u00e9 \u4e2d\u6587 text"}
+{"id": 5, "v": "中文", "c": "raw utf8 中文 and emoji 😀 here"}
+{"id": 6, "v": "\ud83d\ude00", "c": "surrogate pair \ud83d\ude00 emoji"}
+{"id": 7, "v": "quote\"inside", "c": "quote \" inside"}
+{"id": 8, "v": "back\\slash", "c": "back \\ slash C:\\tmp\\x"}
+{"id": 9, "v": "solidus\/escaped", "c": "solidus \/ escaped"}
+{"id": 10, "v": "ctl\b\f\n\r\t", "c": "ctl \b\f\n\r\t chars"}
+{"id": 11, "v": "nul\u0000byte", "c": "nul \u0000 byte"}
+{"id": 12, "v": "low\u0001\u001f", "c": "low \u0001 \u001f ctl"}
+{"id": 13, "v": "del\u007f", "c": "del \u007f char"}
+{"id": 14, "v": "star*q?", "c": "glob * and ? chars"}
+{"id": 15, "v": "123", "c": "123 456"}
+{"id": 16, "v": "1.5", "c": "1.5 2.5"}
+{"id": 17, "v": "true", "c": "true false"}
+{"id": 18, "v": "null", "c": "null null"}
+{"id": 19, "v": "0x1f", "c": "user 42 logged in from 10.0.0.1 at 0x1f with 3.14 ok"}
+{"id": 20, "v": "-9223372036854775808", "c": "big 9223372036854775807 and -9223372036854775808 and 18446744073709551615"}
+{"id": 21, "v": "1e10", "c": "float 1e10 and 1.5E-07 and -0.0"}
+{"id": 22, "v": "line\u2028sep", "c": "line \u2028 sep \u2029 para"}
+{"id": 23, "v": "lone\ud800surrogate", "c": "lone \udfff surrogate"}
+{"id": 24, "v": "Mixed-CASE", "c": "Mixed CASE Words"}
+{"id": 25, "v": "a=b,c=d", "c": "key=value pairs a=1 b=2"}
+{"id": 26, "v": "dict_var_abc123", "c": "id abc123def and ABC-456 and 1-2-3"}
+{"id": 27, "v": "tab\tsep", "c": "tab\tsep but space too"}
+{"id": 28, "v": "newline\nonly", "c": "newline\nand space"}
+{"id": 29, "v": "\u00e9\u0301", "c": "combining e\u0301 mark"}

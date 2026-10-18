@@ -1,0 +1,2 @@
+{"rid":"r05","level":"ERROR","msg":"no timestamp on this one","n":5,"f":5.0,"b":false}
+{"rid":"r17","level":"DEBUG","msg":"second record without ts","n":17,"b":true}

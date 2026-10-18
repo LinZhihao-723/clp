@@ -1,0 +1,3 @@
+{"id":156,"nested":{"lvl":{"k0":876}},"msg":"event 156 from worker 2","gamma":"text value 156 2","delta":{"inner":156,"f":22.286},"eps":1564}
+{"id":208,"nested":{"lvl":{"k0":838}},"msg":"event 208 from worker 7","eps":"text value 208 4"}
+{"id":104,"nested":{"lvl":{"k0":555}},"msg":"event 104 from worker 8","delta":"text value 104 3"}

@@ -1,0 +1,5 @@
+{"id":0,"v":"plain","c":"has a space"}
+{"id":2,"v":"trailing-free","c":"  leading spaces"}
+{"id":3,"v":"x","c":"trailing space "}
+{"id":27,"v":"tab\tsep","c":"tab\tsep but space too"}
+{"id":28,"v":"newline\nonly","c":"newline\nand space"}

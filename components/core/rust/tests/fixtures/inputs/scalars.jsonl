@@ -1,0 +1,11 @@
+{"i": 0, "f": 0.0, "b": true, "n": null, "s": "plain", "c": "two words"}
+{"i": 1, "f": 1.5, "b": false, "n": null, "s": "x", "c": "a b"}
+{"i": -1, "f": -1.5, "b": true, "n": null, "s": "-1", "c": "neg -1 value"}
+{"i": 9223372036854775807, "f": 1.7976931348623157e308, "b": false, "n": null, "s": "max", "c": "i64 max 9223372036854775807"}
+{"i": -9223372036854775808, "f": -1.7976931348623157e308, "b": true, "n": null, "s": "min", "c": "i64 min -9223372036854775808"}
+{"i": 9223372036854775808, "f": 5e-324, "b": false, "n": null, "s": "u64-wraps", "c": "u64 above i64 max wraps"}
+{"i": 18446744073709551615, "f": 2.2250738585072014e-308, "b": true, "n": null, "s": "u64-max", "c": "u64 max wraps to -1"}
+{"i": 42, "f": 3.0, "b": false, "n": null, "s": "42", "c": "answer is 42"}
+{"i": -0, "f": -0.0, "b": true, "n": null, "s": "true", "c": "true story"}
+{"i": 1000000, "f": 0.1, "b": false, "n": null, "s": "null", "c": "null and void"}
+{"i": 123456789012, "f": 100.25, "b": true, "n": null, "s": "1.5", "c": "pi is 3.14159"}

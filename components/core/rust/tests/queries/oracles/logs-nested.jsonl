@@ -1,0 +1,5 @@
+{"ts":1735690211841,"seq":791,"level":"DEBUG","service":"search","latency_ms":9673,"msg":"request 15257 failed with status 400","ctx":{"trace":"t439246","span":11}}
+{"ts":1735690681670,"seq":1421,"level":"INFO","service":"billing","latency_ms":4144,"msg":"request 89381 failed with status 500","ctx":{"trace":"t204092","span":11}}
+{"ts":1735691476229,"seq":2485,"level":"WARN","service":"ingest","latency_ms":2825,"msg":"user 10 logged in from 10.0.78.201","ctx":{"trace":"t291727","span":11}}
+{"ts":1735690183725,"seq":756,"level":"INFO","service":"billing","latency_ms":1025,"msg":"request 1290 failed with status 500","ctx":{"trace":"t354663","span":11},"tags":["a", "b", "c"]}
+{"ts":1735691044343,"seq":1904,"level":"DEBUG","service":"auth","latency_ms":2216,"msg":"job job-f9fc640e finished","ctx":{"trace":"t719578","span":11},"score":27.37}

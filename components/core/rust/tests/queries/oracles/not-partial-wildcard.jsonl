@@ -1,0 +1,2 @@
+{"rid":"r31","ts":1700000031000,"level":"INFO","msg":"deep nesting","deep":{"a":{"b":{"c":{"d":31}}},"x":{"d":310}}}
+{"rid":"r32","ts":1700000032000,"level":"INFO","msg":"deep nesting two","deep":{"y":{"d":32}}}

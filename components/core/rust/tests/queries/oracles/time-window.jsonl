@@ -1,0 +1,3 @@
+{"rid":"r10","ts":1700000010000,"level":"WARN","msg":"unicode café 中文 message","n":10,"f":10.0,"b":true}
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}

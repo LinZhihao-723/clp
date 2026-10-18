@@ -1,0 +1,14 @@
+{"kid": "k00", "a.b": 1, "a": {"b": 2}}
+{"kid": "k01", "a b": 3, "sp ace": "v w"}
+{"kid": "k02", "*": 4, "?": 5, "\\": 6, "\"": 7, ":": 8}
+{"kid": "k03", "@": 9, "@ts": 10, "$": 11, "{}": 12, "[]": 13}
+{"kid": "k04", "é": 14, "中文": 15, "😀": 16}
+{"kid": "k05", "": 17}
+{"kid": "k06", "": {"": 18}}
+{"kid": "k07", "x": {"": 19}, "y": {"": {"z": 20}}}
+{"kid": "k08", "a\nb": 21, "tab\tkey": 22, "\u0001": 23}
+{"kid": "k09", "-": 24, "_": 25, "1": 26, "0.5": 27, "true": 28, "null": 29}
+{"kid": "k10", "k": {"a.b": {"c": 30}}}
+{"kid": "k11", "very_long_key_name_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 31}
+{"kid": "k12", "NOT": 32, "AND": 33, "OR": 34, "not": 35}
+{"kid": "k13", "(": 36, ")": 37, "<": 38, ">": 39, "=": 40}

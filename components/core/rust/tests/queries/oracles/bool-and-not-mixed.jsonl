@@ -1,0 +1,4 @@
+{"rid":"r09","ts":1700000009000,"level":"INFO","msg":"back\\slash path C:\\tmp\\x","n":9,"f":9.75,"b":false}
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r01","ts":1700000001000,"level":"WARN","msg":"disk usage at 91.5 percent","n":1,"f":-2.25,"b":false,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v1/disk"},"tags":["disk"]}
+{"rid":"r15","ts":1700000015000,"level":"WARN","msg":"tab\tand newline\n in msg","f":15.5,"b":false}

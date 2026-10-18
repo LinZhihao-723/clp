@@ -1,0 +1,16 @@
+[
+ {
+  "_id": {
+   "archive_id": "search.ts-nolog.clps",
+   "log_event_idx": {
+    "$numberLong": "0"
+   }
+  },
+  "dataset": "",
+  "message": "{\"rid\":\"r27\",\"ts\":1700000027000,\"level\":\"INFO\",\"msg\":\"nul is the null string\",\"nul\":\"null\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1700000027000"
+  }
+ }
+]

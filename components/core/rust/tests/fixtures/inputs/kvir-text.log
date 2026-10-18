@@ -1,0 +1,10 @@
+2023-11-14T22:13:20.123Z INFO server started on port 8080
+2023-11-14T22:13:21.000Z WARN disk usage at 91 percent
+2023-11-14T22:13:22.500Z ERROR request 42 failed: timeout after 3.5s
+continuation line without a timestamp
+  at frame 0x1f3 in handler.rs:42
+2023-11-14 22:13:23,001 DEBUG user=alice id=0x1f3 action=login
+2023-11-14T22:13:24.000Z INFO unicode café 中文 line
+2023-11-14T22:13:25.250Z INFO quote " and backslash \ in text
+2023-11-14T22:13:26.000Z ERROR request 43 failed: connection reset by peer
+2023-11-14T22:13:27.999Z INFO shutting down

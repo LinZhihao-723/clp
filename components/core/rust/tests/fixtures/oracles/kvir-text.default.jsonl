@@ -1,0 +1,8 @@
+{"message":" INFO server started on port 8080\n","timestamp":"2023-11-14T22:13:20.123Z"}
+{"message":" WARN disk usage at 91 percent\n","timestamp":"2023-11-14T22:13:21.000Z"}
+{"message":" ERROR request 42 failed: timeout after 3.5s\ncontinuation line without a timestamp\n  at frame 0x1f3 in handler.rs:42\n","timestamp":"2023-11-14T22:13:22.500Z"}
+{"message":" INFO unicode café 中文 line\n","timestamp":"2023-11-14T22:13:24.000Z"}
+{"message":" INFO quote \" and backslash \\ in text\n","timestamp":"2023-11-14T22:13:25.250Z"}
+{"message":" ERROR request 43 failed: connection reset by peer\n","timestamp":"2023-11-14T22:13:26.000Z"}
+{"message":" INFO shutting down\n","timestamp":"2023-11-14T22:13:27.999Z"}
+{"message":" DEBUG user=alice id=0x1f3 action=login\n","timestamp":"2023-11-14 22:13:23,001"}

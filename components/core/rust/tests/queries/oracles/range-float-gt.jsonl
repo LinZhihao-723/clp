@@ -1,0 +1,9 @@
+{"rid":"r06","ts":1700000006000,"level":"error","msg":"lowercase error level here","n":6,"f":6.5,"b":true}
+{"rid":"r09","ts":1700000009000,"level":"INFO","msg":"back\\slash path C:\\tmp\\x","n":9,"f":9.75,"b":false}
+{"rid":"r10","ts":1700000010000,"level":"WARN","msg":"unicode café 中文 message","n":10,"f":10.0,"b":true}
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r03","ts":1700000003000,"level":"DEBUG","msg":"cache hit ratio 0.93","n":100,"f":1e10,"b":false,"nums":[60000, 70000]}
+{"rid":"r13","ts":1700000013000,"level":"DEBUG","msg":"trace id abc123def seen","n":13,"f":13.0,"word":"hello"}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r07","ts":1700000007000,"msg":"fatal error with space level","n":7,"f":7.25,"b":false,"level":"FATAL ERROR"}
+{"rid":"r15","ts":1700000015000,"level":"WARN","msg":"tab\tand newline\n in msg","f":15.5,"b":false}

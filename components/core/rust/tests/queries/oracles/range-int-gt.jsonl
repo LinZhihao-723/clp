@@ -1,0 +1,7 @@
+{"rid":"r03","ts":1700000003000,"level":"DEBUG","msg":"cache hit ratio 0.93","n":100,"f":1e10,"b":false,"nums":[60000, 70000]}
+{"rid":"r04","ts":1700000004000,"level":"INFO","msg":"user 43 logged out","n":9223372036854775807,"f":3.0,"b":true,"objs":[{"k": "tier", "v": 1}, {"k": "zone", "v": "us"}]}
+{"rid":"r13","ts":1700000013000,"level":"DEBUG","msg":"trace id abc123def seen","n":13,"f":13.0,"word":"hello"}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r14","ts":1700000014000,"level":"INFO","msg":"quote \" inside msg","n":14,"word":"HELLO"}
+{"rid":"r39","ts":1700000039000,"level":"INFO","msg":"ERROR inside the message text","n":39}
+{"rid":"r17","level":"DEBUG","msg":"second record without ts","n":17,"b":true}

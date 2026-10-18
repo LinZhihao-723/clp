@@ -1,0 +1,142 @@
+[
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2990"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691846509,\"seq\":2990,\"level\":\"INFO\",\"service\":\"billing\",\"latency_ms\":1832,\"msg\":\"user 81 logged in from 10.0.94.24\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691846509"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2991"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691847344,\"seq\":2991,\"level\":\"INFO\",\"service\":\"query\",\"latency_ms\":5048,\"msg\":\"request 48488 failed with status 503\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691847344"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2992"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691848359,\"seq\":2992,\"level\":\"INFO\",\"service\":\"search\",\"latency_ms\":4836,\"msg\":\"query on table t14 returned 8036 rows in 8344ms\",\"score\":-13.58}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691848359"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2993"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691848764,\"seq\":2993,\"level\":\"INFO\",\"service\":\"auth\",\"latency_ms\":3298,\"msg\":\"cache hit ratio 0.194\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691848764"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2994"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691850202,\"seq\":2994,\"level\":\"DEBUG\",\"service\":\"query\",\"latency_ms\":1253,\"msg\":\"job job-924ac4e0 finished\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691850202"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2995"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691850589,\"seq\":2995,\"level\":\"INFO\",\"service\":\"auth\",\"latency_ms\":5649,\"msg\":\"user 42 logged in from 10.0.77.188\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691850589"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2996"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691851165,\"seq\":2996,\"level\":\"INFO\",\"service\":\"auth\",\"latency_ms\":4886,\"msg\":\"request 89952 failed with status 503\",\"ctx\":{\"trace\":\"t378951\",\"span\":88}}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691851165"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2997"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691851839,\"seq\":2997,\"level\":\"INFO\",\"service\":\"auth\",\"latency_ms\":6936,\"msg\":\"query on table t19 returned 3821 rows in 8190ms\",\"tags\":[\"c\", \"e\", \"a\"]}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691851839"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2998"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691852308,\"seq\":2998,\"level\":\"WARN\",\"service\":\"ingest\",\"latency_ms\":3812,\"msg\":\"cache hit ratio 0.118\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691852308"
+  }
+ },
+ {
+  "_id": {
+   "archive_id": "logs.ts.clps",
+   "log_event_idx": {
+    "$numberLong": "2999"
+   }
+  },
+  "dataset": "",
+  "message": "{\"ts\":1735691853741,\"seq\":2999,\"level\":\"WARN\",\"service\":\"auth\",\"latency_ms\":6525,\"msg\":\"job job-24476d3b finished\"}\n",
+  "orig_file_path": "",
+  "timestamp": {
+   "$numberLong": "1735691853741"
+  }
+ }
+]
