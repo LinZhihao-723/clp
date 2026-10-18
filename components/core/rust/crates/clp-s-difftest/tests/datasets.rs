@@ -1,4 +1,4 @@
-//! Dataset equivalence (`docs/DESIGN.md` §11.4): the Rust library decompresses the bench, spider
+//! Dataset equivalence (`docs/design.md` §11.4): the Rust library decompresses the bench, spider
 //! and synthetic archives to the C++ `x` output (canonical multiset), and answers every dataset
 //! query of the suite like C++ (up to the declared divergences) and like `clp_s_query`'s reference
 //! evaluator over the `x` records. The archives are large, so the tests are opt-in: `cargo test

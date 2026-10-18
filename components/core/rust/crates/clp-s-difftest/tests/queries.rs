@@ -1,4 +1,4 @@
-//! Query-suite equivalence (`docs/DESIGN.md` §11.3): the harness self-test (the C++ `clp-s` as the
+//! Query-suite equivalence (`docs/design.md` §11.3): the harness self-test (the C++ `clp-s` as the
 //! reader under test must reproduce the oracle of every fixture case that declares no divergence,
 //! and must fail every case that declares one), and the Rust library against the three oracles
 //! (C++, the declared expectations, and `clp_s_query`'s reference evaluator).

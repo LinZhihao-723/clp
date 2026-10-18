@@ -1,5 +1,5 @@
 # Divergence registry of the Rust clp-s reader prototype (design report §8.3, restricted to this
-# round's scope by docs/DESIGN.md §10). Read by `clp_s_difftest::registry::Registry`.
+# round's scope by docs/design.md §10). Read by `clp_s_difftest::registry::Registry`.
 #
 # Fields:
 #   id                      `DV-nn` (intentional divergence) or `SX-nn` (scope exclusion).

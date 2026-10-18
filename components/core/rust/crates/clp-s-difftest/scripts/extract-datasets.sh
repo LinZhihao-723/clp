@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks `x` on the three dataset archives (bench, spider, synthetic) against the C++ oracles
-# through the Rust library and the `clp-s-rs` binary (`docs/DESIGN.md` §11.4), then times C++
+# through the Rust library and the `clp-s-rs` binary (`docs/design.md` §11.4), then times C++
 # `clp-s x` and `clp-s-rs x` on each dataset (pinned with `taskset -c 8-15`, best of RUNS runs).
 #
 # Usage: crates/clp-s-difftest/scripts/extract-datasets.sh

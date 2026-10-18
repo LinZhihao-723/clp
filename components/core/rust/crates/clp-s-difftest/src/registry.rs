@@ -1,5 +1,5 @@
 //! The machine-checked divergence registry (design report §8.3, restricted to this round's scope by
-//! `docs/DESIGN.md` §10), loaded from `tests/divergences.toml`.
+//! `docs/design.md` §10), loaded from `tests/divergences.toml`.
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -1,7 +1,7 @@
 //! The comparison driver.
 //!
 //! It runs a [`ReaderUnderTest`] over the corpus (fixture `x`, the query suite, the datasets) and
-//! judges every case against the C++ oracles under the divergence registry (`docs/DESIGN.md` §10).
+//! judges every case against the C++ oracles under the divergence registry (`docs/design.md` §10).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
