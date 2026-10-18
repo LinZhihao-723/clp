@@ -1,0 +1,2 @@
+{"rid":"r00","ts":1700000000000,"level":"INFO","msg":"user 42 logged in from 10.0.0.1","n":0,"f":1.5,"b":true,"req":{"user":{"id":42,"name":"alice"},"path":"/api/v1/login"},"tags":["auth", "web"]}
+{"rid":"r01","ts":1700000001000,"level":"WARN","msg":"disk usage at 91.5 percent","n":1,"f":-2.25,"b":false,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v1/disk"},"tags":["disk"]}

@@ -1,0 +1,44 @@
+[
+ [
+  1735690180345,
+  "{\"ts\":1735690180345,\"seq\":751,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":474,\"msg\":\"request 38745 failed with status 500\"}\n",
+  "",
+  "logs.ts-split.2.clps",
+  79
+ ],
+ [
+  1735690235356,
+  "{\"ts\":1735690235356,\"seq\":827,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":4493,\"msg\":\"query on table t17 returned 6621 rows in 2115ms\"}\n",
+  "",
+  "logs.ts-split.2.clps",
+  155
+ ],
+ [
+  1735690315749,
+  "{\"ts\":1735690315749,\"seq\":934,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":1219,\"msg\":\"job job-953a284c finished\"}\n",
+  "",
+  "logs.ts-split.2.clps",
+  262
+ ],
+ [
+  1735690325953,
+  "{\"ts\":1735690325953,\"seq\":949,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":5310,\"msg\":\"job job-a23fd765 finished\"}\n",
+  "",
+  "logs.ts-split.2.clps",
+  277
+ ],
+ [
+  1735690346750,
+  "{\"ts\":1735690346750,\"seq\":976,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":1534,\"msg\":\"request 68763 failed with status 500\"}\n",
+  "",
+  "logs.ts-split.2.clps",
+  304
+ ],
+ [
+  1735690283380,
+  "{\"ts\":1735690283380,\"seq\":891,\"level\":\"ERROR\",\"service\":\"auth\",\"latency_ms\":6125,\"msg\":\"request 92088 failed with status 403\",\"tags\":[\"e\", \"d\", \"c\"]}\n",
+  "",
+  "logs.ts-split.2.clps",
+  219
+ ]
+]

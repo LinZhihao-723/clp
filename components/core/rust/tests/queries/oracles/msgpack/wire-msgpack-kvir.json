@@ -1,0 +1,58 @@
+[
+ [
+  1700000000123,
+  "{\"message\":\" INFO server started on port 8080\\n\",\"timestamp\":\"2023-11-14T22:13:20.123Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  0
+ ],
+ [
+  1700000001000,
+  "{\"message\":\" WARN disk usage at 91 percent\\n\",\"timestamp\":\"2023-11-14T22:13:21.000Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  1
+ ],
+ [
+  1700000002500,
+  "{\"message\":\" ERROR request 42 failed: timeout after 3.5s\\ncontinuation line without a timestamp\\n  at frame 0x1f3 in handler.rs:42\\n\",\"timestamp\":\"2023-11-14T22:13:22.500Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  2
+ ],
+ [
+  1700000003001,
+  "{\"message\":\" DEBUG user=alice id=0x1f3 action=login\\n\",\"timestamp\":\"2023-11-14 22:13:23,001\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  3
+ ],
+ [
+  1700000004000,
+  "{\"message\":\" INFO unicode café 中文 line\\n\",\"timestamp\":\"2023-11-14T22:13:24.000Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  4
+ ],
+ [
+  1700000005250,
+  "{\"message\":\" INFO quote \\\" and backslash \\\\ in text\\n\",\"timestamp\":\"2023-11-14T22:13:25.250Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  5
+ ],
+ [
+  1700000006000,
+  "{\"message\":\" ERROR request 43 failed: connection reset by peer\\n\",\"timestamp\":\"2023-11-14T22:13:26.000Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  6
+ ],
+ [
+  1700000007999,
+  "{\"message\":\" INFO shutting down\\n\",\"timestamp\":\"2023-11-14T22:13:27.999Z\"}\n",
+  "",
+  "kvir-text.ts.clps",
+  7
+ ]
+]

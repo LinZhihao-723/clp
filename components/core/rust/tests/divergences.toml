@@ -1,0 +1,339 @@
+# Divergence registry of the Rust clp-s reader prototype (design report §8.3, restricted to this
+# round's scope by docs/DESIGN.md §10). Read by `clp_s_difftest::registry::Registry`.
+#
+# Fields:
+#   id                      `DV-nn` (intentional divergence) or `SX-nn` (scope exclusion).
+#   summary                 C++ behaviour -> Rust behaviour.
+#   classifier              how the difftest recognises it:
+#                           float-normalization  a mismatching record pair is equal after mapping
+#                                                C++ `%f` numbers to the Rust number they round
+#                                                from, and C++ `nan`/`inf` to `null`;
+#                           declared-by-case     the query case declares it; Rust must equal the
+#                                                case's expectation and C++ must differ;
+#                           archive-dependence   like declared-by-case, and also suggested for an
+#                                                undeclared mismatch when C++ on the single record
+#                                                agrees with Rust (see `archive_dependence_rule`);
+#                           output-shape         checked on exit codes, wire tuples or results-cache
+#                                                documents rather than on records;
+#                           expected-rejection   Rust rejects the archive with UnsupportedArchive
+#                                                at open, before any output;
+#                           dedicated-test       a unit test in `checked_by` proves it; never used to
+#                                                accept a record mismatch.
+#   recognition             how a mismatch caused by this entry looks.
+#   checked_by              where the positive test lives.
+#   archive_dependence_rule the flipping predicate that suggests this entry (archive-dependence
+#                           only): not-exists-path, negated-wildcard-or-bare-value, wildcard-null,
+#                           partial-wildcard-over-array, order-dependent-array,
+#                           order-dependent-empty-key, wildcard-empty-key.
+#
+# Out of scope this round (not registered): DV-03, DV-04 (structured arrays, 0.4.x), DV-26
+# (chunked extraction), DV-33 (FFI), DV-40 (structured arrays), DV-44 (Velox), DV-46 (typed
+# output).
+
+[[divergence]]
+id = "DV-01"
+summary = "Plain floats print with %f (lossy) -> shortest round-trip"
+classifier = "float-normalization"
+recognition = "A C++ number with exactly six fraction digits where Rust prints a number that rounds to it with %f (1e-7 -> 0.000000, 1e300 in full)."
+checked_by = "clp-s-difftest compare (fixtures *.nofloat x)"
+
+[[divergence]]
+id = "DV-02"
+summary = "Non-finite floats print nan/inf (invalid JSON) -> null"
+classifier = "float-normalization"
+recognition = "A C++ line that is invalid JSON only because of bare nan, -nan, inf or -inf tokens, where Rust prints null."
+checked_by = "clp-s-difftest compare; clp-s-json unit tests"
+
+[[divergence]]
+id = "DV-05"
+summary = "NOT v / NOT *: v return every record (or nothing) depending on other columns' encodings -> K3, domain-restricted"
+classifier = "archive-dependence"
+recognition = "A negated bare value or pure wildcard returns records whose value equals the literal, or all records (NOT ERROR on bench: 1,000,000 vs 750,396)."
+checked_by = "suite: not-bare-var, bench-not-bare"
+archive_dependence_rule = "negated-wildcard-or-bare-value"
+
+[[divergence]]
+id = "DV-06"
+summary = "Bug-254 dedupe drops ClpString matches under AND -> matches kept"
+classifier = "declared-by-case"
+recognition = "An AND of a ClpString text match with another predicate loses records C++ should return."
+checked_by = "suite: clp-negation-and, clp-negation-not-or"
+
+[[divergence]]
+id = "DV-07"
+summary = "NEXISTS on a path matches nothing when the path is absent from the archive -> matches every record lacking the path"
+classifier = "archive-dependence"
+recognition = "NOT p: * returns no record (path absent) or depends on other records having p."
+checked_by = "suite: not-exists-absent-path"
+archive_dependence_rule = "not-exists-path"
+
+[[divergence]]
+id = "DV-08"
+summary = "NOT/NEXISTS over a partial wildcard mean exists-not -> not-exists uniformly"
+classifier = "declared-by-case"
+recognition = "NOT a.*: v returns records where some but not all reached values differ."
+checked_by = "suite: not-partial-wildcard"
+
+[[divergence]]
+id = "DV-09"
+summary = "*:null returns everything when any record has a null; NOT *:null and NOT *:* return everything -> K3, NOT * matches nothing"
+classifier = "archive-dependence"
+recognition = "A *: null or NOT *: ... query returns every record of the archive."
+checked_by = "suite: bare-null, pure-wildcard-null, not-pure-wildcard-null, match-none"
+archive_dependence_rule = "wildcard-null"
+
+[[divergence]]
+id = "DV-10"
+summary = "{a: \"null\"} and [null] match both a: null and NOT a: null -> only a: null"
+classifier = "declared-by-case"
+recognition = "A record matches a predicate and its negation."
+checked_by = "suite: not-null"
+
+[[divergence]]
+id = "DV-11"
+summary = "Array range operators evaluate as !=, inexact integers, numbers searched only with a float column -> typed element comparisons"
+classifier = "declared-by-case"
+recognition = "A range query over arrays returns records with no element in range (payload > 50000 on synthetic: 93,444 vs 30,781)."
+checked_by = "suite: range-poly-lt, array-range-gt, array-not-range, arrays-range, synthetic-poly-range and others"
+
+[[divergence]]
+id = "DV-12"
+summary = "A literal path into an unstructured array binds regardless of type -> elements typed"
+classifier = "declared-by-case"
+recognition = "a: null (or a type-mismatched literal) matches every record with an array at a."
+checked_by = "suite: eq-poly-null, array-null-elem, arrays-null"
+
+[[divergence]]
+id = "DV-13"
+summary = "Per-row N/A inside arrays is False before NOT -> K3 per row"
+classifier = "declared-by-case"
+recognition = "NOT over an array predicate returns records whose array has no comparable element."
+checked_by = "suite: array-not-eq, array-not-range, array-not-string, array-object-path-not, arrays-not"
+
+[[divergence]]
+id = "DV-14"
+summary = "double_as_int undefined behaviour -> exact rational comparison"
+classifier = "declared-by-case"
+recognition = "A float literal compared with an integer column at the i64 edges."
+checked_by = "suite: range-float-huge-literal"
+
+[[divergence]]
+id = "DV-15"
+summary = "Integer literal vs Timestamp is ns at row level and ms in the index -> one unit (epoch ms)"
+classifier = "declared-by-case"
+recognition = "A numeric literal on the timestamp column matches records in ns rather than ms."
+checked_by = "suite: range-ts-gt, range-ts-gte, range-ts-lt, eq-ts, range-ts-string-column, range-ts-int-precisions, time-escaped-key-eq, time-escaped-key-gt-disjoint, time-escaped-key-lt-covering"
+
+[[divergence]]
+id = "DV-16"
+summary = "Empty keys transparent everywhere -> transparent only under StructuredArray parents (never this round)"
+classifier = "declared-by-case"
+recognition = "A query through a \"\" key matches as if the key were absent."
+checked_by = "suite: keys-empty-key-child, keys-empty-key-parent-exists, empty-key-wildcard-literal, empty-key-order-reversed-literal"
+
+[[divergence]]
+id = "DV-17"
+summary = "GrepCore ? false positives, inner-* and edge-* token misses, dropped constant escapes -> fixed"
+classifier = "declared-by-case"
+recognition = "A ClpString wildcard returns wrong records because of: a ? (widened to * in the subqueries); a token with an inner * or ? that spans delimiters or numeric variables (C++ requires one dictionary variable); a token with a leading or trailing * whose text is part of a number but not itself encodable (*0.* on 0.041); or a literal backslash before a wildcard or at the end of a constant (C++ drops its escape, so no logtype matches)."
+checked_by = "suite: clp-question-one-char, clp-inner-star-span, clp-inner-star-numbers, clp-question-spans-delimiter, clp-edge-star-float, clp-edge-star-float-prefix, clp-backslash-before-star, clp-backslash-before-inner-star; clp-s-search unit tests (placeholder bytes before a non-wildcard)"
+
+[[divergence]]
+id = "DV-18"
+summary = "Timestamp index matches half-escaped tokens and ignores the namespace -> node-id binding; results unchanged unless DV-15 also applies"
+classifier = "dedicated-test"
+recognition = "Never a record mismatch by itself. Combined with DV-15 it is one: C++ loses the index pruning on a key with `*` or `\\`, so its ns row-level comparison shows (time-escaped-key-gt-disjoint, declared DV-15)."
+checked_by = "clp-s-search planner protocol::the_timestamp_index_binds_its_column_by_node_id (fixture timestamps-escaped-key.ts-escaped) and protocol::the_timestamp_index_is_not_bound_to_the_same_key_in_another_namespace (fixture kvir-text.ts, where `@timestamp` resolves to no column); no fixture has a same-key `@` column, so the namespace half is untested at the record level"
+
+[[divergence]]
+id = "DV-19"
+summary = "Objects never satisfy Exists -> they do"
+classifier = "declared-by-case"
+recognition = "a: * or NOT a: * where a is an object in some records."
+checked_by = "suite: exists-poly, not-exists-poly, exists-empty-object, poly-exists, proj-poly and others"
+
+[[divergence]]
+id = "DV-20"
+summary = "A logically false query or --tge without a timestamp column exits 1 -> zero rows plus a diagnostic, exit 0, all archives searched"
+classifier = "output-shape"
+recognition = "C++ exits 1 with no output; Rust exits 0 with no output."
+checked_by = "suite: time-no-ts-key (expected_rust_exit = 0); clp-s-cli tests"
+
+[[divergence]]
+id = "DV-21"
+summary = "File output truncated per archive -> opened once per session"
+classifier = "output-shape"
+recognition = "Multi-archive msgpack output: C++ holds only the last archive's tuples; Rust holds every match (the Rust stdout set of the same query)."
+checked_by = "suite: wire-msgpack-split"
+
+[[divergence]]
+id = "DV-22"
+summary = "Network tuples lack metadata, one connection per archive -> real metadata, one connection per session"
+classifier = "output-shape"
+recognition = "Network output differs in archive_id/metadata fields or connection count."
+checked_by = "clp-s-sinks unit tests"
+
+[[divergence]]
+id = "DV-23"
+summary = "Downstream failure aborts (exit 134) -> SinkError, exit 4"
+classifier = "output-shape"
+recognition = "A closed pipe or refused connection: C++ aborts, Rust exits 4."
+checked_by = "clp-s-cli tests"
+
+[[divergence]]
+id = "DV-24"
+summary = "Results-cache _ids collide without log order -> RecordId from table order"
+classifier = "output-shape"
+recognition = "C++ inserts fewer documents than min(k, matches) on a --disable-log-order archive; Rust inserts min(k, matches) distinct _ids."
+checked_by = "suite: wire-cache-nolog"
+
+[[divergence]]
+id = "DV-25"
+summary = "Per-archive top-k with first-scanned ties -> session-wide top-k with a total-order tie-break"
+classifier = "output-shape"
+recognition = "Multi-archive results cache: C++ keeps up to k per archive; Rust keeps the k latest records of the session."
+checked_by = "suite: wire-cache-split"
+
+[[divergence]]
+id = "DV-27"
+summary = "ns -> ms truncates toward zero -> floor"
+classifier = "output-shape"
+recognition = "Only pre-1970 timestamps differ by 1 ms on the wire."
+checked_by = "clp-s-wire unit tests"
+
+[[divergence]]
+id = "DV-28"
+summary = "Unordered output follows table order -> unspecified under a pool, table order with one thread"
+classifier = "dedicated-test"
+recognition = "Never a record mismatch: outputs are compared as multisets."
+checked_by = "clp-s-exec unit tests"
+
+[[divergence]]
+id = "DV-29"
+summary = "Any version read -> versions outside [0.5.0, 0.5.x] rejected"
+classifier = "expected-rejection"
+recognition = "A header-patched archive fails at open with UnsupportedArchive."
+checked_by = "clp-s-format unit tests"
+
+[[divergence]]
+id = "DV-30"
+summary = "Trailing timestamp-dictionary bytes, zero-length packets, empty archives unopenable -> readable"
+classifier = "dedicated-test"
+recognition = "A mutated archive C++ cannot open opens in Rust."
+checked_by = "clp-s-format unit tests"
+
+[[divergence]]
+id = "DV-31"
+summary = "Corruption aborts or segfaults -> typed errors"
+classifier = "dedicated-test"
+recognition = "A mutated archive crashes C++; Rust returns CorruptArchive. Every scan, x included, validates the log_event_idx node, so an archive whose log_event_idx node is retyped to a non-integer type also fails Rust x with CorruptArchive (exit 2) where C++ x, which never reads that column, exits 0."
+checked_by = "clp-s-format, clp-s-table unit tests; clp-s-table mutations::retyped_log_event_idx_nodes_are_a_registered_divergence_from_cpp"
+
+[[divergence]]
+id = "DV-32"
+summary = "An unparsable timestamp pattern makes the archive unopenable -> fails only JSON rendering of affected values"
+classifier = "dedicated-test"
+recognition = "A patched pattern: C++ fails to open; Rust opens and fails rendering."
+checked_by = "clp-s-format, clp-s-json unit tests"
+
+[[divergence]]
+id = "DV-34"
+summary = "Missing timestamp is 0 in top-k -> None, sorted last; 0 on the wire"
+classifier = "output-shape"
+recognition = "Top-k with records lacking a timestamp: C++ ranks them as 1970."
+checked_by = "clp-s-exec top-k unit tests"
+
+[[divergence]]
+id = "DV-35"
+summary = "A B4 table aborts the whole archive -> the error names the table"
+classifier = "dedicated-test"
+recognition = "A mutated table: the Rust error names it."
+checked_by = "clp-s-table unit tests"
+
+[[divergence]]
+id = "DV-36"
+summary = "Partial wildcards reach array values only through another record's literal copy -> wildcards descend into arrays"
+classifier = "archive-dependence"
+recognition = "a.*: v (or *.b) misses records whose match is inside an array, unless another record has the path outside one."
+checked_by = "suite: array-partial-wildcard, array-leading-wildcard"
+archive_dependence_rule = "partial-wildcard-over-array"
+
+[[divergence]]
+id = "DV-37"
+summary = "One array suffix per descriptor: matches lost and gained, order-dependent -> per-binding suffix"
+classifier = "archive-dependence"
+recognition = "Array matches flip with ingestion order."
+checked_by = "suite: poly-child-exists, poly-child-array"
+archive_dependence_rule = "order-dependent-array"
+
+[[divergence]]
+id = "DV-38"
+summary = "A wildcard match below a \"\" key is lost unless another record has the path without it -> node sets"
+classifier = "archive-dependence"
+recognition = "A wildcard query misses a record with a \"\" key on the path."
+checked_by = "suite: empty-key-wildcard-leading, empty-key-wildcard-partial, empty-key-wildcard-exists, empty-key-wildcard-tail"
+archive_dependence_rule = "wildcard-empty-key"
+
+[[divergence]]
+id = "DV-39"
+summary = "One descriptor binding two columns of a schema searches only the smaller node id -> exists over the bound node set"
+classifier = "archive-dependence"
+recognition = "A match flips with ingestion order when one pattern binds two columns of a schema."
+checked_by = "suite: empty-key-order-wildcard, empty-key-order-partial-wildcard, empty-key-order-reversed-literal, empty-key-order-reversed-literal-below-empty-key"
+archive_dependence_rule = "order-dependent-empty-key"
+
+[[divergence]]
+id = "DV-41"
+summary = "Unsigned range-index values cast to i64 -> compared exactly"
+classifier = "dedicated-test"
+recognition = "Range-index pruning differs for values above i64::MAX."
+checked_by = "clp-s-format unit tests (msgpack keeps u64 values exact); the clp-s-search half is deferred: range-index evaluation still casts values above i64::MAX to i64, like C++"
+
+[[divergence]]
+id = "DV-42"
+summary = "tge x 10^6 overflows (undefined behaviour) -> saturates"
+classifier = "dedicated-test"
+recognition = "Extreme --tge/--tle values."
+checked_by = "clp-s-query unit tests (TimeBounds::from_epoch_millis)"
+
+[[divergence]]
+id = "DV-43"
+summary = "0.4.x archives read -> rejected (no legacy-v0-4 this round)"
+classifier = "expected-rejection"
+recognition = "A 0.4.x archive fails at open with UnsupportedArchive."
+checked_by = "clp-s-format unit tests"
+
+[[divergence]]
+id = "DV-45"
+summary = "Invalid UTF-8 reaches msgpack/BSON -> wire sinks replace it with U+FFFD; JSON lines pass bytes through"
+classifier = "output-shape"
+recognition = "A wire message differs from C++ only by U+FFFD replacements."
+checked_by = "clp-s-sinks, clp-s-results-cache unit tests"
+
+[[divergence]]
+id = "DV-47"
+summary = "Range-index leaves are replaced by log_event_idx ranges after NarrowTypes splits NOT $f: \"s\" into NOT f:VarString = s OR EXISTS f:ClpString, and match nothing outside every range (no range index without log order) -> K3 over each record's range fields"
+classifier = "declared-by-case"
+recognition = "NOT $_filename: \"<the file>\" returns every record of that file (the EXISTS half is True on any string field); NOT $_filename: * returns nothing in an archive without a range index (--disable-log-order), where Rust returns every record."
+checked_by = "suite: meta-not-filename, meta-not-filename-and-level, meta-not-exists-filename-nolog"
+
+[[divergence]]
+id = "SX-01"
+summary = "Multi-file archives are read -> rejected with UnsupportedArchive (SFA-only scope)"
+classifier = "expected-rejection"
+recognition = "An archive directory fails at open."
+checked_by = "fixture archives/reject/scalars.mfa"
+
+[[divergence]]
+id = "SX-02"
+summary = "Structured arrays are read -> rejected with UnsupportedArchive at open"
+classifier = "expected-rejection"
+recognition = "A schema tree with a StructuredArray node fails at open, before any output."
+checked_by = "fixture archives/reject/arrays.structurize-arrays.clps"
+
+[[divergence]]
+id = "SX-03"
+summary = "Versions outside [0.5.0, 0.5.x] are read -> rejected with UnsupportedArchive"
+classifier = "expected-rejection"
+recognition = "A header-patched archive fails at open."
+checked_by = "clp-s-format unit tests"

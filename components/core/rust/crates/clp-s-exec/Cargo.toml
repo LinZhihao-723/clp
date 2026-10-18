@@ -1,0 +1,21 @@
+[package]
+name = "clp-s-exec"
+version = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+
+[dependencies]
+clp-s-format = { workspace = true }
+clp-s-io = { workspace = true }
+clp-s-json = { workspace = true }
+clp-s-query = { workspace = true }
+clp-s-resources = { workspace = true }
+clp-s-search = { workspace = true }
+clp-s-table = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

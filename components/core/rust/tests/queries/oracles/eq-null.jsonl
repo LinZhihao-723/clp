@@ -1,0 +1,3 @@
+{"rid":"r28","ts":1700000028000,"level":"INFO","msg":"nul is an array of null","nul":[null]}
+{"rid":"r27","ts":1700000027000,"level":"INFO","msg":"nul is the null string","nul":"null"}
+{"rid":"r29","ts":1700000029000,"level":"INFO","msg":"nul is null","nul":null}

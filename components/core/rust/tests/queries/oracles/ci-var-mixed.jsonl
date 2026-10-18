@@ -1,0 +1,3 @@
+{"rid":"r13","ts":1700000013000,"level":"DEBUG","msg":"trace id abc123def seen","n":13,"f":13.0,"word":"hello"}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r14","ts":1700000014000,"level":"INFO","msg":"quote \" inside msg","n":14,"word":"HELLO"}

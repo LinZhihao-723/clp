@@ -1,0 +1,1 @@
+{"rid":"r01","ts":1700000001000,"level":"WARN","msg":"disk usage at 91.5 percent","n":1,"f":-2.25,"b":false,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v1/disk"},"tags":["disk"]}

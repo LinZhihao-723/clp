@@ -1,0 +1,10 @@
+{"id":14,"msg":"event 14 from worker 8","beta":"v14_1","gamma":"text value 14 2","delta":{"inner":14,"f":2.0}}
+{"id":15,"arr":[15, "s15", {"k": 15}],"msg":"event 15 from worker 3","alpha":150,"beta":"v15_1","gamma":"text value 15 2","delta":{"inner":15,"f":2.143}}
+{"id":19,"msg":"event 19 from worker 1","alpha":190,"beta":"v19_1","eps":194}
+{"id":18,"msg":"event 18 from worker 3","beta":"v18_1","eps":184}
+{"id":13,"msg":"event 13 from worker 6","alpha":130,"gamma":"text value 13 2","delta":{"inner":13,"f":1.857},"nested":{"lvl":{"k1":258}}}
+{"id":10,"arr":[10, "s10", {"k": 10}],"msg":"event 10 from worker 3","beta":"v10_1","delta":{"inner":10,"f":1.429}}
+{"id":16,"msg":"event 16 from worker 1","eps":164}
+{"id":12,"msg":"event 12 from worker 3","gamma":"text value 12 2","delta":{"inner":12,"f":1.714}}
+{"id":11,"flag":false,"msg":"event 11 from worker 3","alpha":110,"beta":"v11_1","delta":{"inner":11,"f":1.571}}
+{"id":17,"msg":"event 17 from worker 6","alpha":170,"eps":174}

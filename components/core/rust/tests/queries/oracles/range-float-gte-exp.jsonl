@@ -1,0 +1,2 @@
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r03","ts":1700000003000,"level":"DEBUG","msg":"cache hit ratio 0.93","n":100,"f":1e10,"b":false,"nums":[60000, 70000]}

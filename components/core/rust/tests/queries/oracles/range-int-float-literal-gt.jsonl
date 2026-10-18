@@ -1,0 +1,14 @@
+{"rid":"r06","ts":1700000006000,"level":"error","msg":"lowercase error level here","n":6,"f":6.5,"b":true}
+{"rid":"r08","ts":1700000008000,"level":"INFO","msg":"literal * star and ? question","n":8,"f":-0.5,"b":true}
+{"rid":"r09","ts":1700000009000,"level":"INFO","msg":"back\\slash path C:\\tmp\\x","n":9,"f":9.75,"b":false}
+{"rid":"r10","ts":1700000010000,"level":"WARN","msg":"unicode café 中文 message","n":10,"f":10.0,"b":true}
+{"rid":"r03","ts":1700000003000,"level":"DEBUG","msg":"cache hit ratio 0.93","n":100,"f":1e10,"b":false,"nums":[60000, 70000]}
+{"rid":"r04","ts":1700000004000,"level":"INFO","msg":"user 43 logged out","n":9223372036854775807,"f":3.0,"b":true,"objs":[{"k": "tier", "v": 1}, {"k": "zone", "v": "us"}]}
+{"rid":"r13","ts":1700000013000,"level":"DEBUG","msg":"trace id abc123def seen","n":13,"f":13.0,"word":"hello"}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r07","ts":1700000007000,"msg":"fatal error with space level","n":7,"f":7.25,"b":false,"level":"FATAL ERROR"}
+{"rid":"r38","ts":1700000038000,"level":"INFO","msg":"integral float","n":3.0,"f":3}
+{"rid":"r14","ts":1700000014000,"level":"INFO","msg":"quote \" inside msg","n":14,"word":"HELLO"}
+{"rid":"r39","ts":1700000039000,"level":"INFO","msg":"ERROR inside the message text","n":39}
+{"rid":"r05","level":"ERROR","msg":"no timestamp on this one","n":5,"f":5.0,"b":false}
+{"rid":"r17","level":"DEBUG","msg":"second record without ts","n":17,"b":true}

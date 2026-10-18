@@ -1,0 +1,260 @@
+# Fixture matrix of the Rust clp-s reader corpus (hand-written; `scripts/build-fixtures.sh` reads
+# it). Every entry is compressed by the C++ `clp-s c` from `inputs/<input>` with
+# `--single-file-archive` plus `flags`, unless `kind` says otherwise.
+#
+# * `kind = "sfa"` (default): readable single-file archive(s) at `archives/<name>.clps`, or
+#   `archives/<name>.<k>.clps` (k = creation order) when `--target-encoded-size` splits the input.
+# * `kind = "kvir"`: the input is an unstructured text log, converted to kv-IR by `log-converter`
+#   first; the resulting archive must be readable.
+# * `kind = "reject-mfa"`: a multi-file archive directory at `archives/reject/<name>/`.
+# * `kind = "reject-sfa"`: a single-file archive at `archives/reject/<name>.clps` that the Rust
+#   reader must reject with `UnsupportedArchive` at open time.
+
+[[fixture]]
+name = "scalars.default"
+input = "scalars.jsonl"
+flags = []
+
+[[fixture]]
+name = "scalars.nofloat"
+input = "scalars.jsonl"
+flags = ["--no-retain-float-format"]
+
+[[fixture]]
+name = "scalars.nolog"
+input = "scalars.jsonl"
+flags = ["--disable-log-order"]
+
+[[fixture]]
+name = "floats.default"
+input = "floats.jsonl"
+flags = []
+
+[[fixture]]
+name = "floats.nofloat"
+input = "floats.jsonl"
+flags = ["--no-retain-float-format"]
+
+[[fixture]]
+name = "strings.default"
+input = "strings.jsonl"
+flags = []
+
+[[fixture]]
+name = "strings.nolog"
+input = "strings.jsonl"
+flags = ["--disable-log-order"]
+
+[[fixture]]
+name = "keys.default"
+input = "keys.jsonl"
+flags = []
+
+[[fixture]]
+name = "nested.default"
+input = "nested.jsonl"
+flags = []
+
+[[fixture]]
+name = "nested.tables0"
+input = "nested.jsonl"
+flags = ["--min-table-size", "0"]
+
+[[fixture]]
+name = "arrays.default"
+input = "arrays.jsonl"
+flags = []
+
+[[fixture]]
+name = "arrays.nofloat"
+input = "arrays.jsonl"
+flags = ["--no-retain-float-format"]
+
+[[fixture]]
+name = "polymorphic.default"
+input = "polymorphic.jsonl"
+flags = []
+
+[[fixture]]
+name = "polymorphic.nofloat"
+input = "polymorphic.jsonl"
+flags = ["--no-retain-float-format"]
+
+[[fixture]]
+name = "polymorphic.tables0"
+input = "polymorphic.jsonl"
+flags = ["--min-table-size", "0"]
+
+[[fixture]]
+name = "timestamps-int.default"
+input = "timestamps-int.jsonl"
+flags = []
+
+[[fixture]]
+name = "timestamps-int.ts"
+input = "timestamps-int.jsonl"
+flags = ["--timestamp-key", "ts"]
+
+[[fixture]]
+name = "timestamps-int.ts-nolog"
+input = "timestamps-int.jsonl"
+flags = ["--timestamp-key", "ts", "--disable-log-order"]
+
+[[fixture]]
+name = "timestamps-float.default"
+input = "timestamps-float.jsonl"
+flags = []
+
+[[fixture]]
+name = "timestamps-float.ts"
+input = "timestamps-float.jsonl"
+flags = ["--timestamp-key", "ts"]
+
+[[fixture]]
+name = "timestamps-float.ts-nofloat"
+input = "timestamps-float.jsonl"
+flags = ["--timestamp-key", "ts", "--no-retain-float-format"]
+
+[[fixture]]
+name = "timestamps-string.default"
+input = "timestamps-string.jsonl"
+flags = []
+
+[[fixture]]
+name = "timestamps-string.ts"
+input = "timestamps-string.jsonl"
+flags = ["--timestamp-key", "ts"]
+
+[[fixture]]
+name = "timestamps-string.ts-nested"
+input = "timestamps-string.jsonl"
+flags = ["--timestamp-key", "meta.time"]
+
+[[fixture]]
+name = "long-strings.default"
+input = "long-strings.jsonl"
+flags = []
+
+[[fixture]]
+name = "long-strings.level19"
+input = "long-strings.jsonl"
+flags = ["--compression-level", "19"]
+
+[[fixture]]
+name = "many-schemas.default"
+input = "many-schemas.jsonl"
+flags = []
+
+[[fixture]]
+name = "many-schemas.tables0"
+input = "many-schemas.jsonl"
+flags = ["--min-table-size", "0"]
+
+[[fixture]]
+name = "many-schemas.tables256"
+input = "many-schemas.jsonl"
+flags = ["--min-table-size", "256"]
+
+[[fixture]]
+name = "many-schemas.nolog"
+input = "many-schemas.jsonl"
+flags = ["--disable-log-order"]
+
+[[fixture]]
+name = "many-schemas.split"
+input = "many-schemas.jsonl"
+flags = ["--target-encoded-size", "8192"]
+
+[[fixture]]
+name = "search.ts"
+input = "search.jsonl"
+flags = ["--timestamp-key", "ts"]
+
+[[fixture]]
+name = "search.default"
+input = "search.jsonl"
+flags = []
+
+[[fixture]]
+name = "search.ts-nolog"
+input = "search.jsonl"
+flags = ["--timestamp-key", "ts", "--disable-log-order"]
+
+[[fixture]]
+name = "search.ts-tables0"
+input = "search.jsonl"
+flags = ["--timestamp-key", "ts", "--min-table-size", "0"]
+
+[[fixture]]
+name = "search.ts-nofloat"
+input = "search.jsonl"
+flags = ["--timestamp-key", "ts", "--no-retain-float-format"]
+
+[[fixture]]
+name = "logs.ts"
+input = "logs.jsonl"
+flags = ["--timestamp-key", "ts"]
+
+[[fixture]]
+name = "logs.ts-tables4k"
+input = "logs.jsonl"
+flags = ["--timestamp-key", "ts", "--min-table-size", "4096"]
+
+[[fixture]]
+name = "logs.ts-split"
+input = "logs.jsonl"
+flags = ["--timestamp-key", "ts", "--target-encoded-size", "32768"]
+
+[[fixture]]
+name = "logs.level1"
+input = "logs.jsonl"
+flags = ["--compression-level", "1"]
+
+[[fixture]]
+name = "clp-negation.default"
+input = "clp-negation.jsonl"
+flags = []
+
+[[fixture]]
+name = "empty-key-wildcard.default"
+input = "empty-key-wildcard.jsonl"
+flags = []
+
+[[fixture]]
+name = "empty-key-order.default"
+input = "empty-key-order.jsonl"
+flags = []
+
+[[fixture]]
+name = "empty-key-order-reversed.default"
+input = "empty-key-order-reversed.jsonl"
+flags = []
+
+[[fixture]]
+name = "timestamps-escaped-key.ts-escaped"
+input = "timestamps-escaped-key.jsonl"
+flags = ["--timestamp-key", "t\\*s"]
+
+[[fixture]]
+name = "kvir-text.default"
+input = "kvir-text.log"
+kind = "kvir"
+flags = []
+
+[[fixture]]
+name = "kvir-text.ts"
+input = "kvir-text.log"
+kind = "kvir"
+flags = ["--timestamp-key", "timestamp"]
+
+[[fixture]]
+name = "scalars.mfa"
+input = "scalars.jsonl"
+kind = "reject-mfa"
+flags = []
+
+[[fixture]]
+name = "arrays.structurize-arrays"
+input = "arrays.jsonl"
+kind = "reject-sfa"
+flags = ["--structurize-arrays"]

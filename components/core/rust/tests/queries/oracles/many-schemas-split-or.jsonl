@@ -1,0 +1,94 @@
+{"id":95,"alpha":"text value 95 0","delta":"v95_3","eps":"text value 95 4","msg":"event 95 from worker 7","beta":{"inner":95,"f":13.571},"arr":[95, "s95", {"k": 95}],"gamma":952}
+{"id":125,"msg":"event 125 from worker 4","arr":[125, "s125", {"k": 125}],"alpha":{"inner":125,"f":17.857},"gamma":"v125_2","delta":"text value 125 3","eps":{"inner":125,"f":17.857}}
+{"id":140,"msg":"event 140 from worker 6","arr":[140, "s140", {"k": 140}],"gamma":"text value 140 2","delta":{"inner":140,"f":20.0}}
+{"id":110,"msg":"event 110 from worker 5","arr":[110, "s110", {"k": 110}],"beta":1101,"flag":true,"gamma":"v110_2","delta":"text value 110 3"}
+{"id":150,"msg":"event 150 from worker 6","arr":[150, "s150", {"k": 150}],"beta":"v150_1","gamma":"text value 150 2","eps":1504}
+{"id":135,"msg":"event 135 from worker 8","arr":[135, "s135", {"k": 135}],"alpha":1350,"beta":"v135_1","gamma":"text value 135 2"}
+{"id":127,"msg":"event 127 from worker 8","alpha":{"inner":127,"f":18.143},"beta":1271,"gamma":"v127_2","delta":"text value 127 3","eps":{"inner":127,"f":18.143}}
+{"id":93,"alpha":"text value 93 0","delta":"v93_3","eps":"text value 93 4","msg":"event 93 from worker 8","gamma":932}
+{"id":143,"msg":"event 143 from worker 5","nested":{"lvl":{"k3":456}},"flag":false,"alpha":1430,"beta":"v143_1","gamma":"text value 143 2","delta":{"inner":143,"f":20.429}}
+{"id":159,"msg":"event 159 from worker 5","alpha":1590,"beta":"v159_1","gamma":"text value 159 2","delta":{"inner":159,"f":22.714},"eps":1594}
+{"id":111,"msg":"event 111 from worker 1","alpha":{"inner":111,"f":15.857},"beta":1111,"gamma":"v111_2","delta":"text value 111 3"}
+{"id":94,"delta":"v94_3","eps":"text value 94 4","msg":"event 94 from worker 6","beta":{"inner":94,"f":13.429},"gamma":942}
+{"id":156,"msg":"event 156 from worker 2","nested":{"lvl":{"k0":876}},"gamma":"text value 156 2","delta":{"inner":156,"f":22.286},"eps":1564}
+{"id":157,"msg":"event 157 from worker 3","alpha":1570,"gamma":"text value 157 2","delta":{"inner":157,"f":22.429},"eps":1574}
+{"id":158,"msg":"event 158 from worker 4","beta":"v158_1","gamma":"text value 158 2","delta":{"inner":158,"f":22.571},"eps":1584}
+{"id":126,"msg":"event 126 from worker 4","beta":1261,"gamma":"v126_2","delta":"text value 126 3","eps":{"inner":126,"f":18.0}}
+{"id":109,"msg":"event 109 from worker 8","alpha":{"inner":109,"f":15.571},"gamma":"v109_2","delta":"text value 109 3"}
+{"id":141,"msg":"event 141 from worker 8","alpha":1410,"gamma":"text value 141 2","delta":{"inner":141,"f":20.143}}
+{"id":142,"msg":"event 142 from worker 1","beta":"v142_1","gamma":"text value 142 2","delta":{"inner":142,"f":20.286}}
+{"id":124,"msg":"event 124 from worker 8","gamma":"v124_2","delta":"text value 124 3","eps":{"inner":124,"f":17.714}}
+{"id":151,"msg":"event 151 from worker 8","alpha":1510,"beta":"v151_1","gamma":"text value 151 2","eps":1514}
+{"id":119,"msg":"event 119 from worker 1","alpha":{"inner":119,"f":17.0},"beta":1191,"gamma":"v119_2","eps":{"inner":119,"f":17.0}}
+{"id":117,"msg":"event 117 from worker 8","alpha":{"inner":117,"f":16.714},"gamma":"v117_2","eps":{"inner":117,"f":16.714},"nested":{"lvl":{"k1":758}}}
+{"id":92,"delta":"v92_3","eps":"text value 92 4","msg":"event 92 from worker 6","gamma":922}
+{"id":149,"msg":"event 149 from worker 6","alpha":1490,"gamma":"text value 149 2","eps":1494}
+{"id":100,"msg":"event 100 from worker 7","arr":[100, "s100", {"k": 100}],"gamma":"v100_2"}
+{"id":148,"msg":"event 148 from worker 5","gamma":"text value 148 2","eps":1484}
+{"id":108,"msg":"event 108 from worker 4","gamma":"v108_2","delta":"text value 108 3"}
+{"id":133,"msg":"event 133 from worker 7","alpha":1330,"gamma":"text value 133 2"}
+{"id":134,"msg":"event 134 from worker 6","beta":"v134_1","gamma":"text value 134 2"}
+{"id":154,"msg":"event 154 from worker 8","flag":true,"beta":"v154_1","delta":{"inner":154,"f":22.0},"eps":1544}
+{"id":103,"msg":"event 103 from worker 1","alpha":{"inner":103,"f":14.714},"beta":1031,"gamma":"v103_2"}
+{"id":118,"msg":"event 118 from worker 7","beta":1181,"gamma":"v118_2","eps":{"inner":118,"f":16.857}}
+{"id":132,"msg":"event 132 from worker 8","flag":true,"gamma":"text value 132 2"}
+{"id":101,"msg":"event 101 from worker 5","alpha":{"inner":101,"f":14.429},"gamma":"v101_2"}
+{"id":116,"msg":"event 116 from worker 5","gamma":"v116_2","eps":{"inner":116,"f":16.571}}
+{"id":102,"msg":"event 102 from worker 2","beta":1021,"gamma":"v102_2"}
+{"id":215,"msg":"event 215 from worker 4","arr":[215, "s215", {"k": 215}],"alpha":"text value 215 0","beta":{"inner":215,"f":30.714},"gamma":2152,"eps":"text value 215 4"}
+{"id":223,"msg":"event 223 from worker 6","alpha":"text value 223 0","beta":{"inner":223,"f":31.857},"gamma":2232,"delta":"v223_3","eps":"text value 223 4"}
+{"id":220,"flag":true,"msg":"event 220 from worker 2","arr":[220, "s220", {"k": 220}],"gamma":2202,"delta":"v220_3","eps":"text value 220 4"}
+{"id":221,"msg":"event 221 from worker 4","alpha":"text value 221 0","gamma":2212,"delta":"v221_3","eps":"text value 221 4","nested":{"lvl":{"k1":174}}}
+{"id":205,"msg":"event 205 from worker 1","arr":[205, "s205", {"k": 205}],"alpha":"text value 205 0","gamma":2052,"delta":"v205_3"}
+{"id":213,"msg":"event 213 from worker 4","alpha":"text value 213 0","gamma":2132,"eps":"text value 213 4"}
+{"id":207,"msg":"event 207 from worker 1","alpha":"text value 207 0","beta":{"inner":207,"f":29.571},"gamma":2072,"delta":"v207_3"}
+{"id":222,"msg":"event 222 from worker 7","beta":{"inner":222,"f":31.714},"gamma":2222,"delta":"v222_3","eps":"text value 222 4"}
+{"id":239,"msg":"event 239 from worker 6","alpha":{"inner":239,"f":34.143},"beta":2391,"gamma":"v239_2","delta":"text value 239 3"}
+{"id":214,"msg":"event 214 from worker 1","beta":{"inner":214,"f":30.571},"gamma":2142,"eps":"text value 214 4"}
+{"id":237,"msg":"event 237 from worker 1","alpha":{"inner":237,"f":33.857},"gamma":"v237_2","delta":"text value 237 3"}
+{"id":199,"msg":"event 199 from worker 7","alpha":"text value 199 0","beta":{"inner":199,"f":28.429},"gamma":1992}
+{"id":230,"msg":"event 230 from worker 2","arr":[230, "s230", {"k": 230}],"beta":2301,"gamma":"v230_2"}
+{"id":238,"msg":"event 238 from worker 8","beta":2381,"gamma":"v238_2","delta":"text value 238 3"}
+{"id":212,"msg":"event 212 from worker 6","gamma":2122,"eps":"text value 212 4"}
+{"id":236,"msg":"event 236 from worker 1","gamma":"v236_2","delta":"text value 236 3"}
+{"id":197,"msg":"event 197 from worker 8","alpha":"text value 197 0","gamma":1972}
+{"id":231,"flag":false,"msg":"event 231 from worker 5","alpha":{"inner":231,"f":33.0},"beta":2311,"gamma":"v231_2"}
+{"id":206,"msg":"event 206 from worker 8","beta":{"inner":206,"f":29.429},"gamma":2062,"delta":"v206_3"}
+{"id":198,"flag":true,"msg":"event 198 from worker 5","beta":{"inner":198,"f":28.286},"gamma":1982}
+{"id":229,"msg":"event 229 from worker 8","alpha":{"inner":229,"f":32.714},"gamma":"v229_2"}
+{"id":204,"msg":"event 204 from worker 8","gamma":2042,"delta":"v204_3"}
+{"id":176,"eps":"v176_4","flag":true,"msg":"event 176 from worker 3"}
+{"id":228,"msg":"event 228 from worker 6","gamma":"v228_2"}
+{"id":196,"msg":"event 196 from worker 2","gamma":1962}
+{"id":85,"arr":[85, "s85", {"k": 85}],"msg":"event 85 from worker 4","alpha":"text value 85 0","gamma":852,"eps":"text value 85 4"}
+{"id":30,"arr":[30, "s30", {"k": 30}],"msg":"event 30 from worker 6","beta":"v30_1","gamma":"text value 30 2","delta":{"inner":30,"f":4.286},"eps":304}
+{"id":15,"arr":[15, "s15", {"k": 15}],"msg":"event 15 from worker 3","alpha":150,"beta":"v15_1","gamma":"text value 15 2","delta":{"inner":15,"f":2.143}}
+{"id":87,"msg":"event 87 from worker 1","alpha":"text value 87 0","beta":{"inner":87,"f":12.429},"gamma":872,"eps":"text value 87 4"}
+{"id":20,"arr":[20, "s20", {"k": 20}],"msg":"event 20 from worker 2","gamma":"text value 20 2","eps":204}
+{"id":5,"arr":[5, "s5", {"k": 5}],"msg":"event 5 from worker 6","alpha":50,"gamma":"text value 5 2"}
+{"id":31,"msg":"event 31 from worker 6","alpha":310,"beta":"v31_1","gamma":"text value 31 2","delta":{"inner":31,"f":4.429},"eps":314}
+{"id":29,"msg":"event 29 from worker 5","alpha":290,"gamma":"text value 29 2","delta":{"inner":29,"f":4.143},"eps":294}
+{"id":79,"msg":"event 79 from worker 2","alpha":"text value 79 0","beta":{"inner":79,"f":11.286},"gamma":792,"delta":"v79_3"}
+{"id":70,"arr":[70, "s70", {"k": 70}],"msg":"event 70 from worker 3","beta":{"inner":70,"f":10.0},"gamma":702}
+{"id":13,"msg":"event 13 from worker 6","alpha":130,"gamma":"text value 13 2","delta":{"inner":13,"f":1.857},"nested":{"lvl":{"k1":258}}}
+{"id":71,"msg":"event 71 from worker 1","alpha":"text value 71 0","beta":{"inner":71,"f":10.143},"gamma":712}
+{"id":28,"msg":"event 28 from worker 4","gamma":"text value 28 2","delta":{"inner":28,"f":4.0},"eps":284}
+{"id":14,"msg":"event 14 from worker 8","beta":"v14_1","gamma":"text value 14 2","delta":{"inner":14,"f":2.0}}
+{"id":86,"msg":"event 86 from worker 2","beta":{"inner":86,"f":12.286},"gamma":862,"eps":"text value 86 4"}
+{"id":23,"msg":"event 23 from worker 7","alpha":230,"beta":"v23_1","gamma":"text value 23 2","eps":234}
+{"id":12,"msg":"event 12 from worker 3","gamma":"text value 12 2","delta":{"inner":12,"f":1.714}}
+{"id":22,"flag":true,"msg":"event 22 from worker 6","beta":"v22_1","gamma":"text value 22 2","eps":224}
+{"id":0,"arr":[0, "s0", {"k": 0}],"flag":true,"nested":{"lvl":{"k0":287}},"msg":"event 0 from worker 1"}
+{"id":77,"flag":false,"msg":"event 77 from worker 7","alpha":"text value 77 0","gamma":772,"delta":"v77_3"}
+{"id":21,"msg":"event 21 from worker 6","alpha":210,"gamma":"text value 21 2","eps":214}
+{"id":7,"msg":"event 7 from worker 8","alpha":70,"beta":"v7_1","gamma":"text value 7 2"}
+{"id":78,"msg":"event 78 from worker 2","nested":{"lvl":{"k2":522}},"beta":{"inner":78,"f":11.143},"gamma":782,"delta":"v78_3"}
+{"id":88,"flag":true,"msg":"event 88 from worker 2","delta":"v88_3","eps":"text value 88 4"}
+{"id":69,"msg":"event 69 from worker 8","alpha":"text value 69 0","gamma":692}
+{"id":84,"msg":"event 84 from worker 2","gamma":842,"eps":"text value 84 4"}
+{"id":6,"msg":"event 6 from worker 3","beta":"v6_1","gamma":"text value 6 2"}
+{"id":4,"msg":"event 4 from worker 8","gamma":"text value 4 2"}
+{"id":44,"flag":true,"msg":"event 44 from worker 5","gamma":{"inner":44,"f":6.286},"delta":443}
+{"id":66,"flag":true,"msg":"event 66 from worker 3","beta":{"inner":66,"f":9.429}}
+{"id":76,"msg":"event 76 from worker 8","gamma":762,"delta":"v76_3"}
+{"id":68,"msg":"event 68 from worker 4","gamma":682}

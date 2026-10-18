@@ -1,0 +1,3 @@
+{"ts":1735690277484,"seq":884,"level":"DEBUG","service":"ingest","latency_ms":883,"msg":"job job-06443689 finished","score":-96.58}
+{"ts":1735691809560,"seq":2941,"level":"INFO","service":"ingest","latency_ms":3494,"msg":"request 26767 failed with status 404","score":-97.07}
+{"ts":1735690527213,"seq":1224,"level":"INFO","service":"auth","latency_ms":7262,"msg":"job job-84ef179b finished","tags":[],"score":-99.66}

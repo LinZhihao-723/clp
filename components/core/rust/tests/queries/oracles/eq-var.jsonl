@@ -1,0 +1,27 @@
+{"rid":"r08","ts":1700000008000,"level":"INFO","msg":"literal * star and ? question","n":8,"f":-0.5,"b":true}
+{"rid":"r09","ts":1700000009000,"level":"INFO","msg":"back\\slash path C:\\tmp\\x","n":9,"f":9.75,"b":false}
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r00","ts":1700000000000,"level":"INFO","msg":"user 42 logged in from 10.0.0.1","n":0,"f":1.5,"b":true,"req":{"user":{"id":42,"name":"alice"},"path":"/api/v1/login"},"tags":["auth", "web"]}
+{"rid":"r20","ts":1700000020000,"level":"INFO","msg":"polymorphic p var string","p":"twenty"}
+{"rid":"r26","ts":1700000026000,"level":"INFO","msg":"p is digit string","p":"18"}
+{"rid":"r04","ts":1700000004000,"level":"INFO","msg":"user 43 logged out","n":9223372036854775807,"f":3.0,"b":true,"objs":[{"k": "tier", "v": 1}, {"k": "zone", "v": "us"}]}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r25","ts":1700000025000,"level":"INFO","msg":"polymorphic p array","p":[25, "x"]}
+{"rid":"r38","ts":1700000038000,"level":"INFO","msg":"integral float","n":3.0,"f":3}
+{"rid":"r31","ts":1700000031000,"level":"INFO","msg":"deep nesting","deep":{"a":{"b":{"c":{"d":31}}},"x":{"d":310}}}
+{"rid":"r30","ts":1700000030000,"level":"INFO","msg":"special keys","dotted.key":30,"sp ace":"v30"}
+{"rid":"r28","ts":1700000028000,"level":"INFO","msg":"nul is an array of null","nul":[null]}
+{"rid":"r21","ts":1700000021000,"level":"INFO","msg":"polymorphic p clp string","p":"twenty one"}
+{"rid":"r16","ts":1700000016000,"level":"INFO","msg":"empty containers follow","obj":{},"arr":[]}
+{"rid":"r14","ts":1700000014000,"level":"INFO","msg":"quote \" inside msg","n":14,"word":"HELLO"}
+{"rid":"r19","ts":1700000019000,"level":"INFO","msg":"polymorphic p float","p":19.5}
+{"rid":"r36","ts":1700000036000,"level":"INFO","msg":"bool as string","b":"true"}
+{"rid":"r37","ts":1700000037000,"level":"INFO","msg":"int as string","n":"5"}
+{"rid":"r32","ts":1700000032000,"level":"INFO","msg":"deep nesting two","deep":{"y":{"d":32}}}
+{"rid":"r39","ts":1700000039000,"level":"INFO","msg":"ERROR inside the message text","n":39}
+{"rid":"r27","ts":1700000027000,"level":"INFO","msg":"nul is the null string","nul":"null"}
+{"rid":"r24","ts":1700000024000,"level":"INFO","msg":"polymorphic p object","p":{"q":24}}
+{"rid":"r18","ts":1700000018000,"level":"INFO","msg":"polymorphic p int","p":18}
+{"rid":"r22","ts":1700000022000,"level":"INFO","msg":"polymorphic p bool","p":true}
+{"rid":"r29","ts":1700000029000,"level":"INFO","msg":"nul is null","nul":null}
+{"rid":"r23","ts":1700000023000,"level":"INFO","msg":"polymorphic p null","p":null}

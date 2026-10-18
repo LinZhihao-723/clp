@@ -1,0 +1,1 @@
+{"rid":"r02","ts":1700000002000,"level":"ERROR","msg":"request 7 failed with status 500","n":-5,"f":0.0,"b":true,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v2/req"},"nums":[1, 5, 100]}

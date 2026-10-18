@@ -1,0 +1,8 @@
+{"rid":"r20","ts":1700000020000,"level":"INFO","msg":"polymorphic p var string","p":"twenty"}
+{"rid":"r26","ts":1700000026000,"level":"INFO","msg":"p is digit string","p":"18"}
+{"rid":"r25","ts":1700000025000,"level":"INFO","msg":"polymorphic p array","p":[25, "x"]}
+{"rid":"r21","ts":1700000021000,"level":"INFO","msg":"polymorphic p clp string","p":"twenty one"}
+{"rid":"r19","ts":1700000019000,"level":"INFO","msg":"polymorphic p float","p":19.5}
+{"rid":"r18","ts":1700000018000,"level":"INFO","msg":"polymorphic p int","p":18}
+{"rid":"r22","ts":1700000022000,"level":"INFO","msg":"polymorphic p bool","p":true}
+{"rid":"r23","ts":1700000023000,"level":"INFO","msg":"polymorphic p null","p":null}

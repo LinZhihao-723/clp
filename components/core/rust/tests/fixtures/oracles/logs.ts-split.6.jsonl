@@ -1,0 +1,335 @@
+{"ts":1735691126814,"seq":2015,"level":"DEBUG","service":"billing","latency_ms":1349,"msg":"user 49 logged in from 10.0.61.54"}
+{"ts":1735691127978,"seq":2017,"level":"WARN","service":"billing","latency_ms":7354,"msg":"query on table t13 returned 7987 rows in 2749ms"}
+{"ts":1735691128149,"seq":2018,"level":"WARN","service":"billing","latency_ms":5760,"msg":"cache hit ratio 0.785"}
+{"ts":1735691129106,"seq":2019,"level":"INFO","service":"billing","latency_ms":1155,"msg":"job job-72e19b74 finished"}
+{"ts":1735691129389,"seq":2020,"level":"DEBUG","service":"auth","latency_ms":3526,"msg":"user 500 logged in from 10.0.190.29"}
+{"ts":1735691130819,"seq":2021,"level":"DEBUG","service":"query","latency_ms":1871,"msg":"request 2620 failed with status 500"}
+{"ts":1735691131488,"seq":2022,"level":"DEBUG","service":"query","latency_ms":5849,"msg":"query on table t3 returned 3602 rows in 7087ms"}
+{"ts":1735691132561,"seq":2024,"level":"WARN","service":"search","latency_ms":6590,"msg":"job job-c2ca5315 finished"}
+{"ts":1735691132709,"seq":2026,"level":"DEBUG","service":"search","latency_ms":7148,"msg":"request 16364 failed with status 400"}
+{"ts":1735691133403,"seq":2027,"level":"WARN","service":"search","latency_ms":7733,"msg":"query on table t5 returned 6350 rows in 7678ms"}
+{"ts":1735691133447,"seq":2028,"level":"INFO","service":"query","latency_ms":7611,"msg":"cache hit ratio 0.657"}
+{"ts":1735691134007,"seq":2029,"level":"WARN","service":"billing","latency_ms":8406,"msg":"job job-865665ec finished"}
+{"ts":1735691134991,"seq":2031,"level":"WARN","service":"ingest","latency_ms":3113,"msg":"request 64606 failed with status 404"}
+{"ts":1735691136091,"seq":2032,"level":"INFO","service":"billing","latency_ms":4465,"msg":"query on table t1 returned 5887 rows in 3340ms"}
+{"ts":1735691136093,"seq":2033,"level":"INFO","service":"query","latency_ms":1754,"msg":"cache hit ratio 0.694"}
+{"ts":1735691138312,"seq":2035,"level":"INFO","service":"auth","latency_ms":222,"msg":"user 382 logged in from 10.0.135.194"}
+{"ts":1735691139529,"seq":2036,"level":"WARN","service":"auth","latency_ms":3239,"msg":"request 81212 failed with status 403"}
+{"ts":1735691140942,"seq":2038,"level":"DEBUG","service":"billing","latency_ms":7518,"msg":"cache hit ratio 0.592"}
+{"ts":1735691141334,"seq":2039,"level":"INFO","service":"search","latency_ms":5317,"msg":"job job-568c0912 finished"}
+{"ts":1735691142479,"seq":2041,"level":"ERROR","service":"search","latency_ms":6201,"msg":"request 43723 failed with status 500"}
+{"ts":1735691142805,"seq":2042,"level":"WARN","service":"billing","latency_ms":4546,"msg":"query on table t1 returned 7461 rows in 2136ms"}
+{"ts":1735691144876,"seq":2045,"level":"INFO","service":"ingest","latency_ms":9247,"msg":"user 277 logged in from 10.0.63.34"}
+{"ts":1735691144901,"seq":2046,"level":"INFO","service":"search","latency_ms":1883,"msg":"request 36573 failed with status 403"}
+{"ts":1735691145063,"seq":2047,"level":"ERROR","service":"ingest","latency_ms":2511,"msg":"query on table t4 returned 7965 rows in 763ms"}
+{"ts":1735691145954,"seq":2048,"level":"INFO","service":"billing","latency_ms":4637,"msg":"cache hit ratio 0.228"}
+{"ts":1735691146805,"seq":2049,"level":"WARN","service":"search","latency_ms":5873,"msg":"job job-9a9ec86b finished"}
+{"ts":1735691147556,"seq":2050,"level":"DEBUG","service":"billing","latency_ms":3348,"msg":"user 298 logged in from 10.0.123.108"}
+{"ts":1735691149376,"seq":2053,"level":"INFO","service":"auth","latency_ms":6785,"msg":"cache hit ratio 0.823"}
+{"ts":1735691150404,"seq":2054,"level":"INFO","service":"billing","latency_ms":8172,"msg":"job job-a2722221 finished"}
+{"ts":1735691151320,"seq":2055,"level":"INFO","service":"auth","latency_ms":609,"msg":"user 396 logged in from 10.0.23.134"}
+{"ts":1735691152129,"seq":2056,"level":"INFO","service":"auth","latency_ms":3720,"msg":"request 91337 failed with status 403"}
+{"ts":1735691154316,"seq":2059,"level":"INFO","service":"search","latency_ms":5009,"msg":"job job-0689524f finished"}
+{"ts":1735691155643,"seq":2060,"level":"DEBUG","service":"search","latency_ms":3993,"msg":"user 436 logged in from 10.0.1.240"}
+{"ts":1735691157508,"seq":2062,"level":"INFO","service":"auth","latency_ms":6562,"msg":"query on table t3 returned 3821 rows in 7187ms"}
+{"ts":1735691157766,"seq":2063,"level":"INFO","service":"billing","latency_ms":9329,"msg":"cache hit ratio 0.446"}
+{"ts":1735691158862,"seq":2064,"level":"INFO","service":"search","latency_ms":5854,"msg":"job job-ac79f77d finished"}
+{"ts":1735691160059,"seq":2066,"level":"ERROR","service":"auth","latency_ms":4770,"msg":"request 72548 failed with status 500"}
+{"ts":1735691160813,"seq":2067,"level":"INFO","service":"ingest","latency_ms":1396,"msg":"query on table t8 returned 9179 rows in 2384ms"}
+{"ts":1735691162054,"seq":2068,"level":"INFO","service":"search","latency_ms":572,"msg":"cache hit ratio 0.442"}
+{"ts":1735691163354,"seq":2069,"level":"INFO","service":"search","latency_ms":8102,"msg":"job job-afe56c5d finished"}
+{"ts":1735691164100,"seq":2071,"level":"WARN","service":"auth","latency_ms":1184,"msg":"request 74019 failed with status 404"}
+{"ts":1735691165493,"seq":2073,"level":"ERROR","service":"ingest","latency_ms":346,"msg":"cache hit ratio 0.430"}
+{"ts":1735691167731,"seq":2075,"level":"INFO","service":"auth","latency_ms":4970,"msg":"user 120 logged in from 10.0.17.186"}
+{"ts":1735691167747,"seq":2076,"level":"INFO","service":"query","latency_ms":8264,"msg":"request 70465 failed with status 404"}
+{"ts":1735691168061,"seq":2077,"level":"INFO","service":"ingest","latency_ms":6429,"msg":"query on table t14 returned 8360 rows in 1489ms"}
+{"ts":1735691168721,"seq":2078,"level":"INFO","service":"billing","latency_ms":5296,"msg":"cache hit ratio 0.959"}
+{"ts":1735691170303,"seq":2080,"level":"DEBUG","service":"ingest","latency_ms":253,"msg":"user 251 logged in from 10.0.152.234"}
+{"ts":1735691171226,"seq":2081,"level":"INFO","service":"ingest","latency_ms":2890,"msg":"request 76513 failed with status 500"}
+{"ts":1735691171817,"seq":2082,"level":"INFO","service":"ingest","latency_ms":6848,"msg":"query on table t13 returned 1979 rows in 5159ms"}
+{"ts":1735691172317,"seq":2083,"level":"INFO","service":"ingest","latency_ms":2484,"msg":"cache hit ratio 0.983"}
+{"ts":1735691172661,"seq":2084,"level":"INFO","service":"ingest","latency_ms":1954,"msg":"job job-c66d2661 finished"}
+{"ts":1735691173575,"seq":2085,"level":"WARN","service":"ingest","latency_ms":4584,"msg":"user 324 logged in from 10.0.19.123"}
+{"ts":1735691175696,"seq":2087,"level":"DEBUG","service":"billing","latency_ms":985,"msg":"query on table t4 returned 6716 rows in 3661ms"}
+{"ts":1735691176665,"seq":2089,"level":"INFO","service":"search","latency_ms":3322,"msg":"job job-fc956a27 finished"}
+{"ts":1735691177802,"seq":2090,"level":"ERROR","service":"query","latency_ms":2277,"msg":"user 305 logged in from 10.0.132.101"}
+{"ts":1735691179356,"seq":2092,"level":"INFO","service":"query","latency_ms":323,"msg":"query on table t8 returned 819 rows in 3574ms"}
+{"ts":1735691181134,"seq":2094,"level":"INFO","service":"billing","latency_ms":1747,"msg":"job job-adbbe254 finished"}
+{"ts":1735691181834,"seq":2095,"level":"DEBUG","service":"ingest","latency_ms":3438,"msg":"user 208 logged in from 10.0.22.228"}
+{"ts":1735691182318,"seq":2096,"level":"INFO","service":"billing","latency_ms":9938,"msg":"request 30888 failed with status 500"}
+{"ts":1735691183400,"seq":2098,"level":"INFO","service":"query","latency_ms":8936,"msg":"cache hit ratio 0.058"}
+{"ts":1735691184188,"seq":2099,"level":"ERROR","service":"billing","latency_ms":2001,"msg":"job job-caf0b317 finished"}
+{"ts":1735691186120,"seq":2101,"level":"INFO","service":"billing","latency_ms":4059,"msg":"request 10817 failed with status 400"}
+{"ts":1735691186713,"seq":2102,"level":"INFO","service":"auth","latency_ms":3561,"msg":"query on table t1 returned 1538 rows in 5753ms"}
+{"ts":1735691188210,"seq":2103,"level":"WARN","service":"auth","latency_ms":4931,"msg":"cache hit ratio 0.051"}
+{"ts":1735691189364,"seq":2104,"level":"INFO","service":"auth","latency_ms":5115,"msg":"job job-02cff215 finished"}
+{"ts":1735691190840,"seq":2105,"level":"INFO","service":"billing","latency_ms":9087,"msg":"user 1 logged in from 10.0.146.29"}
+{"ts":1735691193961,"seq":2109,"level":"WARN","service":"auth","latency_ms":9278,"msg":"job job-aa294e50 finished"}
+{"ts":1735691194157,"seq":2110,"level":"INFO","service":"search","latency_ms":7976,"msg":"user 199 logged in from 10.0.74.9"}
+{"ts":1735691194927,"seq":2111,"level":"INFO","service":"billing","latency_ms":1556,"msg":"request 78321 failed with status 500"}
+{"ts":1735691194937,"seq":2112,"level":"WARN","service":"auth","latency_ms":9232,"msg":"query on table t4 returned 780 rows in 2148ms"}
+{"ts":1735691195844,"seq":2113,"level":"INFO","service":"ingest","latency_ms":2809,"msg":"cache hit ratio 0.910"}
+{"ts":1735691199430,"seq":2116,"level":"INFO","service":"search","latency_ms":8705,"msg":"request 83740 failed with status 503"}
+{"ts":1735691199871,"seq":2117,"level":"ERROR","service":"query","latency_ms":5699,"msg":"query on table t6 returned 4069 rows in 2958ms"}
+{"ts":1735691201318,"seq":2118,"level":"WARN","service":"ingest","latency_ms":4972,"msg":"cache hit ratio 0.069"}
+{"ts":1735691202430,"seq":2119,"level":"DEBUG","service":"auth","latency_ms":6832,"msg":"job job-f2aa57c1 finished"}
+{"ts":1735691203565,"seq":2120,"level":"INFO","service":"ingest","latency_ms":8563,"msg":"user 49 logged in from 10.0.16.28"}
+{"ts":1735691205081,"seq":2122,"level":"INFO","service":"billing","latency_ms":8440,"msg":"query on table t20 returned 5034 rows in 946ms"}
+{"ts":1735691206259,"seq":2123,"level":"WARN","service":"auth","latency_ms":9961,"msg":"cache hit ratio 0.988"}
+{"ts":1735691207781,"seq":2126,"level":"DEBUG","service":"billing","latency_ms":3692,"msg":"request 88069 failed with status 400"}
+{"ts":1735691209155,"seq":2127,"level":"INFO","service":"search","latency_ms":1013,"msg":"query on table t11 returned 5988 rows in 5106ms"}
+{"ts":1735691210779,"seq":2129,"level":"INFO","service":"query","latency_ms":2838,"msg":"job job-3d5e64dc finished"}
+{"ts":1735691211992,"seq":2130,"level":"WARN","service":"query","latency_ms":4487,"msg":"user 105 logged in from 10.0.143.143"}
+{"ts":1735691212659,"seq":2131,"level":"ERROR","service":"ingest","latency_ms":2203,"msg":"request 95377 failed with status 400"}
+{"ts":1735691213949,"seq":2132,"level":"INFO","service":"billing","latency_ms":7221,"msg":"query on table t11 returned 8337 rows in 3518ms"}
+{"ts":1735691215557,"seq":2134,"level":"WARN","service":"query","latency_ms":8284,"msg":"job job-59b0d045 finished"}
+{"ts":1735691217536,"seq":2136,"level":"WARN","service":"search","latency_ms":1837,"msg":"request 40856 failed with status 403"}
+{"ts":1735691217843,"seq":2137,"level":"INFO","service":"query","latency_ms":544,"msg":"query on table t4 returned 8851 rows in 1832ms"}
+{"ts":1735691219093,"seq":2138,"level":"INFO","service":"query","latency_ms":9199,"msg":"cache hit ratio 0.088"}
+{"ts":1735691219717,"seq":2139,"level":"INFO","service":"ingest","latency_ms":2681,"msg":"job job-01879275 finished"}
+{"ts":1735691220318,"seq":2140,"level":"INFO","service":"billing","latency_ms":5944,"msg":"user 317 logged in from 10.0.52.230"}
+{"ts":1735691220686,"seq":2141,"level":"WARN","service":"search","latency_ms":7685,"msg":"request 92825 failed with status 500"}
+{"ts":1735691222245,"seq":2143,"level":"ERROR","service":"query","latency_ms":9902,"msg":"cache hit ratio 0.145"}
+{"ts":1735691223238,"seq":2144,"level":"INFO","service":"auth","latency_ms":179,"msg":"job job-86788f31 finished"}
+{"ts":1735691223737,"seq":2145,"level":"INFO","service":"ingest","latency_ms":2264,"msg":"user 366 logged in from 10.0.198.48"}
+{"ts":1735691225164,"seq":2146,"level":"WARN","service":"billing","latency_ms":9723,"msg":"request 89458 failed with status 404"}
+{"ts":1735691225561,"seq":2147,"level":"INFO","service":"billing","latency_ms":1936,"msg":"query on table t12 returned 6976 rows in 402ms"}
+{"ts":1735691226767,"seq":2148,"level":"DEBUG","service":"auth","latency_ms":1344,"msg":"cache hit ratio 0.254"}
+{"ts":1735691227759,"seq":2150,"level":"INFO","service":"ingest","latency_ms":8789,"msg":"user 225 logged in from 10.0.109.23"}
+{"ts":1735691229881,"seq":2152,"level":"ERROR","service":"auth","latency_ms":3382,"msg":"query on table t20 returned 7486 rows in 542ms"}
+{"ts":1735691230175,"seq":2153,"level":"INFO","service":"ingest","latency_ms":8028,"msg":"cache hit ratio 0.409"}
+{"ts":1735691231306,"seq":2154,"level":"INFO","service":"query","latency_ms":675,"msg":"job job-6fa230f6 finished"}
+{"ts":1735691231884,"seq":2155,"level":"WARN","service":"ingest","latency_ms":9783,"msg":"user 445 logged in from 10.0.76.42"}
+{"ts":1735691233353,"seq":2157,"level":"INFO","service":"search","latency_ms":2677,"msg":"query on table t10 returned 2293 rows in 8399ms"}
+{"ts":1735691234542,"seq":2158,"level":"DEBUG","service":"search","latency_ms":6342,"msg":"cache hit ratio 0.141"}
+{"ts":1735691236829,"seq":2161,"level":"WARN","service":"ingest","latency_ms":9968,"msg":"request 28025 failed with status 400"}
+{"ts":1735691237219,"seq":2162,"level":"INFO","service":"billing","latency_ms":9,"msg":"query on table t1 returned 7644 rows in 2878ms"}
+{"ts":1735691237620,"seq":2164,"level":"INFO","service":"query","latency_ms":4970,"msg":"job job-72f94c69 finished"}
+{"ts":1735691238074,"seq":2165,"level":"ERROR","service":"auth","latency_ms":2831,"msg":"user 141 logged in from 10.0.37.213"}
+{"ts":1735691238811,"seq":2166,"level":"INFO","service":"auth","latency_ms":2781,"msg":"request 17141 failed with status 404"}
+{"ts":1735691240064,"seq":2167,"level":"INFO","service":"billing","latency_ms":7306,"msg":"query on table t7 returned 3802 rows in 7549ms"}
+{"ts":1735691241096,"seq":2168,"level":"INFO","service":"billing","latency_ms":5072,"msg":"cache hit ratio 0.845"}
+{"ts":1735691244040,"seq":2171,"level":"WARN","service":"auth","latency_ms":5359,"msg":"request 84591 failed with status 500"}
+{"ts":1735691245297,"seq":2172,"level":"ERROR","service":"query","latency_ms":9174,"msg":"query on table t3 returned 3204 rows in 1507ms"}
+{"ts":1735691246255,"seq":2173,"level":"ERROR","service":"auth","latency_ms":849,"msg":"cache hit ratio 0.516"}
+{"ts":1735691247731,"seq":2174,"level":"INFO","service":"ingest","latency_ms":2062,"msg":"job job-31a42894 finished"}
+{"ts":1735691247978,"seq":2175,"level":"WARN","service":"search","latency_ms":9234,"msg":"user 273 logged in from 10.0.42.194"}
+{"ts":1735691252478,"seq":2179,"level":"INFO","service":"billing","latency_ms":5969,"msg":"job job-c23ef52a finished"}
+{"ts":1735691252857,"seq":2180,"level":"INFO","service":"auth","latency_ms":4176,"msg":"user 324 logged in from 10.0.20.213"}
+{"ts":1735691252976,"seq":2181,"level":"ERROR","service":"search","latency_ms":3131,"msg":"request 64238 failed with status 500"}
+{"ts":1735691253531,"seq":2182,"level":"INFO","service":"auth","latency_ms":8431,"msg":"query on table t11 returned 4099 rows in 5099ms"}
+{"ts":1735691254700,"seq":2183,"level":"INFO","service":"search","latency_ms":9224,"msg":"cache hit ratio 0.992"}
+{"ts":1735691257276,"seq":2185,"level":"DEBUG","service":"ingest","latency_ms":6728,"msg":"user 6 logged in from 10.0.166.2"}
+{"ts":1735691258473,"seq":2186,"level":"WARN","service":"auth","latency_ms":2863,"msg":"request 29705 failed with status 404"}
+{"ts":1735691258727,"seq":2188,"level":"ERROR","service":"search","latency_ms":8133,"msg":"cache hit ratio 0.456"}
+{"ts":1735691259932,"seq":2189,"level":"INFO","service":"billing","latency_ms":25,"msg":"job job-04a32a81 finished"}
+{"ts":1735691260017,"seq":2190,"level":"INFO","service":"ingest","latency_ms":3596,"msg":"user 409 logged in from 10.0.10.196"}
+{"ts":1735691261852,"seq":2192,"level":"WARN","service":"search","latency_ms":2698,"msg":"query on table t4 returned 7591 rows in 8031ms"}
+{"ts":1735691264149,"seq":2194,"level":"INFO","service":"auth","latency_ms":1104,"msg":"job job-073dcedf finished"}
+{"ts":1735691265259,"seq":2195,"level":"INFO","service":"search","latency_ms":9169,"msg":"user 313 logged in from 10.0.189.202"}
+{"ts":1735691266691,"seq":2197,"level":"INFO","service":"billing","latency_ms":3455,"msg":"query on table t1 returned 967 rows in 2964ms"}
+{"ts":1735691267776,"seq":2199,"level":"INFO","service":"billing","latency_ms":1785,"msg":"job job-3a59afa2 finished"}
+{"ts":1735691268938,"seq":2200,"level":"INFO","service":"query","latency_ms":4211,"msg":"user 261 logged in from 10.0.2.7"}
+{"ts":1735691269809,"seq":2201,"level":"INFO","service":"billing","latency_ms":749,"msg":"request 57821 failed with status 500"}
+{"ts":1735691270999,"seq":2202,"level":"INFO","service":"search","latency_ms":1208,"msg":"query on table t8 returned 4073 rows in 5730ms"}
+{"ts":1735691271163,"seq":2203,"level":"INFO","service":"ingest","latency_ms":9113,"msg":"cache hit ratio 0.046"}
+{"ts":1735691271186,"seq":2204,"level":"INFO","service":"auth","latency_ms":8438,"msg":"job job-7163496f finished"}
+{"ts":1735691272785,"seq":2206,"level":"INFO","service":"query","latency_ms":6552,"msg":"request 14390 failed with status 503"}
+{"ts":1735691273979,"seq":2207,"level":"INFO","service":"billing","latency_ms":4359,"msg":"query on table t18 returned 4379 rows in 8391ms"}
+{"ts":1735691274214,"seq":2208,"level":"INFO","service":"billing","latency_ms":5192,"msg":"cache hit ratio 0.595"}
+{"ts":1735691275421,"seq":2209,"level":"INFO","service":"billing","latency_ms":5721,"msg":"job job-a2cfe77a finished"}
+{"ts":1735691275848,"seq":2211,"level":"INFO","service":"ingest","latency_ms":4176,"msg":"request 98255 failed with status 503"}
+{"ts":1735691277762,"seq":2213,"level":"WARN","service":"billing","latency_ms":472,"msg":"cache hit ratio 0.368"}
+{"ts":1735691278933,"seq":2215,"level":"INFO","service":"ingest","latency_ms":6589,"msg":"user 216 logged in from 10.0.48.66"}
+{"ts":1735691280000,"seq":2216,"level":"INFO","service":"billing","latency_ms":3453,"msg":"request 73703 failed with status 400"}
+{"ts":1735691281098,"seq":2217,"level":"WARN","service":"ingest","latency_ms":9434,"msg":"query on table t5 returned 2841 rows in 7834ms"}
+{"ts":1735691281176,"seq":2218,"level":"DEBUG","service":"auth","latency_ms":1859,"msg":"cache hit ratio 0.404"}
+{"ts":1735691282854,"seq":2220,"level":"INFO","service":"query","latency_ms":5171,"msg":"user 228 logged in from 10.0.28.182"}
+{"ts":1735691283146,"seq":2221,"level":"INFO","service":"query","latency_ms":9672,"msg":"request 31757 failed with status 400"}
+{"ts":1735691283290,"seq":2222,"level":"INFO","service":"auth","latency_ms":6411,"msg":"query on table t12 returned 5131 rows in 7062ms"}
+{"ts":1735691283783,"seq":2224,"level":"WARN","service":"query","latency_ms":1270,"msg":"job job-2a612229 finished"}
+{"ts":1735691284689,"seq":2225,"level":"INFO","service":"search","latency_ms":578,"msg":"user 296 logged in from 10.0.66.161"}
+{"ts":1735691287707,"seq":2228,"level":"INFO","service":"auth","latency_ms":4827,"msg":"cache hit ratio 0.236"}
+{"ts":1735691287923,"seq":2229,"level":"ERROR","service":"search","latency_ms":9441,"msg":"job job-0d11ccef finished"}
+{"ts":1735691288698,"seq":2230,"level":"INFO","service":"search","latency_ms":5509,"msg":"user 130 logged in from 10.0.255.101"}
+{"ts":1735691289500,"seq":2231,"level":"ERROR","service":"billing","latency_ms":2504,"msg":"request 3261 failed with status 400"}
+{"ts":1735691292267,"seq":2234,"level":"INFO","service":"ingest","latency_ms":2245,"msg":"job job-a1dadec4 finished"}
+{"ts":1735691292955,"seq":2235,"level":"WARN","service":"billing","latency_ms":4098,"msg":"user 26 logged in from 10.0.223.120"}
+{"ts":1735691294095,"seq":2236,"level":"DEBUG","service":"billing","latency_ms":2017,"msg":"request 66835 failed with status 400"}
+{"ts":1735691294277,"seq":2237,"level":"WARN","service":"ingest","latency_ms":1139,"msg":"query on table t4 returned 7119 rows in 5814ms"}
+{"ts":1735691294656,"seq":2238,"level":"WARN","service":"auth","latency_ms":6904,"msg":"cache hit ratio 0.080"}
+{"ts":1735691296026,"seq":2239,"level":"INFO","service":"ingest","latency_ms":8035,"msg":"job job-414800ec finished"}
+{"ts":1735691297605,"seq":2242,"level":"WARN","service":"billing","latency_ms":5073,"msg":"query on table t9 returned 4885 rows in 6003ms"}
+{"ts":1735691298580,"seq":2243,"level":"INFO","service":"ingest","latency_ms":6877,"msg":"cache hit ratio 0.294"}
+{"ts":1735691299728,"seq":2245,"level":"INFO","service":"billing","latency_ms":9296,"msg":"user 188 logged in from 10.0.12.35"}
+{"ts":1735691300384,"seq":2246,"level":"DEBUG","service":"query","latency_ms":9979,"msg":"request 36103 failed with status 503"}
+{"ts":1735691300662,"seq":2248,"level":"DEBUG","service":"query","latency_ms":800,"msg":"cache hit ratio 0.715"}
+{"ts":1735691301826,"seq":2249,"level":"WARN","service":"ingest","latency_ms":6673,"msg":"job job-732f1b1e finished"}
+{"ts":1735691304294,"seq":2251,"level":"INFO","service":"ingest","latency_ms":1392,"msg":"request 64499 failed with status 400"}
+{"ts":1735691304410,"seq":2252,"level":"ERROR","service":"auth","latency_ms":6894,"msg":"query on table t19 returned 9857 rows in 323ms"}
+{"ts":1735691305659,"seq":2253,"level":"DEBUG","service":"ingest","latency_ms":1368,"msg":"cache hit ratio 0.979"}
+{"ts":1735691306540,"seq":2255,"level":"INFO","service":"ingest","latency_ms":7433,"msg":"user 103 logged in from 10.0.35.37"}
+{"ts":1735691307206,"seq":2256,"level":"WARN","service":"search","latency_ms":5182,"msg":"request 10613 failed with status 400"}
+{"ts":1735691308447,"seq":2257,"level":"WARN","service":"billing","latency_ms":4587,"msg":"query on table t15 returned 4116 rows in 6048ms"}
+{"ts":1735691309564,"seq":2258,"level":"ERROR","service":"search","latency_ms":4862,"msg":"cache hit ratio 0.381"}
+{"ts":1735691310163,"seq":2260,"level":"INFO","service":"billing","latency_ms":7154,"msg":"user 277 logged in from 10.0.209.166"}
+{"ts":1735691312464,"seq":2262,"level":"INFO","service":"ingest","latency_ms":485,"msg":"query on table t18 returned 6458 rows in 2466ms"}
+{"ts":1735691312727,"seq":2263,"level":"WARN","service":"billing","latency_ms":3451,"msg":"cache hit ratio 0.789"}
+{"ts":1735691314213,"seq":2264,"level":"ERROR","service":"search","latency_ms":6222,"msg":"job job-4673360e finished"}
+{"ts":1735691314606,"seq":2265,"level":"ERROR","service":"ingest","latency_ms":9187,"msg":"user 229 logged in from 10.0.8.182"}
+{"ts":1735691315090,"seq":2266,"level":"ERROR","service":"ingest","latency_ms":7267,"msg":"request 19057 failed with status 503"}
+{"ts":1735691315265,"seq":2267,"level":"INFO","service":"ingest","latency_ms":1143,"msg":"query on table t11 returned 9454 rows in 3974ms"}
+{"ts":1735691316798,"seq":2269,"level":"INFO","service":"query","latency_ms":907,"msg":"job job-2062849e finished"}
+{"ts":1735691318071,"seq":2270,"level":"ERROR","service":"ingest","latency_ms":3500,"msg":"user 73 logged in from 10.0.171.13"}
+{"ts":1735691318369,"seq":2271,"level":"INFO","service":"billing","latency_ms":6939,"msg":"request 68765 failed with status 503"}
+{"ts":1735691319265,"seq":2272,"level":"INFO","service":"auth","latency_ms":8398,"msg":"query on table t11 returned 2205 rows in 4046ms"}
+{"ts":1735691319511,"seq":2273,"level":"INFO","service":"billing","latency_ms":9436,"msg":"cache hit ratio 0.586"}
+{"ts":1735691319622,"seq":2274,"level":"INFO","service":"ingest","latency_ms":5089,"msg":"job job-90b7c8e7 finished"}
+{"ts":1735691321207,"seq":2276,"level":"INFO","service":"search","latency_ms":1034,"msg":"request 15403 failed with status 503"}
+{"ts":1735691322986,"seq":2279,"level":"INFO","service":"query","latency_ms":3087,"msg":"job job-3e849352 finished"}
+{"ts":1735691323108,"seq":2280,"level":"ERROR","service":"query","latency_ms":9949,"msg":"user 387 logged in from 10.0.28.170"}
+{"ts":1735691323933,"seq":2281,"level":"INFO","service":"ingest","latency_ms":2705,"msg":"request 84987 failed with status 403"}
+{"ts":1735691324831,"seq":2283,"level":"INFO","service":"ingest","latency_ms":8586,"msg":"cache hit ratio 0.692"}
+{"ts":1735691325237,"seq":2284,"level":"WARN","service":"auth","latency_ms":7432,"msg":"job job-484157d3 finished"}
+{"ts":1735691326356,"seq":2285,"level":"ERROR","service":"billing","latency_ms":654,"msg":"user 302 logged in from 10.0.84.135"}
+{"ts":1735691327098,"seq":2287,"level":"WARN","service":"query","latency_ms":9632,"msg":"query on table t17 returned 9035 rows in 5762ms"}
+{"ts":1735691327794,"seq":2288,"level":"INFO","service":"query","latency_ms":6157,"msg":"cache hit ratio 0.570"}
+{"ts":1735691330061,"seq":2290,"level":"INFO","service":"search","latency_ms":1609,"msg":"user 39 logged in from 10.0.189.122"}
+{"ts":1735691330288,"seq":2291,"level":"INFO","service":"search","latency_ms":6393,"msg":"request 3291 failed with status 400"}
+{"ts":1735691330320,"seq":2292,"level":"INFO","service":"billing","latency_ms":4849,"msg":"query on table t5 returned 6623 rows in 1699ms"}
+{"ts":1735691331315,"seq":2293,"level":"WARN","service":"query","latency_ms":6794,"msg":"cache hit ratio 0.710"}
+{"ts":1735691332160,"seq":2294,"level":"INFO","service":"billing","latency_ms":9650,"msg":"job job-11e3a377 finished"}
+{"ts":1735691334770,"seq":2297,"level":"INFO","service":"search","latency_ms":6385,"msg":"query on table t5 returned 8210 rows in 6174ms"}
+{"ts":1735691336258,"seq":2298,"level":"INFO","service":"auth","latency_ms":2905,"msg":"cache hit ratio 0.576"}
+{"ts":1735691336738,"seq":2299,"level":"INFO","service":"query","latency_ms":9138,"msg":"job job-ca49bf87 finished"}
+{"ts":1735691337993,"seq":2300,"level":"WARN","service":"auth","latency_ms":8524,"msg":"user 428 logged in from 10.0.19.59"}
+{"ts":1735691338632,"seq":2301,"level":"INFO","service":"auth","latency_ms":9002,"msg":"request 98119 failed with status 404"}
+{"ts":1735691339109,"seq":2302,"level":"INFO","service":"ingest","latency_ms":4797,"msg":"query on table t10 returned 1880 rows in 2125ms"}
+{"ts":1735691342177,"seq":2305,"level":"INFO","service":"query","latency_ms":7289,"msg":"user 364 logged in from 10.0.199.111"}
+{"ts":1735691342547,"seq":2306,"level":"INFO","service":"ingest","latency_ms":3630,"msg":"request 79488 failed with status 403"}
+{"ts":1735691342856,"seq":2307,"level":"WARN","service":"search","latency_ms":2265,"msg":"query on table t6 returned 1347 rows in 1356ms"}
+{"ts":1735691343601,"seq":2308,"level":"INFO","service":"ingest","latency_ms":260,"msg":"cache hit ratio 0.640"}
+{"ts":1735691343818,"seq":2309,"level":"INFO","service":"billing","latency_ms":5363,"msg":"job job-3be70f0f finished"}
+{"ts":1735691345982,"seq":2311,"level":"INFO","service":"ingest","latency_ms":2994,"msg":"request 53771 failed with status 403"}
+{"ts":1735691347198,"seq":2314,"level":"WARN","service":"search","latency_ms":3961,"msg":"job job-f6f85f90 finished"}
+{"ts":1735691347248,"seq":2315,"level":"INFO","service":"ingest","latency_ms":8993,"msg":"user 44 logged in from 10.0.32.61"}
+{"ts":1735691348365,"seq":2316,"level":"INFO","service":"query","latency_ms":8086,"msg":"request 92730 failed with status 500"}
+{"ts":1735691349643,"seq":2318,"level":"WARN","service":"query","latency_ms":2640,"msg":"cache hit ratio 0.197"}
+{"ts":1735691349880,"seq":2319,"level":"INFO","service":"billing","latency_ms":1440,"msg":"job job-1dba0b73 finished"}
+{"ts":1735691350747,"seq":2320,"level":"WARN","service":"ingest","latency_ms":202,"msg":"user 396 logged in from 10.0.45.230"}
+{"ts":1735691351124,"seq":2321,"level":"INFO","service":"billing","latency_ms":7188,"msg":"request 50695 failed with status 500"}
+{"ts":1735691351223,"seq":2323,"level":"WARN","service":"query","latency_ms":7236,"msg":"cache hit ratio 0.096"}
+{"ts":1735691352578,"seq":2325,"level":"WARN","service":"billing","latency_ms":5847,"msg":"user 289 logged in from 10.0.105.2"}
+{"ts":1735691353909,"seq":2326,"level":"WARN","service":"query","latency_ms":3544,"msg":"request 73628 failed with status 400"}
+{"ts":1735691354193,"seq":2327,"level":"INFO","service":"auth","latency_ms":3868,"msg":"query on table t14 returned 4583 rows in 551ms"}
+{"ts":1735691355147,"seq":2328,"level":"WARN","service":"auth","latency_ms":7040,"msg":"cache hit ratio 0.145"}
+{"ts":1735691356375,"seq":2330,"level":"WARN","service":"search","latency_ms":427,"msg":"user 488 logged in from 10.0.183.14"}
+{"ts":1735691357422,"seq":2332,"level":"WARN","service":"billing","latency_ms":5205,"msg":"query on table t5 returned 9298 rows in 3459ms"}
+{"ts":1735691357904,"seq":2333,"level":"INFO","service":"billing","latency_ms":5937,"msg":"cache hit ratio 0.529"}
+{"ts":1735691358042,"seq":2334,"level":"INFO","service":"auth","latency_ms":7552,"msg":"job job-4b090dd1 finished"}
+{"ts":1735691358863,"seq":2335,"level":"DEBUG","service":"search","latency_ms":4919,"msg":"user 230 logged in from 10.0.51.190"}
+{"ts":1735691359530,"seq":2336,"level":"ERROR","service":"ingest","latency_ms":2984,"msg":"request 35734 failed with status 403"}
+{"ts":1735691360682,"seq":2337,"level":"INFO","service":"search","latency_ms":8766,"msg":"query on table t3 returned 5159 rows in 454ms"}
+{"ts":1735691363392,"seq":2339,"level":"INFO","service":"billing","latency_ms":5711,"msg":"job job-6a498490 finished"}
+{"ts":1735691364282,"seq":2341,"level":"INFO","service":"auth","latency_ms":2631,"msg":"request 34309 failed with status 403"}
+{"ts":1735691364771,"seq":2342,"level":"INFO","service":"ingest","latency_ms":3490,"msg":"query on table t16 returned 89 rows in 3108ms"}
+{"ts":1735691366174,"seq":2343,"level":"INFO","service":"search","latency_ms":6541,"msg":"cache hit ratio 0.589"}
+{"ts":1735691366702,"seq":2344,"level":"INFO","service":"ingest","latency_ms":4075,"msg":"job job-44986c45 finished"}
+{"ts":1735691368754,"seq":2347,"level":"WARN","service":"billing","latency_ms":4767,"msg":"query on table t17 returned 397 rows in 7307ms"}
+{"ts":1735691369094,"seq":2348,"level":"ERROR","service":"ingest","latency_ms":7486,"msg":"cache hit ratio 0.975"}
+{"ts":1735691134067,"seq":2030,"level":"INFO","service":"ingest","latency_ms":6160,"msg":"user 242 logged in from 10.0.171.73","ctx":{"trace":"t337755","span":0}}
+{"ts":1735691139910,"seq":2037,"level":"INFO","service":"auth","latency_ms":4122,"msg":"query on table t11 returned 6347 rows in 3156ms","ctx":{"trace":"t704624","span":32}}
+{"ts":1735691144063,"seq":2044,"level":"INFO","service":"billing","latency_ms":6893,"msg":"job job-44c7d3f0 finished","ctx":{"trace":"t415174","span":70}}
+{"ts":1735691147891,"seq":2051,"level":"INFO","service":"auth","latency_ms":5797,"msg":"request 40836 failed with status 503","ctx":{"trace":"t545113","span":31}}
+{"ts":1735691154295,"seq":2058,"level":"ERROR","service":"ingest","latency_ms":4395,"msg":"cache hit ratio 0.449","ctx":{"trace":"t321571","span":3}}
+{"ts":1735691159831,"seq":2065,"level":"INFO","service":"billing","latency_ms":463,"msg":"user 195 logged in from 10.0.42.210","ctx":{"trace":"t292752","span":96}}
+{"ts":1735691164836,"seq":2072,"level":"INFO","service":"search","latency_ms":4315,"msg":"query on table t3 returned 5222 rows in 841ms","ctx":{"trace":"t451444","span":9}}
+{"ts":1735691174666,"seq":2086,"level":"INFO","service":"auth","latency_ms":7942,"msg":"request 68899 failed with status 404","ctx":{"trace":"t174287","span":75}}
+{"ts":1735691180736,"seq":2093,"level":"WARN","service":"billing","latency_ms":4719,"msg":"cache hit ratio 0.281","ctx":{"trace":"t950912","span":39}}
+{"ts":1735691185520,"seq":2100,"level":"ERROR","service":"auth","latency_ms":7222,"msg":"user 173 logged in from 10.0.211.231","ctx":{"trace":"t133314","span":84}}
+{"ts":1735691191715,"seq":2107,"level":"INFO","service":"billing","latency_ms":7645,"msg":"query on table t14 returned 7881 rows in 2632ms","ctx":{"trace":"t089371","span":69}}
+{"ts":1735691197112,"seq":2114,"level":"WARN","service":"billing","latency_ms":1345,"msg":"job job-7e27d03e finished","ctx":{"trace":"t959495","span":75}}
+{"ts":1735691204795,"seq":2121,"level":"WARN","service":"ingest","latency_ms":920,"msg":"request 95722 failed with status 403","ctx":{"trace":"t787082","span":33}}
+{"ts":1735691210509,"seq":2128,"level":"INFO","service":"billing","latency_ms":7706,"msg":"cache hit ratio 0.254","ctx":{"trace":"t398933","span":16}}
+{"ts":1735691216655,"seq":2135,"level":"DEBUG","service":"search","latency_ms":4516,"msg":"user 320 logged in from 10.0.87.156","ctx":{"trace":"t026640","span":47}}
+{"ts":1735691227303,"seq":2149,"level":"WARN","service":"billing","latency_ms":1429,"msg":"job job-feb19a65 finished","ctx":{"trace":"t887817","span":44}}
+{"ts":1735691232853,"seq":2156,"level":"INFO","service":"query","latency_ms":1404,"msg":"request 31561 failed with status 404","ctx":{"trace":"t374108","span":18}}
+{"ts":1735691237468,"seq":2163,"level":"WARN","service":"billing","latency_ms":1786,"msg":"cache hit ratio 0.712","ctx":{"trace":"t045027","span":47}}
+{"ts":1735691243865,"seq":2170,"level":"WARN","service":"auth","latency_ms":9172,"msg":"user 24 logged in from 10.0.215.176","ctx":{"trace":"t881851","span":25}}
+{"ts":1735691250302,"seq":2177,"level":"INFO","service":"search","latency_ms":5449,"msg":"query on table t7 returned 4116 rows in 3991ms","ctx":{"trace":"t945104","span":69}}
+{"ts":1735691255901,"seq":2184,"level":"INFO","service":"ingest","latency_ms":9101,"msg":"job job-3f3ffa0d finished","ctx":{"trace":"t360242","span":85}}
+{"ts":1735691260749,"seq":2191,"level":"INFO","service":"search","latency_ms":5219,"msg":"request 87493 failed with status 403","ctx":{"trace":"t263133","span":95}}
+{"ts":1735691267358,"seq":2198,"level":"INFO","service":"ingest","latency_ms":5571,"msg":"cache hit ratio 0.380","ctx":{"trace":"t078043","span":30}}
+{"ts":1735691276278,"seq":2212,"level":"INFO","service":"ingest","latency_ms":8502,"msg":"query on table t4 returned 2435 rows in 6733ms","ctx":{"trace":"t336781","span":34}}
+{"ts":1735691282185,"seq":2219,"level":"WARN","service":"billing","latency_ms":1695,"msg":"job job-7cd79cfb finished","ctx":{"trace":"t434153","span":94}}
+{"ts":1735691285867,"seq":2226,"level":"INFO","service":"auth","latency_ms":9313,"msg":"request 68633 failed with status 403","ctx":{"trace":"t681422","span":76}}
+{"ts":1735691291140,"seq":2233,"level":"INFO","service":"query","latency_ms":7115,"msg":"cache hit ratio 0.471","ctx":{"trace":"t100678","span":74}}
+{"ts":1735691296869,"seq":2240,"level":"INFO","service":"search","latency_ms":8155,"msg":"user 385 logged in from 10.0.138.108","ctx":{"trace":"t609831","span":18}}
+{"ts":1735691300524,"seq":2247,"level":"INFO","service":"query","latency_ms":2174,"msg":"query on table t17 returned 721 rows in 6249ms","ctx":{"trace":"t898170","span":36}}
+{"ts":1735691306198,"seq":2254,"level":"INFO","service":"auth","latency_ms":5042,"msg":"job job-3296ace8 finished","ctx":{"trace":"t055811","span":62}}
+{"ts":1735691320577,"seq":2275,"level":"INFO","service":"auth","latency_ms":7873,"msg":"user 314 logged in from 10.0.163.122","ctx":{"trace":"t219828","span":17}}
+{"ts":1735691324396,"seq":2282,"level":"INFO","service":"billing","latency_ms":305,"msg":"query on table t1 returned 266 rows in 3927ms","ctx":{"trace":"t032447","span":70}}
+{"ts":1735691328804,"seq":2289,"level":"INFO","service":"auth","latency_ms":683,"msg":"job job-e7840ce9 finished","ctx":{"trace":"t466731","span":21}}
+{"ts":1735691334140,"seq":2296,"level":"WARN","service":"auth","latency_ms":8285,"msg":"request 39032 failed with status 400","ctx":{"trace":"t643684","span":14}}
+{"ts":1735691340272,"seq":2303,"level":"ERROR","service":"search","latency_ms":9122,"msg":"cache hit ratio 0.210","ctx":{"trace":"t420842","span":69}}
+{"ts":1735691344665,"seq":2310,"level":"DEBUG","service":"auth","latency_ms":4253,"msg":"user 192 logged in from 10.0.222.102","ctx":{"trace":"t939314","span":15}}
+{"ts":1735691349391,"seq":2317,"level":"DEBUG","service":"query","latency_ms":8996,"msg":"query on table t10 returned 5166 rows in 245ms","ctx":{"trace":"t484242","span":56}}
+{"ts":1735691352248,"seq":2324,"level":"INFO","service":"billing","latency_ms":8212,"msg":"job job-58631d4a finished","ctx":{"trace":"t607824","span":30}}
+{"ts":1735691362139,"seq":2338,"level":"INFO","service":"billing","latency_ms":7655,"msg":"cache hit ratio 0.409","ctx":{"trace":"t800177","span":7}}
+{"ts":1735691366859,"seq":2345,"level":"INFO","service":"query","latency_ms":2275,"msg":"user 353 logged in from 10.0.9.196","ctx":{"trace":"t416139","span":77}}
+{"ts":1735691132631,"seq":2025,"level":"ERROR","service":"query","latency_ms":5841,"msg":"user 223 logged in from 10.0.137.143","tags":["e", "b", "a"]}
+{"ts":1735691137348,"seq":2034,"level":"DEBUG","service":"search","latency_ms":2726,"msg":"job job-df941beb finished","tags":[]}
+{"ts":1735691143583,"seq":2043,"level":"INFO","service":"search","latency_ms":8640,"msg":"cache hit ratio 0.218","tags":["c"]}
+{"ts":1735691148241,"seq":2052,"level":"WARN","service":"ingest","latency_ms":9303,"msg":"query on table t13 returned 8174 rows in 2104ms","tags":["c", "b", "a"]}
+{"ts":1735691156060,"seq":2061,"level":"WARN","service":"billing","latency_ms":4141,"msg":"request 20152 failed with status 403","tags":["d"]}
+{"ts":1735691163814,"seq":2070,"level":"INFO","service":"ingest","latency_ms":4427,"msg":"user 248 logged in from 10.0.248.184","tags":["c", "b", "d"]}
+{"ts":1735691176414,"seq":2088,"level":"INFO","service":"auth","latency_ms":2681,"msg":"cache hit ratio 0.019","tags":["a"]}
+{"ts":1735691182576,"seq":2097,"level":"INFO","service":"billing","latency_ms":7601,"msg":"query on table t5 returned 4773 rows in 6088ms","tags":["b", "d"]}
+{"ts":1735691191326,"seq":2106,"level":"DEBUG","service":"ingest","latency_ms":9306,"msg":"request 58909 failed with status 503","tags":[]}
+{"ts":1735691198365,"seq":2115,"level":"INFO","service":"search","latency_ms":7805,"msg":"user 185 logged in from 10.0.22.190","tags":["e", "b"]}
+{"ts":1735691206292,"seq":2124,"level":"INFO","service":"ingest","latency_ms":7778,"msg":"job job-3f6d4e76 finished","tags":["e"]}
+{"ts":1735691214908,"seq":2133,"level":"INFO","service":"search","latency_ms":8992,"msg":"cache hit ratio 0.198","tags":["a", "b", "c"]}
+{"ts":1735691228698,"seq":2151,"level":"INFO","service":"query","latency_ms":8430,"msg":"request 59831 failed with status 503","tags":["e"]}
+{"ts":1735691235583,"seq":2160,"level":"DEBUG","service":"search","latency_ms":3870,"msg":"user 106 logged in from 10.0.156.241","tags":["a", "c"]}
+{"ts":1735691242544,"seq":2169,"level":"INFO","service":"auth","latency_ms":6326,"msg":"job job-76763716 finished","tags":["d"]}
+{"ts":1735691251221,"seq":2178,"level":"INFO","service":"auth","latency_ms":4012,"msg":"cache hit ratio 0.297","tags":["b"]}
+{"ts":1735691258599,"seq":2187,"level":"INFO","service":"query","latency_ms":2602,"msg":"query on table t7 returned 5299 rows in 2791ms","tags":["e", "a"]}
+{"ts":1735691265545,"seq":2196,"level":"INFO","service":"auth","latency_ms":2456,"msg":"request 31689 failed with status 503","tags":["a", "e", "b"]}
+{"ts":1735691277801,"seq":2214,"level":"INFO","service":"query","latency_ms":3995,"msg":"job job-6463154c finished","tags":[]}
+{"ts":1735691283425,"seq":2223,"level":"WARN","service":"query","latency_ms":9237,"msg":"cache hit ratio 0.173","tags":[]}
+{"ts":1735691289868,"seq":2232,"level":"INFO","service":"query","latency_ms":2255,"msg":"query on table t5 returned 9718 rows in 55ms","tags":["a", "e", "c"]}
+{"ts":1735691296913,"seq":2241,"level":"INFO","service":"ingest","latency_ms":3276,"msg":"request 4679 failed with status 404","tags":["e", "d"]}
+{"ts":1735691303237,"seq":2250,"level":"INFO","service":"search","latency_ms":1786,"msg":"user 179 logged in from 10.0.154.197","tags":["d"]}
+{"ts":1735691309806,"seq":2259,"level":"INFO","service":"query","latency_ms":3559,"msg":"job job-5d778346 finished","tags":["d", "c"]}
+{"ts":1735691321528,"seq":2277,"level":"DEBUG","service":"search","latency_ms":745,"msg":"query on table t2 returned 9847 rows in 4337ms","tags":["a"]}
+{"ts":1735691326796,"seq":2286,"level":"INFO","service":"query","latency_ms":8938,"msg":"request 46836 failed with status 403","tags":[]}
+{"ts":1735691341476,"seq":2304,"level":"INFO","service":"auth","latency_ms":8415,"msg":"job job-514466c4 finished","tags":["a", "c", "e"]}
+{"ts":1735691347154,"seq":2313,"level":"INFO","service":"ingest","latency_ms":2742,"msg":"cache hit ratio 0.072","tags":["b", "e", "d"]}
+{"ts":1735691351176,"seq":2322,"level":"INFO","service":"search","latency_ms":3183,"msg":"query on table t5 returned 6728 rows in 2399ms","tags":["a"]}
+{"ts":1735691364180,"seq":2340,"level":"WARN","service":"query","latency_ms":482,"msg":"user 103 logged in from 10.0.210.145","tags":["b", "c"]}
+{"ts":1735691370103,"seq":2349,"level":"DEBUG","service":"billing","latency_ms":1427,"msg":"job job-de5a5437 finished","tags":["a"]}
+{"ts":1735691141409,"seq":2040,"level":"INFO","service":"auth","latency_ms":4938,"msg":"user 75 logged in from 10.0.210.167","score":63.98}
+{"ts":1735691153340,"seq":2057,"level":"INFO","service":"billing","latency_ms":984,"msg":"query on table t14 returned 6178 rows in 8085ms","score":82.17}
+{"ts":1735691166592,"seq":2074,"level":"WARN","service":"auth","latency_ms":4100,"msg":"job job-77554c89 finished","score":-7.99}
+{"ts":1735691178510,"seq":2091,"level":"INFO","service":"auth","latency_ms":469,"msg":"request 49622 failed with status 404","score":-32.55}
+{"ts":1735691193114,"seq":2108,"level":"INFO","service":"query","latency_ms":8199,"msg":"cache hit ratio 0.973","score":99.55}
+{"ts":1735691206679,"seq":2125,"level":"ERROR","service":"auth","latency_ms":606,"msg":"user 255 logged in from 10.0.165.65","score":90.32}
+{"ts":1735691235251,"seq":2159,"level":"INFO","service":"query","latency_ms":8582,"msg":"job job-4a7ad4e2 finished","score":86.57}
+{"ts":1735691248831,"seq":2176,"level":"WARN","service":"auth","latency_ms":5544,"msg":"request 5947 failed with status 403","score":-67.59}
+{"ts":1735691263189,"seq":2193,"level":"INFO","service":"auth","latency_ms":5514,"msg":"cache hit ratio 0.603","score":72.26}
+{"ts":1735691275581,"seq":2210,"level":"INFO","service":"ingest","latency_ms":4489,"msg":"user 121 logged in from 10.0.191.185","score":77.53}
+{"ts":1735691286802,"seq":2227,"level":"INFO","service":"search","latency_ms":675,"msg":"query on table t14 returned 9916 rows in 5558ms","score":47.78}
+{"ts":1735691299614,"seq":2244,"level":"INFO","service":"query","latency_ms":243,"msg":"job job-f7564467 finished","score":-39.29}
+{"ts":1735691322446,"seq":2278,"level":"WARN","service":"query","latency_ms":7417,"msg":"cache hit ratio 0.466","score":-1.89}
+{"ts":1735691346376,"seq":2312,"level":"INFO","service":"ingest","latency_ms":4105,"msg":"query on table t5 returned 8605 rows in 7072ms","score":-34.51}
+{"ts":1735691355550,"seq":2329,"level":"INFO","service":"ingest","latency_ms":9902,"msg":"job job-b227b075 finished","score":30.98}
+{"ts":1735691368208,"seq":2346,"level":"ERROR","service":"auth","latency_ms":3386,"msg":"request 54149 failed with status 503","score":-55.39}
+{"ts":1735691127150,"seq":2016,"level":"ERROR","service":"billing","latency_ms":5657,"msg":"request 2975 failed with status 500","ctx":{"trace":"t136706","span":18},"tags":["c"]}
+{"ts":1735691169863,"seq":2079,"level":"INFO","service":"billing","latency_ms":2579,"msg":"job job-a2292cf0 finished","ctx":{"trace":"t650916","span":29},"tags":["e", "d", "c"]}
+{"ts":1735691272411,"seq":2205,"level":"INFO","service":"ingest","latency_ms":8255,"msg":"user 9 logged in from 10.0.87.234","ctx":{"trace":"t067557","span":16},"tags":["d"]}
+{"ts":1735691315967,"seq":2268,"level":"INFO","service":"billing","latency_ms":1395,"msg":"cache hit ratio 0.039","ctx":{"trace":"t587240","span":34},"tags":["c", "a"]}
+{"ts":1735691356503,"seq":2331,"level":"INFO","service":"search","latency_ms":742,"msg":"request 24563 failed with status 400","ctx":{"trace":"t785608","span":66},"tags":[]}
+{"ts":1735691131999,"seq":2023,"level":"DEBUG","service":"auth","latency_ms":8526,"msg":"cache hit ratio 0.336","ctx":{"trace":"t012565","span":89},"score":81.0}
+{"ts":1735691311302,"seq":2261,"level":"INFO","service":"ingest","latency_ms":3751,"msg":"request 99787 failed with status 403","ctx":{"trace":"t127691","span":68},"score":-32.23}
+{"ts":1735691221993,"seq":2142,"level":"DEBUG","service":"auth","latency_ms":1835,"msg":"query on table t3 returned 1750 rows in 371ms","ctx":{"trace":"t405506","span":47},"tags":["e", "c", "a"],"score":89.18}
+{"ts":1735691333370,"seq":2295,"level":"INFO","service":"auth","latency_ms":6604,"msg":"user 351 logged in from 10.0.249.210","tags":["b", "d"],"score":-36.52}

@@ -1,0 +1,240 @@
+{"id":83,"msg":"event 83 from worker 1","alpha":"text value 83 0","beta":{"inner":83,"f":11.857},"eps":"text value 83 4"}
+{"id":211,"msg":"event 211 from worker 8","alpha":"text value 211 0","beta":{"inner":211,"f":30.143},"eps":"text value 211 4"}
+{"id":63,"msg":"event 63 from worker 6","alpha":"v63_0","beta":"text value 63 1","gamma":{"inner":63,"f":9.0},"delta":633,"eps":"v63_4"}
+{"id":191,"msg":"event 191 from worker 4","alpha":"v191_0","beta":"text value 191 1","gamma":{"inner":191,"f":27.286},"delta":1913,"eps":"v191_4"}
+{"id":31,"msg":"event 31 from worker 6","alpha":310,"beta":"v31_1","gamma":"text value 31 2","delta":{"inner":31,"f":4.429},"eps":314}
+{"id":159,"msg":"event 159 from worker 5","alpha":1590,"beta":"v159_1","gamma":"text value 159 2","delta":{"inner":159,"f":22.714},"eps":1594}
+{"id":89,"msg":"event 89 from worker 8","alpha":"text value 89 0","delta":"v89_3","eps":"text value 89 4"}
+{"id":217,"msg":"event 217 from worker 7","alpha":"text value 217 0","delta":"v217_3","eps":"text value 217 4"}
+{"id":32,"msg":"event 32 from worker 7"}
+{"id":64,"msg":"event 64 from worker 2"}
+{"id":96,"msg":"event 96 from worker 1"}
+{"id":128,"msg":"event 128 from worker 2"}
+{"id":192,"msg":"event 192 from worker 7"}
+{"id":224,"msg":"event 224 from worker 8"}
+{"id":79,"msg":"event 79 from worker 2","alpha":"text value 79 0","beta":{"inner":79,"f":11.286},"gamma":792,"delta":"v79_3"}
+{"id":207,"msg":"event 207 from worker 1","alpha":"text value 207 0","beta":{"inner":207,"f":29.571},"gamma":2072,"delta":"v207_3"}
+{"id":111,"msg":"event 111 from worker 1","alpha":{"inner":111,"f":15.857},"beta":1111,"gamma":"v111_2","delta":"text value 111 3"}
+{"id":239,"msg":"event 239 from worker 6","alpha":{"inner":239,"f":34.143},"beta":2391,"gamma":"v239_2","delta":"text value 239 3"}
+{"id":29,"msg":"event 29 from worker 5","alpha":290,"gamma":"text value 29 2","delta":{"inner":29,"f":4.143},"eps":294}
+{"id":157,"msg":"event 157 from worker 3","alpha":1570,"gamma":"text value 157 2","delta":{"inner":157,"f":22.429},"eps":1574}
+{"id":94,"msg":"event 94 from worker 6","beta":{"inner":94,"f":13.429},"gamma":942,"delta":"v94_3","eps":"text value 94 4"}
+{"id":222,"msg":"event 222 from worker 7","beta":{"inner":222,"f":31.714},"gamma":2222,"delta":"v222_3","eps":"text value 222 4"}
+{"id":71,"msg":"event 71 from worker 1","alpha":"text value 71 0","beta":{"inner":71,"f":10.143},"gamma":712}
+{"id":199,"msg":"event 199 from worker 7","alpha":"text value 199 0","beta":{"inner":199,"f":28.429},"gamma":1992}
+{"id":86,"msg":"event 86 from worker 2","beta":{"inner":86,"f":12.286},"gamma":862,"eps":"text value 86 4"}
+{"id":214,"msg":"event 214 from worker 1","beta":{"inner":214,"f":30.571},"gamma":2142,"eps":"text value 214 4"}
+{"id":46,"msg":"event 46 from worker 5","beta":"text value 46 1","gamma":{"inner":46,"f":6.571},"delta":463}
+{"id":174,"msg":"event 174 from worker 5","beta":"text value 174 1","gamma":{"inner":174,"f":24.857},"delta":1743}
+{"id":14,"msg":"event 14 from worker 8","beta":"v14_1","gamma":"text value 14 2","delta":{"inner":14,"f":2.0}}
+{"id":142,"msg":"event 142 from worker 1","beta":"v142_1","gamma":"text value 142 2","delta":{"inner":142,"f":20.286}}
+{"id":109,"msg":"event 109 from worker 8","alpha":{"inner":109,"f":15.571},"gamma":"v109_2","delta":"text value 109 3"}
+{"id":237,"msg":"event 237 from worker 1","alpha":{"inner":237,"f":33.857},"gamma":"v237_2","delta":"text value 237 3"}
+{"id":95,"arr":[95, "s95", {"k": 95}],"msg":"event 95 from worker 7","alpha":"text value 95 0","beta":{"inner":95,"f":13.571},"gamma":952,"delta":"v95_3","eps":"text value 95 4"}
+{"id":23,"msg":"event 23 from worker 7","alpha":230,"beta":"v23_1","gamma":"text value 23 2","eps":234}
+{"id":151,"msg":"event 151 from worker 8","alpha":1510,"beta":"v151_1","gamma":"text value 151 2","eps":1514}
+{"id":215,"arr":[215, "s215", {"k": 215}],"msg":"event 215 from worker 4","alpha":"text value 215 0","beta":{"inner":215,"f":30.714},"gamma":2152,"eps":"text value 215 4"}
+{"id":38,"msg":"event 38 from worker 3","beta":"text value 38 1","gamma":{"inner":38,"f":5.429}}
+{"id":166,"msg":"event 166 from worker 8","beta":"text value 166 1","gamma":{"inner":166,"f":23.714}}
+{"id":51,"msg":"event 51 from worker 2","alpha":"v51_0","beta":"text value 51 1","eps":"v51_4"}
+{"id":179,"msg":"event 179 from worker 2","alpha":"v179_0","beta":"text value 179 1","eps":"v179_4"}
+{"id":21,"msg":"event 21 from worker 6","alpha":210,"gamma":"text value 21 2","eps":214}
+{"id":149,"msg":"event 149 from worker 6","alpha":1490,"gamma":"text value 149 2","eps":1494}
+{"id":43,"msg":"event 43 from worker 1","alpha":"v43_0","beta":"text value 43 1","delta":433}
+{"id":171,"msg":"event 171 from worker 7","alpha":"v171_0","beta":"text value 171 1","delta":1713}
+{"id":58,"msg":"event 58 from worker 3","beta":"text value 58 1","delta":583,"eps":"v58_4"}
+{"id":186,"msg":"event 186 from worker 5","beta":"text value 186 1","delta":1863,"eps":"v186_4"}
+{"id":61,"msg":"event 61 from worker 7","alpha":"v61_0","gamma":{"inner":61,"f":8.714},"delta":613,"eps":"v61_4"}
+{"id":189,"msg":"event 189 from worker 7","alpha":"v189_0","gamma":{"inner":189,"f":27.0},"delta":1893,"eps":"v189_4"}
+{"id":125,"arr":[125, "s125", {"k": 125}],"msg":"event 125 from worker 4","alpha":{"inner":125,"f":17.857},"gamma":"v125_2","delta":"text value 125 3","eps":{"inner":125,"f":17.857}}
+{"id":85,"arr":[85, "s85", {"k": 85}],"msg":"event 85 from worker 4","alpha":"text value 85 0","gamma":852,"eps":"text value 85 4"}
+{"id":55,"arr":[55, "s55", {"k": 55}],"flag":false,"msg":"event 55 from worker 8","alpha":"v55_0","beta":"text value 55 1","gamma":{"inner":55,"f":7.857},"eps":"v55_4"}
+{"id":15,"arr":[15, "s15", {"k": 15}],"msg":"event 15 from worker 3","alpha":150,"beta":"v15_1","gamma":"text value 15 2","delta":{"inner":15,"f":2.143}}
+{"id":190,"arr":[190, "s190", {"k": 190}],"msg":"event 190 from worker 7","beta":"text value 190 1","gamma":{"inner":190,"f":27.143},"delta":1903,"eps":"v190_4"}
+{"id":175,"arr":[175, "s175", {"k": 175}],"msg":"event 175 from worker 7","alpha":"v175_0","beta":"text value 175 1","gamma":{"inner":175,"f":25.0},"delta":1753}
+{"id":30,"arr":[30, "s30", {"k": 30}],"msg":"event 30 from worker 6","beta":"v30_1","gamma":"text value 30 2","delta":{"inner":30,"f":4.286},"eps":304}
+{"id":73,"msg":"event 73 from worker 2","alpha":"text value 73 0","delta":"v73_3"}
+{"id":201,"msg":"event 201 from worker 8","alpha":"text value 201 0","delta":"v201_3"}
+{"id":69,"msg":"event 69 from worker 8","alpha":"text value 69 0","gamma":692}
+{"id":197,"msg":"event 197 from worker 8","alpha":"text value 197 0","gamma":1972}
+{"id":6,"msg":"event 6 from worker 3","beta":"v6_1","gamma":"text value 6 2"}
+{"id":134,"msg":"event 134 from worker 6","beta":"v134_1","gamma":"text value 134 2"}
+{"id":108,"msg":"event 108 from worker 4","gamma":"v108_2","delta":"text value 108 3"}
+{"id":236,"msg":"event 236 from worker 1","gamma":"v236_2","delta":"text value 236 3"}
+{"id":84,"msg":"event 84 from worker 2","gamma":842,"eps":"text value 84 4"}
+{"id":212,"msg":"event 212 from worker 6","gamma":2122,"eps":"text value 212 4"}
+{"id":53,"msg":"event 53 from worker 1","alpha":"v53_0","gamma":{"inner":53,"f":7.571},"eps":"v53_4"}
+{"id":181,"msg":"event 181 from worker 4","alpha":"v181_0","gamma":{"inner":181,"f":25.857},"eps":"v181_4"}
+{"id":75,"arr":[75, "s75", {"k": 75}],"msg":"event 75 from worker 3","alpha":"text value 75 0","beta":{"inner":75,"f":10.714},"delta":"v75_3"}
+{"id":90,"arr":[90, "s90", {"k": 90}],"msg":"event 90 from worker 8","beta":{"inner":90,"f":12.857},"delta":"v90_3","eps":"text value 90 4"}
+{"id":195,"arr":[195, "s195", {"k": 195}],"msg":"event 195 from worker 6","nested":{"lvl":{"k3":438}},"alpha":"text value 195 0","beta":{"inner":195,"f":27.857}}
+{"id":91,"msg":"event 91 from worker 4","nested":{"lvl":{"k3":318}},"alpha":"text value 91 0","beta":{"inner":91,"f":13.0},"delta":"v91_3","eps":"text value 91 4"}
+{"id":235,"arr":[235, "s235", {"k": 235}],"msg":"event 235 from worker 8","alpha":{"inner":235,"f":33.571},"beta":2351,"delta":"text value 235 3"}
+{"id":223,"msg":"event 223 from worker 6","alpha":"text value 223 0","beta":{"inner":223,"f":31.857},"gamma":2232,"delta":"v223_3","eps":"text value 223 4"}
+{"id":219,"msg":"event 219 from worker 7","alpha":"text value 219 0","beta":{"inner":219,"f":31.286},"delta":"v219_3","eps":"text value 219 4"}
+{"id":87,"msg":"event 87 from worker 1","alpha":"text value 87 0","beta":{"inner":87,"f":12.429},"gamma":872,"eps":"text value 87 4"}
+{"id":140,"arr":[140, "s140", {"k": 140}],"msg":"event 140 from worker 6","gamma":"text value 140 2","delta":{"inner":140,"f":20.0}}
+{"id":120,"arr":[120, "s120", {"k": 120}],"msg":"event 120 from worker 3","delta":"text value 120 3","eps":{"inner":120,"f":17.143}}
+{"id":210,"arr":[210, "s210", {"k": 210}],"msg":"event 210 from worker 7","beta":{"inner":210,"f":30.0},"eps":"text value 210 4"}
+{"id":105,"arr":[105, "s105", {"k": 105}],"msg":"event 105 from worker 4","alpha":{"inner":105,"f":15.0},"delta":"text value 105 3"}
+{"id":220,"arr":[220, "s220", {"k": 220}],"flag":true,"msg":"event 220 from worker 2","gamma":2202,"delta":"v220_3","eps":"text value 220 4"}
+{"id":110,"arr":[110, "s110", {"k": 110}],"flag":true,"msg":"event 110 from worker 5","beta":1101,"gamma":"v110_2","delta":"text value 110 3"}
+{"id":34,"msg":"event 34 from worker 7","beta":"text value 34 1"}
+{"id":162,"msg":"event 162 from worker 7","beta":"text value 162 1"}
+{"id":150,"arr":[150, "s150", {"k": 150}],"msg":"event 150 from worker 6","beta":"v150_1","gamma":"text value 150 2","eps":1504}
+{"id":135,"arr":[135, "s135", {"k": 135}],"msg":"event 135 from worker 8","alpha":1350,"beta":"v135_1","gamma":"text value 135 2"}
+{"id":205,"arr":[205, "s205", {"k": 205}],"msg":"event 205 from worker 1","alpha":"text value 205 0","gamma":2052,"delta":"v205_3"}
+{"id":221,"msg":"event 221 from worker 4","nested":{"lvl":{"k1":174}},"alpha":"text value 221 0","gamma":2212,"delta":"v221_3","eps":"text value 221 4"}
+{"id":101,"msg":"event 101 from worker 5","alpha":{"inner":101,"f":14.429},"gamma":"v101_2"}
+{"id":229,"msg":"event 229 from worker 8","alpha":{"inner":229,"f":32.714},"gamma":"v229_2"}
+{"id":74,"msg":"event 74 from worker 2","beta":{"inner":74,"f":10.571},"delta":"v74_3"}
+{"id":202,"msg":"event 202 from worker 2","beta":{"inner":202,"f":28.857},"delta":"v202_3"}
+{"id":9,"msg":"event 9 from worker 2","alpha":90,"delta":{"inner":9,"f":1.286}}
+{"id":137,"msg":"event 137 from worker 8","alpha":1370,"delta":{"inner":137,"f":19.571}}
+{"id":115,"arr":[115, "s115", {"k": 115}],"msg":"event 115 from worker 1","alpha":{"inner":115,"f":16.429},"beta":1151,"eps":{"inner":115,"f":16.429}}
+{"id":24,"msg":"event 24 from worker 6","delta":{"inner":24,"f":3.429},"eps":244}
+{"id":152,"msg":"event 152 from worker 7","delta":{"inner":152,"f":21.714},"eps":1524}
+{"id":127,"msg":"event 127 from worker 8","alpha":{"inner":127,"f":18.143},"beta":1271,"gamma":"v127_2","delta":"text value 127 3","eps":{"inner":127,"f":18.143}}
+{"id":155,"arr":[155, "s155", {"k": 155}],"msg":"event 155 from worker 6","alpha":1550,"beta":"v155_1","delta":{"inner":155,"f":22.143},"eps":1554}
+{"id":65,"arr":[65, "s65", {"k": 65}],"msg":"event 65 from worker 8","nested":{"lvl":{"k1":666}},"alpha":"text value 65 0"}
+{"id":170,"arr":[170, "s170", {"k": 170}],"msg":"event 170 from worker 7","beta":"text value 170 1","delta":1703}
+{"id":93,"msg":"event 93 from worker 8","alpha":"text value 93 0","gamma":932,"delta":"v93_3","eps":"text value 93 4"}
+{"id":19,"msg":"event 19 from worker 1","alpha":190,"beta":"v19_1","eps":194}
+{"id":147,"msg":"event 147 from worker 6","alpha":1470,"beta":"v147_1","eps":1474}
+{"id":20,"arr":[20, "s20", {"k": 20}],"msg":"event 20 from worker 2","gamma":"text value 20 2","eps":204}
+{"id":35,"arr":[35, "s35", {"k": 35}],"msg":"event 35 from worker 5","alpha":"v35_0","beta":"text value 35 1"}
+{"id":50,"arr":[50, "s50", {"k": 50}],"msg":"event 50 from worker 8","beta":"text value 50 1","eps":"v50_4"}
+{"id":5,"arr":[5, "s5", {"k": 5}],"msg":"event 5 from worker 6","alpha":50,"gamma":"text value 5 2"}
+{"id":123,"msg":"event 123 from worker 6","alpha":{"inner":123,"f":17.571},"beta":1231,"delta":"text value 123 3","eps":{"inner":123,"f":17.571}}
+{"id":143,"flag":false,"msg":"event 143 from worker 5","alpha":1430,"beta":"v143_1","gamma":"text value 143 2","delta":{"inner":143,"f":20.429},"nested":{"lvl":{"k3":456}}}
+{"id":60,"arr":[60, "s60", {"k": 60}],"msg":"event 60 from worker 2","gamma":{"inner":60,"f":8.571},"delta":603,"eps":"v60_4"}
+{"id":25,"arr":[25, "s25", {"k": 25}],"msg":"event 25 from worker 8","alpha":250,"delta":{"inner":25,"f":3.571},"eps":254}
+{"id":45,"arr":[45, "s45", {"k": 45}],"msg":"event 45 from worker 5","alpha":"v45_0","gamma":{"inner":45,"f":6.429},"delta":453}
+{"id":213,"msg":"event 213 from worker 4","alpha":"text value 213 0","gamma":2132,"eps":"text value 213 4"}
+{"id":80,"arr":[80, "s80", {"k": 80}],"msg":"event 80 from worker 4","eps":"text value 80 4"}
+{"id":121,"flag":false,"msg":"event 121 from worker 1","alpha":{"inner":121,"f":17.286},"delta":"text value 121 3","eps":{"inner":121,"f":17.286}}
+{"id":36,"msg":"event 36 from worker 6","gamma":{"inner":36,"f":5.143}}
+{"id":164,"msg":"event 164 from worker 6","gamma":{"inner":164,"f":23.429}}
+{"id":8,"msg":"event 8 from worker 7","delta":{"inner":8,"f":1.143}}
+{"id":136,"msg":"event 136 from worker 8","delta":{"inner":136,"f":19.429}}
+{"id":165,"arr":[165, "s165", {"k": 165}],"flag":false,"msg":"event 165 from worker 4","alpha":"v165_0","gamma":{"inner":165,"f":23.571}}
+{"id":10,"arr":[10, "s10", {"k": 10}],"msg":"event 10 from worker 3","beta":"v10_1","delta":{"inner":10,"f":1.429}}
+{"id":180,"arr":[180, "s180", {"k": 180}],"msg":"event 180 from worker 6","gamma":{"inner":180,"f":25.714},"eps":"v180_4"}
+{"id":70,"arr":[70, "s70", {"k": 70}],"msg":"event 70 from worker 3","beta":{"inner":70,"f":10.0},"gamma":702}
+{"id":62,"msg":"event 62 from worker 3","beta":"text value 62 1","gamma":{"inner":62,"f":8.857},"delta":623,"eps":"v62_4"}
+{"id":182,"msg":"event 182 from worker 8","nested":{"lvl":{"k2":615}},"beta":"text value 182 1","gamma":{"inner":182,"f":26.0},"eps":"v182_4"}
+{"id":13,"msg":"event 13 from worker 6","alpha":130,"gamma":"text value 13 2","delta":{"inner":13,"f":1.857},"nested":{"lvl":{"k1":258}}}
+{"id":39,"msg":"event 39 from worker 3","alpha":"v39_0","beta":"text value 39 1","gamma":{"inner":39,"f":5.571},"nested":{"lvl":{"k3":793}}}
+{"id":183,"msg":"event 183 from worker 4","alpha":"v183_0","beta":"text value 183 1","gamma":{"inner":183,"f":26.143},"eps":"v183_4"}
+{"id":126,"msg":"event 126 from worker 4","beta":1261,"gamma":"v126_2","delta":"text value 126 3","eps":{"inner":126,"f":18.0}}
+{"id":47,"msg":"event 47 from worker 3","alpha":"v47_0","beta":"text value 47 1","gamma":{"inner":47,"f":6.714},"delta":473}
+{"id":158,"msg":"event 158 from worker 4","beta":"v158_1","gamma":"text value 158 2","delta":{"inner":158,"f":22.571},"eps":1584}
+{"id":156,"nested":{"lvl":{"k0":876}},"msg":"event 156 from worker 2","gamma":"text value 156 2","delta":{"inner":156,"f":22.286},"eps":1564}
+{"id":209,"flag":false,"msg":"event 209 from worker 1","alpha":"text value 209 0","eps":"text value 209 4"}
+{"id":56,"msg":"event 56 from worker 8","delta":563,"eps":"v56_4"}
+{"id":184,"msg":"event 184 from worker 4","delta":1843,"eps":"v184_4"}
+{"id":18,"msg":"event 18 from worker 3","beta":"v18_1","eps":184}
+{"id":146,"msg":"event 146 from worker 8","beta":"v146_1","eps":1464}
+{"id":81,"msg":"event 81 from worker 5","alpha":"text value 81 0","eps":"text value 81 4"}
+{"id":3,"msg":"event 3 from worker 2","alpha":30,"beta":"v3_1"}
+{"id":131,"msg":"event 131 from worker 7","alpha":1310,"beta":"v131_1"}
+{"id":76,"msg":"event 76 from worker 8","gamma":762,"delta":"v76_3"}
+{"id":204,"msg":"event 204 from worker 8","gamma":2042,"delta":"v204_3"}
+{"id":49,"msg":"event 49 from worker 7","alpha":"v49_0","eps":"v49_4"}
+{"id":177,"msg":"event 177 from worker 7","alpha":"v177_0","eps":"v177_4"}
+{"id":185,"arr":[185, "s185", {"k": 185}],"msg":"event 185 from worker 7","alpha":"v185_0","delta":1853,"eps":"v185_4"}
+{"id":141,"msg":"event 141 from worker 8","alpha":1410,"gamma":"text value 141 2","delta":{"inner":141,"f":20.143}}
+{"id":122,"msg":"event 122 from worker 7","beta":1221,"delta":"text value 122 3","eps":{"inner":122,"f":17.429}}
+{"id":225,"arr":[225, "s225", {"k": 225}],"msg":"event 225 from worker 2","alpha":{"inner":225,"f":32.143}}
+{"id":203,"msg":"event 203 from worker 4","alpha":"text value 203 0","beta":{"inner":203,"f":29.0},"delta":"v203_3"}
+{"id":107,"msg":"event 107 from worker 3","alpha":{"inner":107,"f":15.286},"beta":1071,"delta":"text value 107 3"}
+{"id":167,"msg":"event 167 from worker 5","alpha":"v167_0","beta":"text value 167 1","gamma":{"inner":167,"f":23.857}}
+{"id":124,"msg":"event 124 from worker 8","gamma":"v124_2","delta":"text value 124 3","eps":{"inner":124,"f":17.714}}
+{"id":28,"msg":"event 28 from worker 4","gamma":"text value 28 2","delta":{"inner":28,"f":4.0},"eps":284}
+{"id":54,"msg":"event 54 from worker 5","beta":"text value 54 1","gamma":{"inner":54,"f":7.714},"eps":"v54_4"}
+{"id":218,"msg":"event 218 from worker 2","beta":{"inner":218,"f":31.143},"delta":"v218_3","eps":"text value 218 4"}
+{"id":187,"flag":false,"msg":"event 187 from worker 3","alpha":"v187_0","beta":"text value 187 1","delta":1873,"eps":"v187_4"}
+{"id":59,"msg":"event 59 from worker 2","alpha":"v59_0","beta":"text value 59 1","delta":593,"eps":"v59_4"}
+{"id":130,"arr":[130, "s130", {"k": 130}],"msg":"event 130 from worker 6","beta":"v130_1","nested":{"lvl":{"k2":865}}}
+{"id":230,"arr":[230, "s230", {"k": 230}],"msg":"event 230 from worker 2","beta":2301,"gamma":"v230_2"}
+{"id":145,"arr":[145, "s145", {"k": 145}],"msg":"event 145 from worker 1","alpha":1450,"eps":1454}
+{"id":117,"msg":"event 117 from worker 8","nested":{"lvl":{"k1":758}},"alpha":{"inner":117,"f":16.714},"gamma":"v117_2","eps":{"inner":117,"f":16.714}}
+{"id":119,"msg":"event 119 from worker 1","alpha":{"inner":119,"f":17.0},"beta":1191,"gamma":"v119_2","eps":{"inner":119,"f":17.0}}
+{"id":67,"msg":"event 67 from worker 1","alpha":"text value 67 0","beta":{"inner":67,"f":9.571}}
+{"id":233,"msg":"event 233 from worker 4","alpha":{"inner":233,"f":33.286},"delta":"text value 233 3"}
+{"id":12,"msg":"event 12 from worker 3","gamma":"text value 12 2","delta":{"inner":12,"f":1.714}}
+{"id":82,"msg":"event 82 from worker 1","beta":{"inner":82,"f":11.714},"eps":"text value 82 4"}
+{"id":22,"flag":true,"msg":"event 22 from worker 6","beta":"v22_1","gamma":"text value 22 2","eps":224}
+{"id":0,"arr":[0, "s0", {"k": 0}],"flag":true,"nested":{"lvl":{"k0":287}},"msg":"event 0 from worker 1"}
+{"id":77,"flag":false,"msg":"event 77 from worker 7","alpha":"text value 77 0","gamma":772,"delta":"v77_3"}
+{"id":234,"msg":"event 234 from worker 5","nested":{"lvl":{"k2":502}},"beta":2341,"delta":"text value 234 3"}
+{"id":200,"arr":[200, "s200", {"k": 200}],"msg":"event 200 from worker 7","delta":"v200_3"}
+{"id":98,"msg":"event 98 from worker 8","beta":981}
+{"id":226,"msg":"event 226 from worker 3","beta":2261}
+{"id":238,"msg":"event 238 from worker 8","beta":2381,"gamma":"v238_2","delta":"text value 238 3"}
+{"id":40,"arr":[40, "s40", {"k": 40}],"msg":"event 40 from worker 6","delta":403}
+{"id":68,"msg":"event 68 from worker 4","gamma":682}
+{"id":196,"msg":"event 196 from worker 2","gamma":1962}
+{"id":1,"msg":"event 1 from worker 8","alpha":10}
+{"id":129,"msg":"event 129 from worker 6","alpha":1290}
+{"id":92,"msg":"event 92 from worker 6","gamma":922,"delta":"v92_3","eps":"text value 92 4"}
+{"id":7,"msg":"event 7 from worker 8","alpha":70,"beta":"v7_1","gamma":"text value 7 2"}
+{"id":16,"msg":"event 16 from worker 1","eps":164}
+{"id":144,"msg":"event 144 from worker 2","eps":1444}
+{"id":100,"arr":[100, "s100", {"k": 100}],"msg":"event 100 from worker 7","gamma":"v100_2"}
+{"id":78,"msg":"event 78 from worker 2","nested":{"lvl":{"k2":522}},"beta":{"inner":78,"f":11.143},"gamma":782,"delta":"v78_3"}
+{"id":27,"msg":"event 27 from worker 3","alpha":270,"beta":"v27_1","delta":{"inner":27,"f":3.857},"eps":274}
+{"id":26,"msg":"event 26 from worker 7","beta":"v26_1","delta":{"inner":26,"f":3.714},"eps":264,"nested":{"lvl":{"k2":921}}}
+{"id":88,"flag":true,"msg":"event 88 from worker 2","delta":"v88_3","eps":"text value 88 4"}
+{"id":208,"nested":{"lvl":{"k0":838}},"msg":"event 208 from worker 7","eps":"text value 208 4"}
+{"id":42,"msg":"event 42 from worker 7","beta":"text value 42 1","delta":423}
+{"id":216,"msg":"event 216 from worker 7","delta":"v216_3","eps":"text value 216 4"}
+{"id":178,"msg":"event 178 from worker 4","beta":"text value 178 1","eps":"v178_4"}
+{"id":163,"msg":"event 163 from worker 7","alpha":"v163_0","beta":"text value 163 1"}
+{"id":160,"arr":[160, "s160", {"k": 160}],"msg":"event 160 from worker 2"}
+{"id":104,"nested":{"lvl":{"k0":555}},"msg":"event 104 from worker 8","delta":"text value 104 3"}
+{"id":133,"msg":"event 133 from worker 7","alpha":1330,"gamma":"text value 133 2"}
+{"id":106,"msg":"event 106 from worker 3","beta":1061,"delta":"text value 106 3"}
+{"id":148,"msg":"event 148 from worker 5","gamma":"text value 148 2","eps":1484}
+{"id":113,"msg":"event 113 from worker 1","alpha":{"inner":113,"f":16.143},"eps":{"inner":113,"f":16.143}}
+{"id":231,"flag":false,"msg":"event 231 from worker 5","alpha":{"inner":231,"f":33.0},"beta":2311,"gamma":"v231_2"}
+{"id":11,"flag":false,"msg":"event 11 from worker 3","alpha":110,"beta":"v11_1","delta":{"inner":11,"f":1.571}}
+{"id":154,"flag":true,"msg":"event 154 from worker 8","beta":"v154_1","delta":{"inner":154,"f":22.0},"eps":1544}
+{"id":103,"msg":"event 103 from worker 1","alpha":{"inner":103,"f":14.714},"beta":1031,"gamma":"v103_2"}
+{"id":206,"msg":"event 206 from worker 8","beta":{"inner":206,"f":29.429},"gamma":2062,"delta":"v206_3"}
+{"id":52,"nested":{"lvl":{"k0":156}},"msg":"event 52 from worker 7","gamma":{"inner":52,"f":7.429},"eps":"v52_4"}
+{"id":139,"msg":"event 139 from worker 3","alpha":1390,"beta":"v139_1","delta":{"inner":139,"f":19.857}}
+{"id":118,"msg":"event 118 from worker 7","beta":1181,"gamma":"v118_2","eps":{"inner":118,"f":16.857}}
+{"id":188,"msg":"event 188 from worker 7","gamma":{"inner":188,"f":26.857},"delta":1883,"eps":"v188_4"}
+{"id":153,"msg":"event 153 from worker 7","alpha":1530,"delta":{"inner":153,"f":21.857},"eps":1534}
+{"id":173,"msg":"event 173 from worker 8","alpha":"v173_0","gamma":{"inner":173,"f":24.714},"delta":1733}
+{"id":132,"flag":true,"msg":"event 132 from worker 8","gamma":"text value 132 2"}
+{"id":4,"msg":"event 4 from worker 8","gamma":"text value 4 2"}
+{"id":193,"msg":"event 193 from worker 6","alpha":"text value 193 0"}
+{"id":232,"msg":"event 232 from worker 8","delta":"text value 232 3"}
+{"id":99,"flag":false,"msg":"event 99 from worker 6","alpha":{"inner":99,"f":14.143},"beta":991}
+{"id":198,"flag":true,"msg":"event 198 from worker 5","beta":{"inner":198,"f":28.286},"gamma":1982}
+{"id":44,"flag":true,"msg":"event 44 from worker 5","gamma":{"inner":44,"f":6.286},"delta":443}
+{"id":37,"msg":"event 37 from worker 2","alpha":"v37_0","gamma":{"inner":37,"f":5.286}}
+{"id":227,"msg":"event 227 from worker 7","alpha":{"inner":227,"f":32.429},"beta":2271}
+{"id":138,"msg":"event 138 from worker 8","beta":"v138_1","delta":{"inner":138,"f":19.714}}
+{"id":172,"msg":"event 172 from worker 7","gamma":{"inner":172,"f":24.571},"delta":1723}
+{"id":116,"msg":"event 116 from worker 5","gamma":"v116_2","eps":{"inner":116,"f":16.571}}
+{"id":114,"msg":"event 114 from worker 8","beta":1141,"eps":{"inner":114,"f":16.286}}
+{"id":169,"msg":"event 169 from worker 8","nested":{"lvl":{"k1":473}},"alpha":"v169_0","delta":1693}
+{"id":57,"msg":"event 57 from worker 6","alpha":"v57_0","delta":573,"eps":"v57_4"}
+{"id":66,"flag":true,"msg":"event 66 from worker 3","beta":{"inner":66,"f":9.429}}
+{"id":97,"msg":"event 97 from worker 8","alpha":{"inner":97,"f":13.857}}
+{"id":112,"msg":"event 112 from worker 1","eps":{"inner":112,"f":16.0}}
+{"id":194,"msg":"event 194 from worker 6","beta":{"inner":194,"f":27.714}}
+{"id":17,"msg":"event 17 from worker 6","alpha":170,"eps":174}
+{"id":102,"msg":"event 102 from worker 2","beta":1021,"gamma":"v102_2"}
+{"id":41,"msg":"event 41 from worker 7","alpha":"v41_0","delta":413}
+{"id":33,"flag":false,"msg":"event 33 from worker 6","alpha":"v33_0"}
+{"id":176,"flag":true,"msg":"event 176 from worker 3","eps":"v176_4"}
+{"id":72,"msg":"event 72 from worker 7","delta":"v72_3"}
+{"id":48,"msg":"event 48 from worker 5","eps":"v48_4"}
+{"id":228,"msg":"event 228 from worker 6","gamma":"v228_2"}
+{"id":168,"msg":"event 168 from worker 2","delta":1683}
+{"id":161,"msg":"event 161 from worker 2","alpha":"v161_0"}
+{"id":2,"msg":"event 2 from worker 3","beta":"v2_1"}

@@ -1,0 +1,2 @@
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r02","ts":1700000002000,"level":"ERROR","msg":"request 7 failed with status 500","n":-5,"f":0.0,"b":true,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v2/req"},"nums":[1, 5, 100]}

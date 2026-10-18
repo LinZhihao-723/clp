@@ -1,0 +1,3 @@
+{"rid":"r25","ts":1700000025000,"level":"INFO","msg":"polymorphic p array","p":[25, "x"]}
+{"rid":"r19","ts":1700000019000,"level":"INFO","msg":"polymorphic p float","p":19.5}
+{"rid":"r18","ts":1700000018000,"level":"INFO","msg":"polymorphic p int","p":18}

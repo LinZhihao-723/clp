@@ -1,0 +1,5 @@
+{"rid":"r11","ts":1700000011000,"level":"INFO","msg":"request 11 failed with status 404","n":-9223372036854775808,"f":1.7976931348623157e308,"b":false}
+{"rid":"r00","ts":1700000000000,"level":"INFO","msg":"user 42 logged in from 10.0.0.1","n":0,"f":1.5,"b":true,"req":{"user":{"id":42,"name":"alice"},"path":"/api/v1/login"},"tags":["auth", "web"]}
+{"rid":"r02","ts":1700000002000,"level":"ERROR","msg":"request 7 failed with status 500","n":-5,"f":0.0,"b":true,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v2/req"},"nums":[1, 5, 100]}
+{"rid":"r38","ts":1700000038000,"level":"INFO","msg":"integral float","n":3.0,"f":3}
+{"rid":"r05","level":"ERROR","msg":"no timestamp on this one","n":5,"f":5.0,"b":false}

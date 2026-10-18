@@ -1,0 +1,2 @@
+{"rid":"r04","ts":1700000004000,"level":"INFO","msg":"user 43 logged out","n":9223372036854775807,"f":3.0,"b":true,"objs":[{"k": "tier", "v": 1}, {"k": "zone", "v": "us"}]}
+{"rid":"r33","ts":1700000033000,"level":"WARN","msg":"array of objects","objs":[{"k": "tier", "v": 33}, {"k": "shard", "v": [1, 2]}]}

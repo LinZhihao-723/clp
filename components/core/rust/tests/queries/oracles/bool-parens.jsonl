@@ -1,0 +1,10 @@
+{"rid":"r10","ts":1700000010000,"level":"WARN","msg":"unicode café 中文 message","n":10,"f":10.0,"b":true}
+{"rid":"r01","ts":1700000001000,"level":"WARN","msg":"disk usage at 91.5 percent","n":1,"f":-2.25,"b":false,"req":{"user":{"id":7,"name":"bob"},"path":"/api/v1/disk"},"tags":["disk"]}
+{"rid":"r04","ts":1700000004000,"level":"INFO","msg":"user 43 logged out","n":9223372036854775807,"f":3.0,"b":true,"objs":[{"k": "tier", "v": 1}, {"k": "zone", "v": "us"}]}
+{"rid":"r33","ts":1700000033000,"level":"WARN","msg":"array of objects","objs":[{"k": "tier", "v": 33}, {"k": "shard", "v": [1, 2]}]}
+{"rid":"r35","ts":1700000035000,"level":"WARN","msg":"array of mixed","nums":[1.5, "60001", true, null]}
+{"rid":"r12","ts":1700000012000,"level":"INFO","msg":"Mixed Case Message HERE","n":12,"f":12.5,"b":true,"word":"Hello"}
+{"rid":"r34","ts":1700000034000,"level":"WARN","msg":"array of strings","tags":["x y", "web", "Auth"]}
+{"rid":"r14","ts":1700000014000,"level":"INFO","msg":"quote \" inside msg","n":14,"word":"HELLO"}
+{"rid":"r15","ts":1700000015000,"level":"WARN","msg":"tab\tand newline\n in msg","f":15.5,"b":false}
+{"rid":"r39","ts":1700000039000,"level":"INFO","msg":"ERROR inside the message text","n":39}

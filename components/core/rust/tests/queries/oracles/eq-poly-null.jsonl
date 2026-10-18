@@ -1,0 +1,2 @@
+{"rid":"r25","ts":1700000025000,"level":"INFO","msg":"polymorphic p array","p":[25, "x"]}
+{"rid":"r23","ts":1700000023000,"level":"INFO","msg":"polymorphic p null","p":null}

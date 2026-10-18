@@ -1,0 +1,7 @@
+{"rid":"r38","ts":1700000038000,"level":"INFO","msg":"integral float","n":3.0,"f":3}
+{"rid":"r31","ts":1700000031000,"level":"INFO","msg":"deep nesting","deep":{"a":{"b":{"c":{"d":31}}},"x":{"d":310}}}
+{"rid":"r30","ts":1700000030000,"level":"INFO","msg":"special keys","dotted.key":30,"sp ace":"v30"}
+{"rid":"r36","ts":1700000036000,"level":"INFO","msg":"bool as string","b":"true"}
+{"rid":"r37","ts":1700000037000,"level":"INFO","msg":"int as string","n":"5"}
+{"rid":"r32","ts":1700000032000,"level":"INFO","msg":"deep nesting two","deep":{"y":{"d":32}}}
+{"rid":"r39","ts":1700000039000,"level":"INFO","msg":"ERROR inside the message text","n":39}
