@@ -1,6 +1,6 @@
 # Rust clp-s reader: prototyping and benchmark
 
-This document has two parts: the conformance of the prototype against the C++ `clp-s` (Part 1, correctness), and indicative query performance on three datasets (Part 2). Section numbers without a part refer to the part they appear in. The design is in [design.md](design.md).
+This document has three parts: the conformance of the prototype against the C++ `clp-s` (Part 1, correctness), indicative query performance on three datasets (Part 2), and the query part of Log Archival Bench on its MongoDB dataset (Part 3). Section numbers without a part refer to the part they appear in. The design is in [design.md](design.md).
 
 ## Part 1. Conformance against the C++ clp-s
 
@@ -643,3 +643,353 @@ bare value.
   fewer results in Rust, so their Rust/C++ ratios are partly about output volume, not speed.
 - The tables do not include S3, msgpack or results-cache outputs. They are outside this report's
   task, which covers JSON output only.
+
+## Part 3. Log Archival Bench query benchmark (MongoDB)
+
+Date: 2026-10-19.
+
+[Log Archival Bench](https://github.com/y-scope/log-archival-bench) (LAB) is YScope's framework for
+comparing log archival and analytics tools ([blog post](https://blog.yscope.com/log-archival-bench-a-framework-for-comparing-log-archival-analytics-tools-160e98b9d189)).
+It measures ingestion (compression ratio, speed and memory) and search (query latency and memory,
+cold and hot). This part reproduces only LAB's **search** benchmark for `clp-s`, with the C++
+`clp-s` and the Rust `clp-s-rs` reading the same archives. It keeps LAB's dataset, LAB's six
+queries (verbatim) and LAB's per-query procedure. Ingestion is not compared: every archive is
+written by the C++ `clp-s` with LAB's flags.
+
+The harness lives in [`benchmarks/lab/`](../benchmarks/lab/README.md). Its README maps each LAB
+step to the harness and lists the deliberate differences.
+
+### Summary
+
+- **Every result is correct.** All 180 measured runs (5 repetitions × cold/hot × 6 queries × 3
+  tools) exited with 0, wrote nothing to stderr, and returned LAB's expected count. Before the
+  timing, the sorted outputs of the three tools were compared for all six queries, and they are
+  byte-identical (see [Correctness](#correctness)).
+- **Rust is faster than C++ on every query, cold and hot.** Against the C++ reader on the same
+  single-file archives:
+
+  | mode | speedup vs C++ SFA, per query | sum of medians: C++ MFA | C++ SFA | Rust SFA | speedup vs C++ SFA, on the sums |
+  |---|---|---|---|---|---|
+  | cold | 1.44-1.68x | 8.266 s | 8.010 s | 5.095 s | 1.57x |
+  | hot | 1.49-1.96x | 7.424 s | 7.450 s | 4.673 s | 1.59x |
+
+- **Q2 dominates the totals.** It returns 336,293 records and takes 3.9 s in Rust against 6.2 s in
+  C++ (cold), or 3.8 s against 6.0 s (hot). The C++ readers spend about 1.6-1.75 s of it in the
+  kernel, with 1.42M minor page faults per run. Rust spends 0.1-0.2 s there, with about 54k.
+- **The small queries are bound by the variable dictionary** (Q3 and Q4 were profiled). Each
+  reader decompresses the variable dictionary of all 65 archives (about 50 MiB), with the same
+  libzstd on both sides. Rust wins by skipping the per-entry work C++ does around that
+  decompression (see [Where the time goes](#where-the-time-goes)).
+- **Rust has the lower peak RSS on every query** (17-209 MiB against 46-244 MiB). LAB's own memory
+  metric (the average of the RSS samples) is also lower for Rust on every query except Q2, where
+  Rust holds close to its 209 MiB peak for the whole run (about 204 MiB on average), while C++
+  peaks at 242-244 MiB but averages 157-163 MiB.
+- **The archive layout barely matters to the C++ reader.** C++ on LAB's multi-file archives is
+  2-10% slower than on single-file archives when cold, and the same within noise when hot.
+- The spread is small: min-max over the 5 repetitions is within about 5% of the median in most
+  cells. The widest are Rust Q4 (up to 15%; its runs fall into two groups, see
+  [Where the time goes](#where-the-time-goes)) and C++ SFA Q3 hot (up to 8%).
+
+### What was reproduced
+
+| LAB | this run |
+|---|---|
+| Datasets: five; only MongoDB is queried. | MongoDB (`mongod`), the only queried dataset. |
+| Ingestion: `clp-s c` per tool, measured. | Not measured. Both archive sets were written once by the C++ `clp-s` with LAB's flags. |
+| Search: six KQL queries from `assets/clp/config.yaml`, checked against fixed expected counts. | The same six queries, verbatim, and the same expected counts. |
+| Search procedure per query and mode (below). | The same procedure, repeated 5 times. |
+| Metrics: query latency, average RSS. | The same two, plus peak RSS, CPU time and page faults from `/usr/bin/time -v`. |
+
+### Dataset and archives
+
+| | value |
+|---|---|
+| Source | LAB `data/mongod/metadata.yaml`: Zenodo record 11075361, `mongodb.tar.gz` (1,590,845,765 B, 260 log files) |
+| Content | MongoDB server logs written while running YCSB workloads A-E repeatedly |
+| Log events | 186,287,600 (equals LAB's `number_of_lines`) |
+| Raw size | 69,582,861,765 B (64.80 GiB) |
+| Input | LAB's `mongod.log`, rebuilt in one streaming pass by `prepare.py input`; the result is equivalent to the `awk`/`sed` concatenation in LAB's `scripts/download_all.py` |
+
+Both archive sets were compressed by the C++ `clp-s` (`build/core/clp-s`, single-threaded, not
+rebuilt) from the same `mongod.log`:
+
+| | multi-file (MFA, LAB default) | single-file (SFA) |
+|---|---|---|
+| Flags | `c --timestamp-key "t.\$date" --target-encoded-size 268435456` | the same plus `--single-file-archive` |
+| Archives | 65 directories, 520 files (8 per archive) | 65 files, 713 KB to 8.09 MB (mean 5.38 MB) |
+| Size | 349,770,584 B (0.326 GiB) | 349,770,573 B (0.326 GiB) |
+| Compression ratio (raw / archive bytes) | 198.9 | 198.9 |
+| Records (`clp-s s DIR '*'`) | 186,287,600 | 186,287,600 |
+
+The two sets were compressed concurrently, each in 322 s of wall time with about 370 MiB peak
+RSS. This is for reference only; ingestion is not part of the comparison.
+
+### Queries
+
+The queries are LAB's `assets/clp/config.yaml` strings, verbatim. As in LAB, each string goes
+through `shlex.split`, and the resulting single argument is the KQL passed to the reader.
+
+| # | KQL | meaning (LAB) | expected count |
+|---|---|---|---|
+| Q1 | `attr.tickets:*` | `attr.tickets` exists | 38,611 |
+| Q2 | `id: 22419` | `id` equals 22419 | 336,293 |
+| Q3 | `attr.message.msg: log_release* AND attr.message.session_name: connection` | prefix match on a nested string, and an equality | 1 |
+| Q4 | `ctx: initandlisten AND (NOT msg: "WiredTiger message" OR attr.message.msg: log_remove*)` | equality with a negated phrase or a prefix match | 122 |
+| Q5 | `c: WTWRTLOG AND attr.message.ts_sec > 1679490000` | equality and an integer range | 52,421 |
+| Q6 | `ctx: FlowControlRefresher AND attr.numTrimmed: 0` | equality on a string and an integer | 38,611 |
+
+LAB picks Q1 and Q6 to return the same count as a sanity check. They return different records.
+
+### Method
+
+- **Tools** (a reader searching one archive set):
+  - `cpp-sfa`: `clp-s s <archives-sfa> <kql>`.
+  - `rust-sfa`: `clp-s-rs search <archives-sfa> --query <kql>`. Given a directory of single-file
+    archives, `clp-s-rs` searches its entries, sorted by name, as one session (the same set of
+    archives C++ searches).
+  - `cpp-mfa`: `clp-s s <archives-mfa> <kql>`, LAB's own layout, as a reference row. The Rust
+    reader does not read multi-file archives, so the head-to-head comparison is `rust-sfa` against
+    `cpp-sfa`.
+- **Binaries:**
+  - C++: `build/core/clp-s` of this repository (12.4 MiB plus 34 shared libraries; sha256
+    `c2b93a72...`), the same binary as in Parts 1 and 2. Not rebuilt.
+  - Rust: `clp-s-rs 0.1.0-dev` from `cargo build --release -p clp-s-cli` at workspace commit
+    `fa5e4c2a` (rustc 1.96.0, default cargo `release` profile, statically linked zstd 1.5.7;
+    31.6 MiB; sha256 `fcfd955b...`). No code was changed for this benchmark.
+- **Procedure** (LAB's `bench_search`). For each repetition, each mode (cold, then hot) and each
+  query, every tool runs these steps in turn:
+  1. Flush and drop the page cache (`echo 1 > /proc/sys/vm/drop_caches` in a privileged
+     container).
+  2. Hot mode only: run the same query 3 times to warm up.
+  3. Start polling RSS with `ps` every 0.1 s, on a wall-clock grid, summing the reader processes
+     of the run. A sample with no reader process counts as 0, and a run without samples records
+     -1, as in LAB.
+  4. Time the measured run end to end, from spawn until stdout is drained and the process is
+     reaped. stdout is counted in memory (the result count is the number of output lines, as in
+     LAB) and never written to disk.
+- **Repetitions:** the whole procedure ran 5 times. The tool order rotates every repetition, so
+  drift and order effects reach every tool equally. Tables show the median, with min-max, over
+  the 5 runs.
+- **Metrics:**
+  - *Query latency* (LAB): end-to-end wall time of the measured run.
+  - *Average RSS* (LAB): the mean of the `ps` samples, including the 0 samples taken as the
+    process starts or exits.
+  - *Peak RSS*, user and system CPU time, page faults and file-system inputs, from
+    `/usr/bin/time -v`.
+- **Deliberate differences from LAB:**
+  - **CPU limit.** LAB runs each tool in a Docker container limited with `--cpus=4`. Here the
+    readers run natively, pinned with `taskset -c 8-11`. On this host those are 2 physical cores
+    with hyperthreading. Both readers search on one thread (CPU time stays close to wall time), so
+    the limit mainly keeps other work off the measured cores.
+  - **No container around the reader**, so there is no `docker exec` overhead in the timing.
+    `/usr/bin/time` and `taskset` add under a millisecond per run.
+  - **Single-file archives** for the comparison, because the Rust reader reads only SFAs. They use
+    LAB's flags plus `--single-file-archive`.
+  - **5 repetitions** instead of LAB's single pass, with rotation, and medians reported.
+  - **stderr** is counted separately instead of being merged into the counted output. Every run
+    here had empty stderr, so the counts are the same either way.
+  - **Cache flush.** LAB runs a global `sync` before dropping the caches, and so does the
+    harness's `config.yaml`. On this host the global `sync` blocked forever on a FUSE filesystem
+    elsewhere in the shared WSL2 kernel, so this run used a copy of the config that flushes only the
+    data filesystem (`sync -f <data dir>`) before the same `drop_caches`. The drop itself works:
+    every cold run read 65-349 MiB from the file system, and every hot run read 0. A first
+    attempt with the global `sync` hung in its third repetition. Its 97 completed runs have medians
+    within 10% of the final ones and are not used here.
+- **Environment:** Intel i9-14900K (32 logical CPUs), 47 GiB of memory, Linux 6.6.87.2 under
+  WSL2, archives on an SSD-backed ext4 virtual disk. The load average was about 1-1.5 before the
+  run. LAB's published numbers come from a Xeon E5-2630v3 with 128 GB of memory and a 7200 RPM SATA
+  disk, running CLP v0.4.0, so the absolute numbers here are not comparable with LAB's. Only the
+  ratios between the readers are meaningful.
+
+### Correctness
+
+Before the timing, each query ran once per tool, and the outputs were compared:
+
+| # | expected | C++ MFA | C++ SFA | Rust SFA | outputs |
+|---|---|---|---|---|---|
+| Q1 | 38,611 | 38,611 | 38,611 | 38,611 | identical after sorting (8,589,948 B); line order differs |
+| Q2 | 336,293 | 336,293 | 336,293 | 336,293 | identical after sorting (43,381,797 B); line order differs |
+| Q3 | 1 | 1 | 1 | 1 | byte-identical |
+| Q4 | 122 | 122 | 122 | 122 | byte-identical |
+| Q5 | 52,421 | 52,421 | 52,421 | 52,421 | byte-identical |
+| Q6 | 38,611 | 38,611 | 38,611 | 38,611 | identical after sorting (6,872,758 B); line order differs |
+
+No canonicalization was needed and no registered divergence applies: no output contains a float
+printed in C++'s six-digit `%f` form, which DV-01 and DV-02 cover. The C++ outputs on MFAs and
+SFAs are also identical after sorting. Every measured run of the benchmark returned the expected
+count again.
+
+### Results
+
+Speedup is the C++ median divided by the Rust median, so above 1 means Rust is faster.
+
+#### Query latency, cold (s, median (min-max) over 5 runs)
+
+| query | C++ MFA | C++ SFA | Rust SFA | C++ SFA / Rust | C++ MFA / Rust |
+|---|---|---|---|---|---|
+| Q1 | 0.372 (0.364-0.374) | 0.344 (0.334-0.354) | 0.205 (0.197-0.209) | 1.68x | 1.82x |
+| Q2 | 6.253 (6.240-6.292) | 6.158 (6.119-6.210) | 3.908 (3.859-3.917) | 1.58x | 1.60x |
+| Q3 | 0.332 (0.326-0.348) | 0.306 (0.304-0.308) | 0.213 (0.208-0.223) | 1.44x | 1.56x |
+| Q4 | 0.456 (0.446-0.466) | 0.414 (0.407-0.414) | 0.255 (0.253-0.293) | 1.62x | 1.79x |
+| Q5 | 0.482 (0.475-0.483) | 0.448 (0.438-0.451) | 0.283 (0.278-0.291) | 1.58x | 1.70x |
+| Q6 | 0.371 (0.365-0.387) | 0.341 (0.331-0.346) | 0.231 (0.222-0.243) | 1.48x | 1.61x |
+| sum of medians | 8.266 | 8.010 | 5.095 | 1.57x | 1.62x |
+
+#### Query latency, hot (s, median (min-max) over 5 runs)
+
+| query | C++ MFA | C++ SFA | Rust SFA | C++ SFA / Rust | C++ MFA / Rust |
+|---|---|---|---|---|---|
+| Q1 | 0.263 (0.261-0.266) | 0.269 (0.262-0.272) | 0.137 (0.134-0.143) | 1.96x | 1.91x |
+| Q2 | 5.965 (5.930-6.027) | 5.985 (5.928-6.050) | 3.789 (3.692-3.852) | 1.58x | 1.57x |
+| Q3 | 0.235 (0.229-0.240) | 0.240 (0.238-0.259) | 0.154 (0.153-0.156) | 1.55x | 1.52x |
+| Q4 | 0.344 (0.337-0.347) | 0.342 (0.337-0.350) | 0.229 (0.194-0.236) | 1.49x | 1.50x |
+| Q5 | 0.359 (0.352-0.369) | 0.355 (0.346-0.358) | 0.206 (0.203-0.210) | 1.72x | 1.75x |
+| Q6 | 0.258 (0.251-0.265) | 0.260 (0.248-0.268) | 0.158 (0.152-0.159) | 1.64x | 1.63x |
+| sum of medians | 7.424 | 7.450 | 4.673 | 1.59x | 1.59x |
+
+#### Memory (MiB, median over 5 runs)
+
+Average RSS is LAB's metric. Peak RSS is `ru_maxrss` from `/usr/bin/time`.
+
+| query | mode | avg RSS: C++ MFA / C++ SFA / Rust SFA | peak RSS: C++ MFA / C++ SFA / Rust SFA |
+|---|---|---|---|
+| Q1 | cold | 43.6 / 41.5 / 13.1 | 53.4 / 52.3 / 20.9 |
+| Q2 | cold | 156.5 / 160.2 / 203.6 | 241.9 / 243.6 / 208.8 |
+| Q3 | cold | 38.3 / 37.0 / 10.9 | 45.6 / 45.6 / 17.3 |
+| Q4 | cold | 104.8 / 81.9 / 45.5 | 131.1 / 137.2 / 111.1 |
+| Q5 | cold | 52.0 / 48.0 / 24.0 | 76.6 / 77.7 / 42.3 |
+| Q6 | cold | 46.8 / 42.8 / 14.1 | 51.7 / 51.7 / 20.1 |
+| Q1 | hot | 43.5 / 50.4 / 15.6 | 53.9 / 52.5 / 21.1 |
+| Q2 | hot | 161.8 / 162.6 / 204.7 | 242.2 / 243.5 / 208.8 |
+| Q3 | hot | 40.8 / 36.5 / 12.7 | 46.0 / 46.1 / 17.7 |
+| Q4 | hot | 96.3 / 82.8 / 44.8 | 131.5 / 137.6 / 111.0 |
+| Q5 | hot | 57.7 / 56.3 / 24.7 | 76.9 / 78.1 / 42.6 |
+| Q6 | hot | 48.9 / 50.2 / 14.1 | 51.9 / 52.1 / 20.1 |
+
+Peak RSS varies by at most 0.8 MiB (about 2%) between runs. Average RSS is noisy for runs under
+0.5 s, because the 0.1 s grid takes only a few samples and some of them land on the start or exit
+of the process (for example, C++ SFA Q1 cold ranges from 28.7 to 49.9 MiB).
+
+#### CPU time, hot (median over 5 runs)
+
+| query | user s: C++ SFA / Rust | system s: C++ SFA / Rust | minor page faults: C++ SFA / Rust |
+|---|---|---|---|
+| Q1 | 0.25 / 0.08 | 0.02 / 0.05 | 11,097 / 51,356 |
+| Q2 | 4.75 / 3.90 | 1.61 / 0.11 | 1,417,975 / 54,477 |
+| Q3 | 0.23 / 0.11 | 0.02 / 0.04 | 17,361 / 46,395 |
+| Q4 | 0.31 / 0.16 | 0.05 / 0.07 | 39,440 / 70,352 |
+| Q5 | 0.32 / 0.16 | 0.05 / 0.04 | 20,379 / 54,548 |
+| Q6 | 0.24 / 0.12 | 0.03 / 0.04 | 10,951 / 44,192 |
+
+`/usr/bin/time` reports CPU time in 10 ms steps. Cold runs have about the same user time and up to
+0.13 s more system time. C++ MFA matches C++ SFA within about 0.02 s in both.
+
+### Where the time goes
+
+The two queries with the smallest hot-mode margins, Q4 (1.49x) and Q3 (1.55x), were profiled with
+`perf record -e cpu-clock` under the same pinning, after 3 warm-up runs. The C++ binary was used
+as is, with DWARF call graphs. For Rust, the measured binary was left unchanged; call stacks come
+from two profiling builds of the same commit in separate target directories, one with line tables
+and one with forced frame pointers (used only for proportions, as it runs about 5% slower).
+
+**User CPU per hot run (ms):**
+
+| phase | Q3 C++ | Q3 Rust | Q4 C++ | Q4 Rust |
+|---|---:|---:|---:|---:|
+| variable dictionary: zstd decoding | 45.6 | 41.8 | 43.6 | 41.6 |
+| C++ streaming zstd wrapper (`try_read`, `ZSTD_decompressStream`, `memcpy`) | 51.6 | - | 51.3 | - |
+| zstd Huffman loop (assembly without unwind info; dictionary and tables together) | 14.4 | 15.1 | 15.2 | 16.3 |
+| variable dictionary: building entries (C++: one `std::string` per entry; Rust: one buffer plus offsets) | ~55 | 7.2 | ~55 | 7.5 |
+| variable dictionary: freeing the previous archive's entries at the next open (C++) | 30.0 | - | 26.5 | - |
+| exact variable-dictionary lookup | 3.7 | **30.3** | 3.3 | **30.3** |
+| wildcard dictionary match | 12.3 | 13.8 | 9.6 | 13.7 |
+| table stream zstd | 0.5 | 0.5 | 55.0 | 49.0 |
+| filter (C++ `ColumnScan`; Rust `CompiledTableFilter` and table scan) | 0.1 | 0.0 | 14.3 | 8.5 |
+| output (JSON rendering and writing) | 0 | 0 | 0.1 | 0.2 |
+| archive open, startup, other | ~15 | ~7 | ~26 | ~8 |
+| **total user** | ~228 | ~116 | ~300 | ~175 |
+
+The rows do not overlap and add up to the total. The C++ wrapper row holds every sample under
+`try_read` that is not entropy decoding, so the entry-building row leaves those out.
+
+- **These queries are bound by the variable dictionary.** Each reader decompresses the whole
+  variable dictionary of all 65 archives, about 50 MiB. Q3 decompresses almost no table data; Q4
+  also decodes the `initandlisten` tables. Output costs under 0.3 ms (1 and 122 results).
+- **The decompression itself is the same work on both sides:** the same libzstd 1.5.7 on the same
+  bytes. The difference is the work around it. C++ reads the dictionary entry by entry through a
+  streaming wrapper, allocates one `std::string` per entry, and frees them all when the next
+  archive opens: about 130-135 ms per run. Rust decompresses each section in one call into one
+  buffer with an offset table, which costs about 7 ms.
+- **Why the margin is narrow here:**
+  1. The shared zstd work is half or more of Rust's time (about 57 of 116 ms in Q3, about 107 of
+     175 ms in Q4).
+  2. `VariableDictionary::find_exact` (`crates/clp-s-format/src/dictionary.rs`) hashes every
+     dictionary entry with the default SipHash hasher to look up one or two probe strings. That
+     costs about 30 ms per run, against 3-4 ms in C++.
+  3. **Heap churn.** In Q3, Rust grows the heap by 184.8 MiB and shrinks it by 184.4 MiB over a
+     run, while its peak heap is only 11.3 MiB. glibc returns the memory to the OS after each
+     archive, so the next archive's dictionary buffers land on fresh pages. That costs 46k-70k
+     minor page faults (against 17k-39k for C++), or about 30-40 ms of system time. 76% of these
+     faults are under `load_dictionaries`.
+  4. **This churn is why Q4 has the smallest ratio.** Rust's Q4 times fall into two groups. Runs
+     with about 29k faults take 0.194-0.200 s hot, and runs with about 70k faults take
+     0.229-0.236 s. The hot median fell into the slow group, and the cold median into the fast one,
+     which is also why Q4 is the only query with a higher ratio cold (1.62x) than hot (1.49x).
+- **Q2.** C++ spends 1.6-1.75 s of its 6 s in the kernel, with 1.42M minor faults per run; Rust
+  spends 0.1-0.2 s with about 54k. User time is 4.75 s against 3.90 s. So a large part of Q2's
+  1.58x comes from allocator behaviour on the C++ side, and the rest from decoding and JSON
+  rendering, as in Part 2.
+
+**Cold against hot.** Cold mode adds about 60-95 ms to the SFA runs of both readers; Q2 adds more
+(C++ 173 ms, Rust 119 ms). Rust Q4 adds only 26 ms, because its cold median falls into the fast
+fault group and its hot median into the slow one. Dropping the caches and then re-warming only the
+binary or only the archives splits that cost:
+
+- **Archive I/O:** about 50-60 ms for both readers. Both read 50-58 MiB synchronously without
+  prefetch: C++ in about 1,800 reads, Rust in about 200 larger ones.
+- **Program loading:** C++ needs about 30-40 ms to load its binary and its 34 shared libraries
+  (curl, OpenSSL, GnuTLS, Kerberos, LDAP, libssh and others), which the cache drop evicts. Rust is
+  one statically linked file and needs about 10 ms.
+- A similar fixed penalty on a smaller Rust time lowers the cold ratio of Q1, Q3, Q5 and Q6. Q2
+  does not move.
+- The MFA archives cost C++ about 25-95 ms more than the SFAs when cold, because each archive is 8
+  files to open and read. When hot, the two layouts are within noise.
+
+**What would widen the gap** (not applied; the benchmark measures the code as it is):
+
+1. **Stop the heap churn (measured).** Rerunning both binaries with glibc tunables that disable
+   heap trimming (`glibc.malloc.trim_threshold` and `glibc.malloc.mmap_threshold` at 1 GiB) left
+   peak RSS unchanged and moved Q3 from 151-162 to 117-120 ms for Rust (C++: 238-244 to
+   223-229 ms), and Q4 from 225-232 to 192-204 ms for Rust (C++: 339-348 to 325-350 ms). That is
+   about 1.9x for Q3 and 1.7x for Q4. Product options: a session-wide pool for the dictionary
+   decode buffers, `mallopt` in the CLI, or mimalloc or jemalloc.
+2. **Make `find_exact` cheap (estimated).** With one or two probes, compare lengths and then bytes,
+   or use a fast non-cryptographic hasher. That should save about 25 ms, giving about 2.4x for Q3
+   and 2.0x for Q4. Q5 and Q6 take the same lookup path.
+3. **A literal-prefix fast path** for patterns like `log_release*` and `log_remove*`, before the
+   general wildcard matcher. Matching costs about 14 ms now; this would save up to about 10 ms.
+4. **Below the zstd floor:** searching archives in parallel (LAB allows 4 CPUs and both readers use
+   one, so about 3x in wall time is plausible, but the prototype is single-threaded by design), or
+   a format change so that a query does not decompress the whole variable dictionary.
+5. **Cold mode:** prefetching the next archive's dictionary while the current one is decoded. CPU
+   per archive is about 1.8 ms and I/O about 0.9 ms, so most of the I/O could be hidden. The
+   prototype does not prefetch by design.
+
+### Caveats
+
+- The archives total only 0.326 GiB, so cold and hot differ by about 0.1 s per query. Under WSL2,
+  a cold read may also be served from the Windows host's cache of the virtual disk, which makes
+  cold mode warmer than on LAB's bare-metal SATA disk.
+- Rust's cold runs read about 40-45 MiB more from the file system than C++ SFA on the small
+  queries (Q2 reads 341-349 MiB for every reader). Part of this is reloading its 31.6 MiB
+  statically linked binary after the cache drop.
+- The pinned CPUs are 2 physical cores with hyperthreading rather than LAB's quota of 4 CPUs.
+  Both readers are single-threaded, so this matters little here, but a parallel reader would need
+  the full 4 cores to be compared fairly.
+- LAB's average-RSS metric includes the 0 samples at process start and exit, so it is noisy for
+  runs under 0.5 s; peak RSS is the steadier memory metric.
+- The Rust binary uses the plain cargo `release` profile (no LTO, 16 codegen units).
+- The C++ binary is a current development build of `clp-s`, not the CLP v0.4.0 release LAB
+  benchmarked.
+- The host is a shared WSL2 machine. The spread is small, but the absolute values are not
+  portable.
