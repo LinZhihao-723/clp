@@ -23,8 +23,8 @@ readable.
 
 The remaining issues are style-rule violations, a few small drifts between the design and the
 code, and some gaps in reporting and coverage. None of them is a correctness defect. They are
-listed in [Outstanding issues](#outstanding-issues). After the final fix, only one item is left:
-adding the DV-47 row to design report §8.3, which lives outside this workspace.
+listed in [Outstanding issues](#outstanding-issues). After the final fix, none is left: the last
+one, the DV-47 row, is now in [design.md](design.md) Part 1 §8.3.
 
 ### 1. Gates and test counts
 
@@ -123,8 +123,8 @@ All `proto-*` containers were removed afterwards.
   DV-36 ×2, DV-37 ×2, DV-06 ×2, and one each of DV-05, DV-07, DV-08, DV-10, DV-14, DV-20 and
   DV-21 (a case can carry several tags). DV-21 is `wire-msgpack-split`, judged since the final fix.
 - Every stdout case is also checked against `clp_s_query`'s reference evaluator (`Query::evaluate`,
-  the executable design report §8.1 spec) over the C++-loaded records. A case passes only if Rust
-  equals C++ (or its declared expectation) **and** equals the reference.
+  the executable spec of [design.md](design.md) Part 3) over the C++-loaded records. A case passes
+  only if Rust equals C++ (or its declared expectation) **and** equals the reference.
 - The difftest's Rust readers produce the msgpack output since the final fix: the library through
   `MsgpackResultSink`, `clp-s-rs` through `--output file`. Of the 4 msgpack cases, 3 pass and
   `wire-msgpack-split` is accepted under DV-21, with the same verdicts for both readers. The 3
@@ -190,11 +190,11 @@ Checked through `clp-s-rs` by hand, and in tests:
 | structured arrays are rejected at open, before any output | `x` and `s` on `arrays.structurize-arrays.clps` → "unsupported archive feature in section /schema_tree: structured arrays", exit 2, no output; `clp-s-format` crafted test (unordered region); difftest SX-02 | OK |
 | version window [0.5.0, 0.5.x] | header-patched copies: 0.4.0, 0.6.0 and 1.5.0 → "unsupported archive version", exit 2; 0.5.2 and 0.5.65535 read; `crafted.rs::versions_outside_the_window_are_unsupported` | OK |
 | archives ingested from kv-IR are readable | `kvir-text.default`, `kvir-text.ts`: `x` passes, `wire-msgpack-kvir` passes, and a hand check of 6 queries on `kvir-text.ts` was byte-identical to C++ | OK |
-| no IR features | no kv-IR search, `.clp` input or Velox code; the crate list matches [design.md](design.md) §2 | OK |
+| no IR features | no kv-IR search, `.clp` input or Velox code; the crate list matches [design.md](design.md) Part 2 §2 | OK |
 | unordered extract only; `--ordered`, `--count`, `--count-by-time` rejected with exit 1 | `clp-s-cli` tests | OK |
 | `CurrentThread` only; no pool or prefetch; S3 issues one GET per coalesced range, in sequence | code review of `clp-s-exec` and `clp-s-object-store` | OK |
 | DR1/DR2 layering | `cargo tree -p clp-s-exec -e normal` shows no tokio, aws or mongodb; no library reads env vars; table and search do not depend on json | OK |
-| no `unsafe` without a measured need | one `unsafe impl WriteBuf for PrefixBuffer` (`clp-s-format/src/decode.rs`), which caps zstd at the planned prefix (design report: prefix ends cut decoded bytes by 18-59%); it has `// SAFETY:` comments | OK |
+| no `unsafe` without a measured need | one `unsafe impl WriteBuf for PrefixBuffer` (`clp-s-format/src/decode.rs`), which caps zstd at the planned prefix (design.md Part 1 §4.2.3: prefix ends cut decoded bytes by 18-59%); it has `// SAFETY:` comments | OK |
 
 ### 3. Divergences hit
 
@@ -208,7 +208,7 @@ Checked through `clp-s-rs` by hand, and in tests:
 | DV-20 | logically false queries and `--tge` without a timestamp column: Rust exits 0 with a warning, C++ exits 1 (also seen in the hand checks: `a > "x"`, `a > 1e400`) | declared, exit-code check |
 | DV-21, DV-22, DV-23, DV-24, DV-25, DV-27, DV-34, DV-45 | wire and results-cache outputs | output-shape tests |
 | DV-29/DV-43, DV-30, DV-31, DV-32, DV-35, DV-41, DV-42 | format and planner unit tests | dedicated tests |
-| **DV-47** (new) | `NOT $_filename: ...` (3 cases) | registered in `tests/divergences.toml` only; **not yet in design report §8.3** (issue 9) |
+| **DV-47** (new) | `NOT $_filename: ...` (3 cases) | registered in `tests/divergences.toml`, and now in [design.md](design.md) Part 1 §8.3 (issue 9) |
 | SX-01, SX-02 | rejection fixtures | expected rejection |
 
 ### 4. Correctness hot spots reviewed
@@ -259,9 +259,9 @@ Checked through `clp-s-rs` by hand, and in tests:
 - **Fuzzing breadth:** the fuzzing in §2.2 covers only the `search.*` fixtures (40 records). The
   other fixtures are covered only by the curated suite.
 - **Wire outputs:** the difftest does not drive the results-cache output for the Rust readers (3
-  SKIP lines), because it needs MongoDB. Dedicated tests cover it, so the DESIGN §11.3 rule that
-  the library and CLI give identical digests is not checked for that output. The msgpack output is
-  judged for both readers since the final fix.
+  SKIP lines), because it needs MongoDB. Dedicated tests cover it, so the design.md Part 2 §11.3
+  rule that the library and CLI give identical digests is not checked for that output. The msgpack
+  output is judged for both readers since the final fix.
 - **Performance:** the report (Part 2) is indicative only: WSL2, one machine, archives of
   11-33 MB. In this review, `extract-datasets.sh` ran concurrently with the S3 suite and gave
   `x` best-of-3 times of 0.33/0.46/0.50 s (Rust) against 0.55/0.77/0.86 s (C++) on
@@ -277,10 +277,9 @@ Severity: **Medium** = fix before this code moves into the repository workspace;
 small cleanup; **Info** = a decision to record. There are no High issues.
 
 **Status after the final fix (2026-10-18).** Each issue was verified against the code before it was
-changed. Issues 1-8 and 10 are fixed. Issue 9 is fixed inside this workspace; its design-report half
-lives outside the workspace and is still open. Issue 11 needs no change. Every gate and every
-equivalence suite was rerun afterwards (see [Re-run after the final
-fix](#re-run-after-the-final-fix)).
+changed. Issues 1-10 are fixed; issue 9's DV-47 row is now in design.md Part 1 §8.3. Issue 11
+needs no change. Every gate and every equivalence suite was rerun afterwards (see [Re-run after
+the final fix](#re-run-after-the-final-fix)).
 
 1. **Fixed. Medium (style: docstrings).** About 45 functions lacked docstrings, against the review
    guide rule that every function is documented. All of them were test helpers. Every helper the
@@ -326,10 +325,10 @@ fix](#re-run-after-the-final-fix)).
    codes, and a pseudo-terminal (`script`) still gets colours.
    `clp-s-cli/tests/search.rs::archives_that_cannot_match_succeed_with_a_diagnostic` now asserts
    that the captured warning has no ESC byte. With `.with_ansi(true)` put back, the test fails.
-7. **Fixed. Low (design drift).** The code is right and the design was stale, so DESIGN §7.3 now
-   describes `ResultsCacheSink` as built: JSON and timestamps, `Commutative`. DESIGN §15 X3 records
-   the reason: `_id` keys on the record id (DV-24), and the top-k winners arrive in the single
-   `TopK` partition (D10).
+7. **Fixed. Low (design drift).** The code is right and the design was stale, so design.md Part 2
+   §7.3 now describes `ResultsCacheSink` as built: JSON and timestamps, `Commutative`. Part 2 §15 X3
+   records the reason: `_id` keys on the record id (DV-24), and the top-k winners arrive in the
+   single `TopK` partition (D10).
 8. **Fixed. Low (coverage and reporting).** Both Rust readers of `clp-s-difftest` now produce the
    msgpack output: the library through `MsgpackResultSink` into a buffer (via a shared
    `run_into_buffer` helper), and `clp-s-rs` through `--output file --path`. On the fixture
@@ -342,12 +341,11 @@ fix](#re-run-after-the-final-fix)).
    - The results-cache output stays skipped in the difftest, because it needs MongoDB.
      `tests/README.md` ("Wire oracles", "Who judges them") now says which tests own it.
    - `tests/RESULTS-M2.md` has an update note in place of the "pending M3a" statement.
-9. **Partly fixed. Low (divergence register).** DV-47 is now in the DESIGN §10 divergence table,
-   with its three suite cases. Design report §8.3 lives outside this workspace, so **the row still
-   has to be added there**. Proposed row:
-   `| DV-47 | Search | Range-index leaves under NOT: NarrowTypes splits NOT $f: "s" into NOT f:VarString = s OR EXISTS f:ClpString, then rewrites range-index leaves into log_event_idx ranges, so NOT $_filename: "<file>" returns every record of the file and NOT $_filename: * returns nothing without a range index | K3 over each record's range-index fields |`.
-10. **Fixed (recorded). Info (scope).** DESIGN §15 now records the two Spider-adapter behaviours
-    as deviations, with their reasons and tests:
+9. **Fixed. Low (divergence register).** DV-47 is in the design.md Part 2 §10 divergence table,
+   with its three suite cases, and its row is now in the divergence register of design.md Part 1
+   §8.3.
+10. **Fixed (recorded). Info (scope).** design.md Part 2 §15 now records the two Spider-adapter
+    behaviours as deviations, with their reasons and tests:
     - X1: the C++ `clp-s` subprocess fallback on an `UnsupportedArchive` raised before anything
       was written;
     - X2: the `WaitForBase` retry on a memory-budget `ResourceExhausted`. Inside the reader the

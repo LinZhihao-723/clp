@@ -170,14 +170,14 @@ archives searched as one session, or `dataset:<name>`), `kql`, and optionally `i
 `tge`/`tle` (epoch ms), `projection`, `outputs` and `max_num_results`. Multi-archive targets run in
 C++ as one `clp-s s <dir>` over a directory of symlinks to the archives.
 
-- **Divergences.** A query whose C++ result is a registered divergence (design report §8.3) has
+- **Divergences.** A query whose C++ result is a registered divergence (design.md Part 1 §8.3) has
   `divergence = ["DV-xx", ...]`. It also states the Rust result it expects:
   - `expected_rust_ids`: the `rid` (search), `kid` (keys) or `id` values of the expected records;
   - `expected_rust_count`: used for fixtures without ids, and for datasets;
   - `expected_rust_exit = 0`: used for DV-20.
 - **Non-divergent queries** must match the C++ oracle exactly, as a canonical multiset.
-- **Reference model.** `scripts/reference_eval.py` is an independent Python model of design
-  report §8.1: K3 over existential predicates, istringstream literal typing, wildcards that descend
+- **Reference model.** `scripts/reference_eval.py` is an independent Python model of design.md
+  Part 3: K3 over existential predicates, istringstream literal typing, wildcards that descend
   into arrays, epoch-ms numeric literals against the timestamp column, ns-exact time bounds, and
   ASCII case-folding. `gen-oracles.sh` runs it on every fixture query and writes
   `reference_status` into the manifest:
@@ -246,5 +246,5 @@ The authoritative numbers are in the GENERATED manifests.
   17, 19, 20, 21, 24, 25, 36, 37, 38, 39 and 47.
 - **Reference model:** it agrees with C++ on 224 untagged fixture queries. On the 75 tagged
   fixture queries it checks, it agrees with the stated Rust expectation. It also reproduces the
-  design report's figures on the datasets: 750,396 for `NOT ERROR` on bench, and 30,781 for
+  figures of design.md Part 1 on the datasets: 750,396 for `NOT ERROR` on bench, and 30,781 for
   `payload > 50000` on synthetic.
