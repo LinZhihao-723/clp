@@ -1,0 +1,123 @@
+# Search benchmark following Log Archival Bench (LAB):
+# https://github.com/y-scope/log-archival-bench
+#
+# String values may reference `${VAR}`: `CLP_S` (default `<repo>/build/core/clp-s`), `CLP_S_RS`
+# (default `$CARGO_TARGET_DIR/release/clp-s-rs`, else `<workspace>/target/release/clp-s-rs`),
+# `LAB_DATA_ROOT` (default `<workspace>/target/lab-data`), `PROTO_DATA_ROOT` (default
+# `<workspace>/target/proto-data`) or any other environment variable. Relative paths are resolved
+# against `data_root`.
+
+data_root: "${LAB_DATA_ROOT}"
+
+# LAB `src/template.py` (`bench_search`, `poll_memory`) and `assets/clp/config.yaml`.
+search:
+  hot_run_warm_up_times: 3
+  memory_polling_interval_s: 0.1
+  repetitions: 5
+  # LAB runs each tool in a container limited with `--cpus=4`; here every search runs natively,
+  # pinned with `taskset -c`.
+  cpu_set: "8-11"
+  # LAB `assets/clp/main.py` `clear_cache`: `sync` then `echo 1 > /proc/sys/vm/drop_caches`, run in
+  # a privileged container so that no host root access is needed.
+  clear_cache_command:
+    - docker
+    - run
+    - --rm
+    - --privileged
+    - mongo:8.0.21
+    - sh
+    - -c
+    - sync; echo 1 > /proc/sys/vm/drop_caches
+
+# A reader's search command. `{binary}`, `{archives}` (the archive directory) and `{query}` (the
+# KQL text) are substituted per element.
+readers:
+  cpp:
+    binary: "${CLP_S}"
+    search_command: ["{binary}", "s", "{archives}", "{query}"]
+  rust:
+    binary: "${CLP_S_RS}"
+    # A directory of single-file archives is searched as one session over its entries, sorted by
+    # name (the same set C++ searches for that directory).
+    search_command: ["{binary}", "search", "{archives}", "--query", "{query}"]
+
+# A tool is a reader searching one archive layout of the dataset. Within a repetition the tools
+# run interleaved per (mode, query), in an order rotated every repetition.
+tools:
+  cpp-mfa: {reader: cpp, archives: mfa}
+  cpp-sfa: {reader: cpp, archives: sfa}
+  rust-sfa: {reader: rust, archives: sfa}
+
+# Archives are always written by the C++ `clp-s` (LAB `assets/clp/main.py` `ingest`); compression
+# is not measured. `{layout_flags}` expands to the flags of the archive layout.
+compression:
+  reader: cpp
+  command:
+    - "{binary}"
+    - c
+    - --timestamp-key
+    - "{timestamp_key}"
+    - --target-encoded-size
+    - "{target_encoded_size}"
+    - "{layout_flags}"
+    - "{output_dir}"
+    - "{input}"
+  layout_flags:
+    mfa: []
+    sfa: [--single-file-archive]
+
+# Speedup columns of the report: `candidate` against `baseline` (baseline time / candidate time).
+report:
+  speedups:
+    - {candidate: rust-sfa, baseline: cpp-sfa}
+    - {candidate: rust-sfa, baseline: cpp-mfa}
+
+# `queries[].lab_query` is LAB's text verbatim: LAB joins the command into one string and splits it
+# with `shlex.split` (`docker_execute`), so the KQL is `shlex.split(lab_query)`, which must be one
+# token. `expected_count` comes from LAB `src/template.py` `check_results`.
+datasets:
+  mongod:
+    # LAB `data/mongod/metadata.yaml` and `scripts/download_all.py`.
+    source: "https://zenodo.org/records/11075361/files/mongodb.tar.gz?download=1"
+    tarball: mongod/mongodb.tar.gz
+    input: mongod/mongod.log
+    number_of_lines: 186287600
+    timestamp_key: "t.$date"
+    target_encoded_size: 268435456
+    archives:
+      mfa: mongod/archives-mfa
+      sfa: mongod/archives-sfa
+    queries:
+      - lab_query: '"attr.tickets:*"'
+        expected_count: 38611
+      - lab_query: '"id: 22419"'
+        expected_count: 336293
+      - lab_query: '"attr.message.msg: log_release* AND attr.message.session_name: connection"'
+        expected_count: 1
+      - lab_query: '''ctx: initandlisten AND (NOT msg: "WiredTiger message" OR attr.message.msg: log_remove*)'''
+        expected_count: 122
+      - lab_query: '"c: WTWRTLOG AND attr.message.ts_sec > 1679490000"'
+        expected_count: 52421
+      - lab_query: '"ctx: FlowControlRefresher AND attr.numTrimmed: 0"'
+        expected_count: 38611
+
+  # A small dataset that validates the harness (`run.py --smoke`): the `bench` dataset of the
+  # differential tests. Its SFA is the existing dataset archive; its MFAs are compressed from the
+  # archive's decompressed JSON lines.
+  smoke:
+    input: "${PROTO_DATA_ROOT}/oracles/datasets/bench.x.jsonl"
+    number_of_lines: 1000000
+    sfa_seed:
+      - "${PROTO_DATA_ROOT}/datasets/bench.clps"
+    timestamp_key: timestamp
+    target_encoded_size: 16777216
+    archives:
+      mfa: smoke/archives-mfa
+      sfa: smoke/archives-sfa
+    queries:
+      - lab_query: '"seq: 424242"'
+        expected_count: 1
+      - lab_query: '"level: ERROR"'
+        expected_count: 249604
+      - lab_query: '"latency_ms > 9000"'
+        expected_count: 100100
