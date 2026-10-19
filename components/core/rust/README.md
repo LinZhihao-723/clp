@@ -14,7 +14,8 @@ Scope:
 
 Documentation:
 
-- [`docs/design.md`](docs/design.md): architecture, decisions and search semantics.
+- [`docs/design.md`](docs/design.md): the architecture, the prototype design and the search
+  semantics.
 - [`docs/prototyping-and-benchmark.md`](docs/prototyping-and-benchmark.md): conformance against
   the C++ `clp-s` and indicative query performance.
 - [`docs/api-overview.md`](docs/api-overview.md): the public archive iteration API.

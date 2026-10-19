@@ -3,7 +3,8 @@
 Hosts read archives through one crate, `clp-s-reader`, which re-exports a small facade: open an
 `Archive`, describe what you want in a `ScanRequest`, then either pull batches from a `Scan` or push
 a multi-archive `SearchSession` into a `Sink`. This document lists that surface for review before the
-API is frozen. The design behind it is in [design.md](design.md).
+API is frozen. The design behind it is in [design.md](design.md): Part 1 §5 is the target API and
+Part 2 the prototype's contracts.
 
 ## Overview
 
@@ -459,9 +460,10 @@ pub struct ScanStats {
 ## Design notes and open questions
 
 The surface is small and consistent, but documenting it turned up a few types that leak from
-internal crates and two design-report APIs that this round does not have yet.
+internal crates and two APIs of the target design ([design.md](design.md) Part 1 §5) that this
+round does not have yet.
 
-**Deviations from the design report (by decision this round)**
+**Deviations from the target API of design.md Part 1 §5 (by decision this round)**
 
 - S3 is `ArchiveLocation::Source(Arc::new(S3Source::new(..)?))`, re-exported as
   `clp_s_reader::s3::*` behind feature `s3`, instead of an `ArchiveLocation::S3` variant.
