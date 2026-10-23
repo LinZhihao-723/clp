@@ -17,9 +17,9 @@ use futures::Stream;
 use search_result_listener::JobStatusSource;
 use search_result_listener::MariaDbJobStatusSource;
 use search_result_listener::OutcomeFuture;
+use search_result_listener::ResultEncoding;
 use search_result_listener::ResultListener;
 use search_result_listener::ResultStream;
-use search_result_listener::SearchResult;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionOutcome;
 
@@ -114,21 +114,28 @@ impl QueryJobTable for MariaDbQueryJobTable {
 /// # Type Parameters
 ///
 /// * `QueryJobTableType` - The query jobs table that searches are submitted to.
-pub struct StreamingSearch<QueryJobTableType: QueryJobTable> {
-    listener: ResultListener,
+/// * `EncodingType` - The encoding of the results the searches stream back.
+pub struct StreamingSearch<QueryJobTableType: QueryJobTable, EncodingType: ResultEncoding> {
+    listener: ResultListener<EncodingType>,
     query_job_table: QueryJobTableType,
 }
 
-impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
+impl<QueryJobTableType: QueryJobTable, EncodingType: ResultEncoding>
+    StreamingSearch<QueryJobTableType, EncodingType>
+{
     #[must_use]
-    pub const fn new(listener: ResultListener, query_job_table: QueryJobTableType) -> Self {
+    pub const fn new(
+        listener: ResultListener<EncodingType>,
+        query_job_table: QueryJobTableType,
+    ) -> Self {
         Self {
             listener,
             query_job_table,
         }
     }
 
-    /// Submits a search job whose search tasks stream their results to this server.
+    /// Submits a search job whose search tasks stream their results to this server, which encodes
+    /// them with `encoding`.
     ///
     /// Dropping the returned future once it has been polled doesn't stop the job's submission: the
     /// submitted job's cancellation is requested instead.
@@ -147,9 +154,12 @@ impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
     pub async fn submit(
         &self,
         query_config: QueryConfig,
-    ) -> Result<SearchStream<QueryJobTableType>, ClientError> {
+        encoding: EncodingType,
+    ) -> Result<SearchStream<QueryJobTableType, EncodingType::Batch>, ClientError> {
         let mut search_job_config = query_config.into_streaming_search_job_config()?;
-        let session = self.listener.open_session(SessionConfig::default());
+        let session = self
+            .listener
+            .open_session(SessionConfig::default(), encoding);
         search_job_config.network_output = Some(session.network_output().clone());
         let query_job_table = self.query_job_table.clone();
         tokio::spawn(async move {
@@ -174,17 +184,21 @@ impl<QueryJobTableType: QueryJobTable> StreamingSearch<QueryJobTableType> {
 }
 
 /// An event of a streaming search.
+///
+/// # Type Parameters
+///
+/// * `BatchType` - The type of a batch of encoded results.
 #[derive(Debug)]
-pub enum SearchEvent {
-    /// A search result.
-    Result(SearchResult),
+pub enum SearchEvent<BatchType> {
+    /// A batch of the search's results, in the order its connection claimed them.
+    Results(BatchType),
 
     /// The end of the search, once its query job has terminated and every result has been
     /// streamed, with the search's outcome.
     End(Result<SessionOutcome, search_result_listener::Error>),
 }
 
-/// The events of a streaming search: each of its results as it arrives, then its end.
+/// The events of a streaming search: each batch of its results as it arrives, then its end.
 ///
 /// Dropping the stream before its end, or ending it because its query job's status can no longer be
 /// tracked, requests the cancellation of its query job.
@@ -192,9 +206,10 @@ pub enum SearchEvent {
 /// # Type Parameters
 ///
 /// * `QueryJobTableType` - The query jobs table that the search was submitted to.
-pub struct SearchStream<QueryJobTableType: QueryJobTable> {
+/// * `BatchType` - The type of a batch of encoded results.
+pub struct SearchStream<QueryJobTableType: QueryJobTable, BatchType> {
     query_job_id: QueryJobId,
-    results: ResultStream,
+    results: ResultStream<BatchType>,
     have_results_ended: bool,
 
     /// `None` once the end has been streamed.
@@ -203,7 +218,7 @@ pub struct SearchStream<QueryJobTableType: QueryJobTable> {
     query_job_table: QueryJobTableType,
 }
 
-impl<QueryJobTableType: QueryJobTable> SearchStream<QueryJobTableType> {
+impl<QueryJobTableType: QueryJobTable, BatchType> SearchStream<QueryJobTableType, BatchType> {
     #[must_use]
     pub const fn query_job_id(&self) -> QueryJobId {
         self.query_job_id
@@ -228,14 +243,16 @@ impl<QueryJobTableType: QueryJobTable> SearchStream<QueryJobTableType> {
     }
 }
 
-impl<QueryJobTableType: QueryJobTable> Stream for SearchStream<QueryJobTableType> {
-    type Item = SearchEvent;
+impl<QueryJobTableType: QueryJobTable, BatchType> Stream
+    for SearchStream<QueryJobTableType, BatchType>
+{
+    type Item = SearchEvent<BatchType>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if !this.have_results_ended {
             match ready!(Pin::new(&mut this.results).poll_next(cx)) {
-                Some(result) => return Poll::Ready(Some(SearchEvent::Result(result))),
+                Some(batch) => return Poll::Ready(Some(SearchEvent::Results(batch))),
                 None => this.have_results_ended = true,
             }
         }
@@ -251,7 +268,9 @@ impl<QueryJobTableType: QueryJobTable> Stream for SearchStream<QueryJobTableType
     }
 }
 
-impl<QueryJobTableType: QueryJobTable> Drop for SearchStream<QueryJobTableType> {
+impl<QueryJobTableType: QueryJobTable, BatchType> Drop
+    for SearchStream<QueryJobTableType, BatchType>
+{
     fn drop(&mut self) {
         let Some(outcome) = self.outcome.take() else {
             return;

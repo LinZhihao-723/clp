@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::Path;
 use axum::extract::Query;
 use axum::extract::State;
@@ -13,7 +14,6 @@ use clp_rust_utils::job_config::QueryJobStatus;
 use clp_rust_utils::types::ArchiveId;
 use futures::Stream;
 use futures::StreamExt;
-use search_result_listener::SearchResult;
 use search_result_listener::SessionOutcome;
 use serde::Deserialize;
 use serde::Serialize;
@@ -32,6 +32,9 @@ use crate::client::CompressionUsage;
 use crate::client::CompressionUsageParams;
 use crate::client::QueryConfig;
 use crate::client::ValidatedCompressionUsageParams;
+use crate::sse;
+use crate::sse::SseEncoding;
+use crate::sse::SseResponse;
 use crate::streaming_search::QueryJobTable;
 use crate::streaming_search::SearchEvent;
 use crate::streaming_search::StreamingSearch;
@@ -233,7 +236,7 @@ struct QueryResultsUri {
 async fn stream_query(
     State(client): State<Client>,
     Json(query_config): Json<QueryConfig>,
-) -> Result<Sse<impl Stream<Item = Result<Event, HandlerError>>>, HandlerError> {
+) -> Result<SseResponse<impl Stream<Item = Result<Bytes, HandlerError>>>, HandlerError> {
     serve_streaming_search(client.streaming_search(), query_config).await
 }
 
@@ -257,20 +260,6 @@ struct StreamingSearchResult {
 
     /// The result's log message, without its trailing newline.
     message: String,
-}
-
-impl From<SearchResult> for StreamingSearchResult {
-    fn from(result: SearchResult) -> Self {
-        let mut message = result.message;
-        if message.ends_with('\n') {
-            message.pop();
-        }
-        Self {
-            archive_id: result.archive_id,
-            timestamp: result.timestamp,
-            message,
-        }
-    }
 }
 
 /// The data of a streaming search's `end` event: the terminal status of the search's query job,
@@ -325,12 +314,12 @@ struct StreamingSearchError {
 /// * [`HandlerError::NotImplemented`] if `streaming_search` is `None`, i.e., the package doesn't
 ///   run queries on Spider.
 /// * Forwards [`StreamingSearch::submit`]'s return values on failure.
-/// * Forwards [`Event::json_data`]'s return values on failure.
+/// * Forwards [`sse::encode_event`]'s return values on failure.
 async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
-    streaming_search: Option<&StreamingSearch<QueryJobTableType>>,
+    streaming_search: Option<&StreamingSearch<QueryJobTableType, SseEncoding>>,
     query_config: QueryConfig,
 ) -> Result<
-    Sse<impl Stream<Item = Result<Event, HandlerError>> + use<QueryJobTableType>>,
+    SseResponse<impl Stream<Item = Result<Bytes, HandlerError>> + use<QueryJobTableType>>,
     HandlerError,
 > {
     const END_EVENT: &str = "end";
@@ -347,17 +336,15 @@ async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
         ));
     };
     let search_stream = streaming_search
-        .submit(query_config)
+        .submit(query_config, SseEncoding)
         .await
         .inspect_err(|e| tracing::error!(error = % e, "Failed to submit a streaming search."))?;
     let query_job_id = search_stream.query_job_id();
 
-    let job_event = Event::default()
-        .event(JOB_EVENT)
-        .json_data(StreamingSearchJob { query_job_id })?;
+    let job_event = sse::encode_event(JOB_EVENT, &StreamingSearchJob { query_job_id })?;
     let mut has_streamed_result = false;
     let events = search_stream.map(move |search_event| match search_event {
-        SearchEvent::Result(result) => {
+        SearchEvent::Results(batch) => {
             if !has_streamed_result {
                 has_streamed_result = true;
                 tracing::debug!(
@@ -365,28 +352,29 @@ async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
                     "Yielding the streaming search's first result."
                 );
             }
-            Ok(Event::default().json_data(StreamingSearchResult::from(result))?)
+            Ok(batch)
         }
-        SearchEvent::End(Ok(outcome)) => Ok(Event::default()
-            .event(END_EVENT)
-            .json_data(StreamingSearchEnd::from(outcome))?),
+        SearchEvent::End(Ok(outcome)) => Ok(sse::encode_event(
+            END_EVENT,
+            &StreamingSearchEnd::from(outcome),
+        )?),
         SearchEvent::End(Err(e)) => {
             tracing::error!(
                 query_job_id,
                 error = % e,
                 "Failed to wait for the streaming search's query job to terminate."
             );
-            Ok(Event::default()
-                .event(ERROR_EVENT)
-                .json_data(StreamingSearchError {
+            Ok(sse::encode_event(
+                ERROR_EVENT,
+                &StreamingSearchError {
                     message: "failed to wait for the query job to terminate".to_owned(),
-                })?)
+                },
+            )?)
         }
     });
-    Ok(
-        Sse::new(futures::stream::once(std::future::ready(Ok(job_event))).chain(events))
-            .keep_alive(KeepAlive::default()),
-    )
+    Ok(SseResponse::new(
+        futures::stream::once(std::future::ready(Ok(job_event))).chain(events),
+    ))
 }
 
 /// Query parameters for the query results endpoint.
@@ -569,8 +557,8 @@ enum HandlerError {
     NotImplemented(String),
 }
 
-impl From<axum::Error> for HandlerError {
-    fn from(_: axum::Error) -> Self {
+impl From<serde_json::Error> for HandlerError {
+    fn from(_: serde_json::Error) -> Self {
         Self::InternalServer
     }
 }
@@ -910,6 +898,7 @@ mod tests {
 #[cfg(test)]
 mod stream_query_tests {
     use std::collections::BTreeMap;
+    use std::convert::Infallible;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
     use std::ops::Range;
@@ -922,19 +911,30 @@ mod stream_query_tests {
     use async_trait::async_trait;
     use axum::Json;
     use axum::body::Body;
+    use axum::body::Bytes;
     use axum::http::Request;
     use axum::http::StatusCode;
+    use axum::http::header::CACHE_CONTROL;
     use axum::http::header::CONTENT_TYPE;
+    use axum::response::IntoResponse;
     use axum::response::Response;
+    use axum::response::Sse;
+    use axum::response::sse::Event;
     use axum::routing::post;
     use clp_rust_utils::job_config::NetworkOutput;
     use clp_rust_utils::job_config::QueryJobId;
     use clp_rust_utils::job_config::QueryJobStatus;
     use clp_rust_utils::job_config::SearchJobConfig;
+    use clp_rust_utils::types::ArchiveId;
+    use futures::stream;
     use http_body_util::BodyExt;
     use search_result_listener::JobStatusSource;
     use search_result_listener::ListenerConfig;
+    use search_result_listener::ResultEncoder;
+    use search_result_listener::ResultEncoding;
     use search_result_listener::ResultListener;
+    use search_result_listener::SessionOutcome;
+    use search_result_listener::SessionStats;
     use serde_json::json;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
@@ -944,13 +944,38 @@ mod stream_query_tests {
     use tokio::time::timeout;
     use tower::ServiceExt;
 
+    use super::StreamingSearchEnd;
+    use super::StreamingSearchError;
+    use super::StreamingSearchJob;
+    use super::StreamingSearchResult;
     use super::serve_streaming_search;
     use crate::client::ClientError;
     use crate::client::QueryConfig;
+    use crate::sse;
+    use crate::sse::SseEncoding;
     use crate::streaming_search::QueryJobTable;
     use crate::streaming_search::StreamingSearch;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
+
+    /// Messages whose JSON escaping or trailing newlines an event encoding could get wrong.
+    const TRICKY_MESSAGES: &[&str] = &[
+        "{\"quoted\":\"value\"}\n",
+        "back\\slash\n",
+        "nul \u{0} unit separator \u{1f} delete \u{7f}\n",
+        "tab\t backspace\u{8} form feed\u{c}\n",
+        "line separator \u{2028} paragraph separator \u{2029}\n",
+        "non-ASCII é 日本 🦀\n",
+        "x\n",
+        "x\n\n",
+        "x\r\n",
+        "inner\nnewline",
+        "",
+        "\n",
+    ];
+
+    /// Timestamps at the edges of their range.
+    const TRICKY_TIMESTAMPS: &[i64] = &[i64::MIN, -1, 0, i64::MAX];
 
     /// The longest a test waits for the server before failing.
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -1357,6 +1382,21 @@ mod stream_query_tests {
             Self { stream }
         }
 
+        /// Sends `results` as the task's first results, each given by its timestamp and message.
+        async fn send_timestamped_messages(&mut self, results: &[(i64, &str)]) {
+            let mut bytes = Vec::new();
+            for (result_index, (timestamp, message)) in (0_u64..).zip(results) {
+                bytes.extend(
+                    rmp_serde::to_vec(&(result_index, timestamp, message))
+                        .expect("encoding a result shouldn't fail"),
+                );
+            }
+            self.stream
+                .write_all(&bytes)
+                .await
+                .expect("sending results should succeed");
+        }
+
         /// Sends the results at `result_indices`.
         async fn send_results(&mut self, result_indices: Range<u64>) {
             let mut bytes = Vec::new();
@@ -1384,7 +1424,7 @@ mod stream_query_tests {
     ///
     /// A router serving `POST /query/stream`.
     fn streaming_search_app(
-        streaming_search: Option<Arc<StreamingSearch<FakeQueryJobTable>>>,
+        streaming_search: Option<Arc<StreamingSearch<FakeQueryJobTable, SseEncoding>>>,
     ) -> axum::Router {
         axum::Router::new().route(
             "/query/stream",
@@ -1439,6 +1479,163 @@ mod stream_query_tests {
     /// The message of the result at `result_index`, without a trailing newline.
     fn message(result_index: u64) -> String {
         format!("{{\"result\":{result_index}}}")
+    }
+
+    /// # Returns
+    ///
+    /// Each of [`TRICKY_MESSAGES`], paired with one of [`TRICKY_TIMESTAMPS`] in turn.
+    fn tricky_results() -> Vec<(i64, &'static str)> {
+        TRICKY_TIMESTAMPS
+            .iter()
+            .copied()
+            .cycle()
+            .zip(TRICKY_MESSAGES.iter().copied())
+            .collect()
+    }
+
+    /// # Returns
+    ///
+    /// The event that the streaming search route encoded with [`Event::json_data`] for a result.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serializing the result fails.
+    fn axum_result_event(archive_id: ArchiveId, timestamp: i64, message: &str) -> Event {
+        let mut message = message.to_owned();
+        if message.ends_with('\n') {
+            message.pop();
+        }
+        Event::default()
+            .json_data(StreamingSearchResult {
+                archive_id,
+                timestamp,
+                message,
+            })
+            .expect("serializing a result shouldn't fail")
+    }
+
+    /// # Returns
+    ///
+    /// The body of an axum [`Sse`] response streaming `events`.
+    async fn axum_sse_body(events: Vec<Event>) -> String {
+        body_text(
+            Sse::new(stream::iter(events.into_iter().map(Ok::<_, Infallible>))).into_response(),
+        )
+        .await
+    }
+
+    /// # Returns
+    ///
+    /// `bytes` as a string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bytes` isn't UTF-8.
+    fn utf8(bytes: &Bytes) -> String {
+        String::from_utf8(bytes.to_vec()).expect("the bytes should be UTF-8")
+    }
+
+    #[tokio::test]
+    async fn sse_encoder_matches_axum_json_events() -> anyhow::Result<()> {
+        let archive_id = ARCHIVE_ID.parse::<ArchiveId>()?;
+        let mut encoder = SseEncoding.encoder(archive_id);
+        let mut axum_events = Vec::new();
+        for (timestamp, message) in tricky_results() {
+            encoder.encode(timestamp, message);
+            axum_events.push(axum_result_event(archive_id, timestamp, message));
+        }
+
+        assert_eq!(
+            utf8(&encoder.take_batch()),
+            axum_sse_body(axum_events).await
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn named_events_match_axum() -> anyhow::Result<()> {
+        let job = StreamingSearchJob { query_job_id: 7 };
+        let end = StreamingSearchEnd::from(SessionOutcome {
+            status: QueryJobStatus::Succeeded,
+            stats: SessionStats {
+                num_results_emitted: 3,
+                num_duplicates_dropped: 2,
+                num_protocol_errors: 1,
+                num_results_discarded: 0,
+            },
+        });
+        let error = StreamingSearchError {
+            message: "failed to wait for the \"query\" job\nto terminate".to_owned(),
+        };
+
+        assert_eq!(
+            utf8(&sse::encode_event("job", &job)?),
+            axum_sse_body(vec![Event::default().event("job").json_data(&job)?]).await
+        );
+        assert_eq!(
+            utf8(&sse::encode_event("end", &end)?),
+            axum_sse_body(vec![Event::default().event("end").json_data(&end)?]).await
+        );
+        assert_eq!(
+            utf8(&sse::encode_event("error", &error)?),
+            axum_sse_body(vec![Event::default().event("error").json_data(&error)?]).await
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_body_is_byte_identical_to_the_axum_sse_rendering() -> anyhow::Result<()> {
+        let harness = Harness::start().await;
+        let response = harness.post(&json!({"query_string": "*"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(b"text/event-stream".as_slice())
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(CACHE_CONTROL)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(b"no-cache".as_slice())
+        );
+
+        let results = tricky_results();
+        let mut clp_s = harness.connect(1).await;
+        clp_s.send_timestamped_messages(&results).await;
+        drop(clp_s);
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Succeeded);
+        let body = timeout(TIMEOUT, body_text(response)).await?;
+
+        let archive_id = ARCHIVE_ID.parse::<ArchiveId>()?;
+        let mut axum_events = vec![
+            Event::default()
+                .event("job")
+                .json_data(StreamingSearchJob { query_job_id: 1 })?,
+        ];
+        axum_events.extend(
+            results
+                .iter()
+                .map(|(timestamp, message)| axum_result_event(archive_id, *timestamp, message)),
+        );
+        axum_events.push(
+            Event::default()
+                .event("end")
+                .json_data(StreamingSearchEnd::from(SessionOutcome {
+                    status: QueryJobStatus::Succeeded,
+                    stats: SessionStats {
+                        num_results_emitted: u64::try_from(results.len())?,
+                        ..SessionStats::default()
+                    },
+                }))?,
+        );
+        assert_eq!(body, axum_sse_body(axum_events).await);
+        Ok(())
     }
 
     #[tokio::test]

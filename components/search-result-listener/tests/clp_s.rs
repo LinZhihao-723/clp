@@ -17,6 +17,7 @@ use common::FakeJobStatusSource;
 use futures::StreamExt;
 use search_result_listener::ListenerConfig;
 use search_result_listener::ResultListener;
+use search_result_listener::SearchResultEncoding;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionStats;
 use tokio::process::Command;
@@ -24,7 +25,7 @@ use uuid::Uuid;
 
 const NUM_RECORDS: u64 = 1000;
 const QUERY: &str = "*Transmitted*";
-const TIMEOUT: Duration = Duration::from_secs(60);
+const TIMEOUT: Duration = Duration::from_mins(1);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires a clp-s binary; set `CLP_S_BINARY` to its path"]
@@ -75,7 +76,7 @@ async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
         ..ListenerConfig::default()
     })
     .await?;
-    let session = listener.open_session(SessionConfig::default());
+    let session = listener.open_session(SessionConfig::default(), SearchResultEncoding);
     let network_output = session.network_output().clone();
     let status_source = FakeJobStatusSource::new();
     let (results, outcome) = session.run(1, status_source.clone());
@@ -98,7 +99,7 @@ async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
     search(QUERY, 0).await?;
     status_source.set(Some(QueryJobStatus::Succeeded));
 
-    let results = tokio::time::timeout(TIMEOUT, results.collect::<Vec<_>>()).await?;
+    let results = tokio::time::timeout(TIMEOUT, results.concat()).await?;
     let outcome = tokio::time::timeout(TIMEOUT, outcome).await??;
     let mut messages = Vec::with_capacity(results.len());
     for result in results {

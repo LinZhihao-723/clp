@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
@@ -23,6 +24,7 @@ use search_result_listener::OutcomeFuture;
 use search_result_listener::ResultListener;
 use search_result_listener::ResultStream;
 use search_result_listener::SearchResult;
+use search_result_listener::SearchResultEncoding;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionOutcome;
 use search_result_listener::SessionStats;
@@ -53,12 +55,15 @@ const BASE_SESSION_CONFIG: SessionConfig = SessionConfig {
 
 /// A loopback listener with one running session whose job status the test controls.
 struct Harness {
-    _listener: ResultListener,
+    _listener: ResultListener<SearchResultEncoding>,
     network_output: NetworkOutput,
     status_source: FakeJobStatusSource,
 
     /// `None` once the test has dropped the result stream.
-    results: Option<ResultStream>,
+    results: Option<ResultStream<Vec<SearchResult>>>,
+
+    /// The results of the received batches that the test hasn't taken yet.
+    pending_results: VecDeque<SearchResult>,
 
     outcome: OutcomeFuture,
 }
@@ -69,7 +74,7 @@ impl Harness {
         let listener = ResultListener::bind(listener_config)
             .await
             .expect("binding a loopback listener should succeed");
-        let session = listener.open_session(session_config);
+        let session = listener.open_session(session_config, SearchResultEncoding);
         let network_output = session.network_output().clone();
         let status_source = FakeJobStatusSource::new();
         let (results, outcome) = session.run(QUERY_JOB_ID, status_source.clone());
@@ -78,6 +83,7 @@ impl Harness {
             network_output,
             status_source,
             results: Some(results),
+            pending_results: VecDeque::new(),
             outcome,
         }
     }
@@ -91,9 +97,31 @@ impl Harness {
     ///
     /// The next result the session emits.
     async fn next_result(&mut self) -> SearchResult {
+        loop {
+            if let Some(result) = self.pending_results.pop_front() {
+                return result;
+            }
+            let batch = self.next_batch().await;
+            self.pending_results.extend(batch);
+        }
+    }
+
+    /// # Returns
+    ///
+    /// The next batch of results the session emits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if results of an earlier batch haven't been taken yet.
+    async fn next_batch(&mut self) -> Vec<SearchResult> {
+        assert_eq!(
+            self.pending_results,
+            [],
+            "the results of earlier batches should have been taken"
+        );
         timeout(TIMEOUT, self.results().next())
             .await
-            .expect("a result should arrive")
+            .expect("a batch should arrive")
             .expect("the result stream shouldn't end yet")
     }
 
@@ -112,9 +140,13 @@ impl Harness {
     ///
     /// The remaining results, once the result stream has ended.
     async fn collect_results(&mut self) -> Vec<SearchResult> {
-        timeout(TIMEOUT, self.results().collect::<Vec<_>>())
-            .await
-            .expect("the result stream should end")
+        let mut results: Vec<_> = self.pending_results.drain(..).collect();
+        results.extend(
+            timeout(TIMEOUT, self.results().concat())
+                .await
+                .expect("the result stream should end"),
+        );
+        results
     }
 
     /// # Returns
@@ -134,7 +166,7 @@ impl Harness {
     /// # Panics
     ///
     /// Panics if the test has dropped the result stream.
-    const fn results(&mut self) -> &mut ResultStream {
+    const fn results(&mut self) -> &mut ResultStream<Vec<SearchResult>> {
         self.results
             .as_mut()
             .expect("the result stream shouldn't have been dropped")
@@ -181,7 +213,11 @@ impl FakeClpS {
     }
 
     /// Sends the results at `result_indices` of task `task_index` in a single write.
-    async fn send_results(&mut self, task_index: u64, result_indices: Range<u64>) {
+    async fn send_results(
+        &mut self,
+        task_index: u64,
+        result_indices: impl IntoIterator<Item = u64>,
+    ) {
         let mut bytes = Vec::new();
         for result_index in result_indices {
             bytes.extend(encode_result(
@@ -328,23 +364,25 @@ fn sorted_messages(results: &[SearchResult]) -> Vec<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn single_attempt_emits_every_result_in_order() {
+    const NUM_RESULTS: u64 = 20_000;
+
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
     let mut clp_s = harness.connect().await;
     clp_s
         .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
         .await;
-    clp_s.send_results(0, 0..5).await;
+    clp_s.send_results(0, 0..NUM_RESULTS).await;
     drop(clp_s);
 
     let (results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
 
-    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..5));
+    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..NUM_RESULTS));
     assert_eq!(
         outcome,
         SessionOutcome {
             status: QueryJobStatus::Succeeded,
             stats: SessionStats {
-                num_results_emitted: 5,
+                num_results_emitted: NUM_RESULTS,
                 ..SessionStats::default()
             },
         }
@@ -447,6 +485,36 @@ async fn index_gap_closes_the_connection_without_moving_the_cursor() {
         SessionStats {
             num_results_emitted: 4,
             num_duplicates_dropped: 1,
+            num_protocol_errors: 1,
+            num_results_discarded: 0,
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn claimed_results_before_an_index_gap_in_the_same_read_are_emitted() {
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, [0, 1, 3]).await;
+    attempt.expect_closed_by_listener().await;
+
+    let mut retry = harness.connect().await;
+    retry
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    retry.send_results(0, 0..4).await;
+    drop(retry);
+    let (results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
+
+    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..4));
+    assert_eq!(
+        outcome.stats,
+        SessionStats {
+            num_results_emitted: 4,
+            num_duplicates_dropped: 2,
             num_protocol_errors: 1,
             num_results_discarded: 0,
         }
@@ -589,6 +657,136 @@ async fn malformed_result_frame_closes_the_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn claimed_results_before_a_malformed_frame_in_the_same_read_are_emitted() {
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    let mut bytes = Vec::new();
+    for result_index in 0..2 {
+        bytes.extend(encode_result(
+            result_index,
+            timestamp(result_index),
+            &message(0, result_index),
+        ));
+    }
+    rmp::encode::write_str(&mut bytes, "not a result frame")
+        .expect("writing to a `Vec` shouldn't fail");
+    attempt.send(&bytes).await;
+    attempt.expect_closed_by_listener().await;
+
+    let (results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
+
+    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..2));
+    assert_eq!(
+        outcome.stats,
+        SessionStats {
+            num_results_emitted: 2,
+            num_duplicates_dropped: 0,
+            num_protocol_errors: 1,
+            num_results_discarded: 0,
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn results_of_one_read_are_delivered_in_few_batches() {
+    const MAX_NUM_BATCHES: usize = 10;
+    const NUM_RESULTS: u64 = 1000;
+
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    attempt.send_results(0, 0..NUM_RESULTS).await;
+    drop(attempt);
+    harness.status_source.set(Some(QueryJobStatus::Succeeded));
+    let batches = timeout(TIMEOUT, harness.results().collect::<Vec<_>>())
+        .await
+        .expect("the result stream should end");
+
+    assert!(
+        batches.len() <= MAX_NUM_BATCHES,
+        "the results arrived in {} batches",
+        batches.len()
+    );
+    assert_eq!(
+        batches.concat(),
+        expected_results(0, ARCHIVE_ID, 0..NUM_RESULTS)
+    );
+    assert_eq!(
+        harness.outcome().await.stats.num_results_emitted,
+        NUM_RESULTS
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_consumer_stops_the_connection_from_reading() {
+    /// Far more than the socket buffers of a loopback connection hold.
+    const NUM_BYTES_SENT: usize = 64 * 1024 * 1024;
+    const MESSAGE_LEN: usize = 4096;
+    const NUM_RESULTS: u64 = (NUM_BYTES_SENT / MESSAGE_LEN) as u64;
+
+    let session_config = SessionConfig {
+        channel_capacity: NonZeroUsize::MIN,
+        ..BASE_SESSION_CONFIG
+    };
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
+    let mut attempt = harness.connect().await;
+    attempt
+        .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
+        .await;
+    let large_message =
+        |result_index: u64| format!("{result_index:08}{}\n", "x".repeat(MESSAGE_LEN - 9));
+    let mut bytes = Vec::with_capacity(NUM_BYTES_SENT + 1024 * 1024);
+    for result_index in 0..NUM_RESULTS {
+        bytes.extend(encode_result(
+            result_index,
+            timestamp(result_index),
+            &large_message(result_index),
+        ));
+    }
+    let mut attempt_task = tokio::spawn(async move {
+        attempt.send(&bytes).await;
+    });
+
+    assert!(
+        timeout(Duration::from_secs(1), &mut attempt_task)
+            .await
+            .is_err(),
+        "the listener shouldn't read every result while the consumer is stalled"
+    );
+    let mut results = Vec::new();
+    for _ in 0..NUM_RESULTS {
+        results.push(harness.next_result().await);
+    }
+    timeout(TIMEOUT, attempt_task)
+        .await
+        .expect("the attempt should send every result once the consumer drains")
+        .expect("the attempt shouldn't panic");
+    let (remaining_results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
+    results.extend(remaining_results);
+
+    let archive_id = ARCHIVE_ID
+        .parse::<ArchiveId>()
+        .expect("test archive IDs are valid UUIDs");
+    assert!(
+        results
+            == (0..NUM_RESULTS)
+                .map(|result_index| SearchResult {
+                    archive_id,
+                    timestamp: timestamp(result_index),
+                    message: large_message(result_index),
+                })
+                .collect::<Vec<_>>(),
+        "every result should arrive once, in order"
+    );
+    assert_eq!(outcome.stats.num_results_emitted, NUM_RESULTS);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn result_cut_off_by_a_disconnect_is_never_claimed() {
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
     let mut attempt = harness.connect().await;
@@ -636,16 +834,18 @@ async fn claimed_result_reaches_a_slow_consumer_after_the_grace_period() {
     stale_attempt
         .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
         .await;
+    // Separate reads, so that the first batch fills the channel and the second waits to be sent.
     stale_attempt.send_results(0, 0..5).await;
-    // Give the listener time to fill the channel and claim the next result.
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(100)).await;
+    stale_attempt.send_results(0, 5..10).await;
+    sleep(Duration::from_millis(100)).await;
 
     harness.status_source.set(Some(QueryJobStatus::Succeeded));
     sleep(session_config.drain_grace_period * 5).await;
     let (results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
 
-    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..5));
-    assert_eq!(outcome.stats.num_results_emitted, 5);
+    assert_eq!(results, expected_results(0, ARCHIVE_ID, 0..10));
+    assert_eq!(outcome.stats.num_results_emitted, 10);
     stale_attempt.expect_closed_by_listener().await;
 }
 
@@ -834,7 +1034,7 @@ async fn dropping_a_session_without_running_it_unregisters_it() {
     let listener = ResultListener::bind(BASE_LISTENER_CONFIG)
         .await
         .expect("binding a loopback listener should succeed");
-    let session = listener.open_session(BASE_SESSION_CONFIG);
+    let session = listener.open_session(BASE_SESSION_CONFIG, SearchResultEncoding);
     let network_output = session.network_output().clone();
     drop(session);
 
@@ -848,8 +1048,8 @@ async fn sessions_on_one_listener_receive_only_their_own_results() {
     let listener = ResultListener::bind(BASE_LISTENER_CONFIG)
         .await
         .expect("binding a loopback listener should succeed");
-    let first_session = listener.open_session(BASE_SESSION_CONFIG);
-    let second_session = listener.open_session(BASE_SESSION_CONFIG);
+    let first_session = listener.open_session(BASE_SESSION_CONFIG, SearchResultEncoding);
+    let second_session = listener.open_session(BASE_SESSION_CONFIG, SearchResultEncoding);
     let first_network_output = first_session.network_output().clone();
     let second_network_output = second_session.network_output().clone();
     let status_source = FakeJobStatusSource::new();
@@ -871,10 +1071,10 @@ async fn sessions_on_one_listener_receive_only_their_own_results() {
     drop(second_attempt);
     status_source.set(Some(QueryJobStatus::Succeeded));
 
-    let first_results = timeout(TIMEOUT, first_results.collect::<Vec<_>>())
+    let first_results = timeout(TIMEOUT, first_results.concat())
         .await
         .expect("the first result stream should end");
-    let second_results = timeout(TIMEOUT, second_results.collect::<Vec<_>>())
+    let second_results = timeout(TIMEOUT, second_results.concat())
         .await
         .expect("the second result stream should end");
     assert_eq!(first_results, expected_results(0, ARCHIVE_ID, 0..3));
@@ -932,7 +1132,8 @@ async fn results_after_the_result_stream_is_dropped_are_read_and_discarded() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn connection_blocked_on_a_full_channel_keeps_reading_once_the_result_stream_is_dropped() {
-    const NUM_RESULTS: u64 = 100;
+    const NUM_RESULTS_PER_WRITE: u64 = 10;
+    const NUM_WRITES: u64 = 3;
 
     let session_config = SessionConfig {
         channel_capacity: NonZeroUsize::MIN,
@@ -943,9 +1144,17 @@ async fn connection_blocked_on_a_full_channel_keeps_reading_once_the_result_stre
     attempt
         .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
         .await;
-    attempt.send_results(0, 0..NUM_RESULTS).await;
-    // Give the listener time to fill the channel and block on sending the next result.
-    sleep(Duration::from_millis(200)).await;
+    // Separate reads: the first batch fills the channel, the second waits to be sent, and the third
+    // waits in the socket.
+    for write_index in 0..NUM_WRITES {
+        attempt
+            .send_results(
+                0,
+                write_index * NUM_RESULTS_PER_WRITE..(write_index + 1) * NUM_RESULTS_PER_WRITE,
+            )
+            .await;
+        sleep(Duration::from_millis(100)).await;
+    }
 
     harness.results = None;
     attempt.expect_open_until_eof().await;
@@ -955,10 +1164,10 @@ async fn connection_blocked_on_a_full_channel_keeps_reading_once_the_result_stre
     assert_eq!(
         outcome.stats,
         SessionStats {
-            num_results_emitted: session_config.channel_capacity.get() as u64,
+            num_results_emitted: NUM_RESULTS_PER_WRITE,
             num_duplicates_dropped: 0,
             num_protocol_errors: 0,
-            num_results_discarded: NUM_RESULTS - session_config.channel_capacity.get() as u64,
+            num_results_discarded: (NUM_WRITES - 1) * NUM_RESULTS_PER_WRITE,
         }
     );
 }

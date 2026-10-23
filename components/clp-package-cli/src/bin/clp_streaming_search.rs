@@ -15,13 +15,15 @@ use clp_rust_utils::dataset::CLP_DEFAULT_DATASET_NAME;
 use clp_rust_utils::job_config::QueryJobStatus;
 use clp_rust_utils::job_config::SearchJobConfig;
 use clp_rust_utils::serde::yaml;
+use clp_rust_utils::types::ArchiveId;
 use futures::StreamExt;
 use non_empty_string::NonEmptyString;
 use search_result_listener::ListenerConfig;
 use search_result_listener::MariaDbJobStatusSource;
+use search_result_listener::ResultEncoder;
+use search_result_listener::ResultEncoding;
 use search_result_listener::ResultListener;
 use search_result_listener::ResultStream;
-use search_result_listener::SearchResult;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionOutcome;
 use tokio::signal::unix::SignalKind;
@@ -68,6 +70,49 @@ struct Cli {
 
     /// Wildcard query.
     wildcard_query: String,
+}
+
+/// The output format of the results: one line per result, prefixed with its archive ID and
+/// timestamp unless `raw` is set.
+struct OutputEncoding {
+    raw: bool,
+}
+
+impl ResultEncoding for OutputEncoding {
+    type Batch = Vec<u8>;
+    type Encoder = OutputEncoder;
+
+    fn encoder(&self, archive_id: ArchiveId) -> OutputEncoder {
+        OutputEncoder {
+            line_prefix: (!self.raw).then(|| format!("{archive_id} ")),
+            batch: Vec::new(),
+        }
+    }
+}
+
+/// The [`ResultEncoder`] of [`OutputEncoding`].
+struct OutputEncoder {
+    line_prefix: Option<String>,
+    batch: Vec<u8>,
+}
+
+impl ResultEncoder for OutputEncoder {
+    type Batch = Vec<u8>;
+
+    /// # Panics
+    ///
+    /// Panics if writing to the batch fails, which writing to a `Vec` never does.
+    fn encode(&mut self, timestamp: i64, message: &str) {
+        if let Some(line_prefix) = &self.line_prefix {
+            self.batch.extend_from_slice(line_prefix.as_bytes());
+            write!(self.batch, "{timestamp}: ").expect("writing to a `Vec` shouldn't fail");
+        }
+        self.batch.extend_from_slice(message.as_bytes());
+    }
+
+    fn take_batch(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.batch)
+    }
 }
 
 #[tokio::main]
@@ -150,7 +195,7 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
     })
     .await
     .inspect_err(|e| tracing::error!(error = % e, "Failed to listen for search results."))?;
-    let session = listener.open_session(SessionConfig::default());
+    let session = listener.open_session(SessionConfig::default(), OutputEncoding { raw: args.raw });
 
     let datasets = if args.datasets.is_empty() {
         vec![CLP_DEFAULT_DATASET_NAME.to_owned()]
@@ -180,7 +225,7 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
         query_job_id,
         MariaDbJobStatusSource::new(db_pool, JOB_STATUS_POLL_INTERVAL),
     );
-    print_results(results, args.raw).await.inspect_err(|e| {
+    print_results(results).await.inspect_err(|e| {
         tracing::error!(error = % e, "Failed to print the search results.");
     })?;
     let SessionOutcome { status, stats } = outcome.await.inspect_err(|e| {
@@ -224,7 +269,7 @@ fn set_up_logging() {
         .init();
 }
 
-/// Prints each result to stdout as it arrives, writing each result with a single write.
+/// Prints each batch of results to stdout as it arrives, writing each batch with a single write.
 ///
 /// # Errors
 ///
@@ -232,30 +277,13 @@ fn set_up_logging() {
 ///
 /// * Forwards [`Write::write_all`]'s return values on failure.
 /// * Forwards [`Write::flush`]'s return values on failure.
-async fn print_results(mut results: ResultStream, raw: bool) -> std::io::Result<()> {
+async fn print_results(mut results: ResultStream<Vec<u8>>) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
-    let mut line = Vec::new();
-    while let Some(result) = results.next().await {
-        line.clear();
-        format_result(&mut line, &result, raw);
-        stdout.write_all(&line)?;
+    while let Some(batch) = results.next().await {
+        stdout.write_all(&batch)?;
         stdout.flush()?;
     }
     Ok(())
-}
-
-/// Appends `result` to `line`: only the message if `raw` is set, otherwise the message prefixed
-/// with the result's archive ID and timestamp.
-///
-/// # Panics
-///
-/// Panics if writing to `line` fails, which writing to a `Vec` never does.
-fn format_result(line: &mut Vec<u8>, result: &SearchResult, raw: bool) {
-    if !raw {
-        write!(line, "{} {}: ", result.archive_id, result.timestamp)
-            .expect("writing to a `Vec` shouldn't fail");
-    }
-    line.extend_from_slice(result.message.as_bytes());
 }
 
 /// Parses a command-line value that must not be empty.
@@ -279,22 +307,22 @@ mod tests {
     use clap::Parser;
     use clp_rust_utils::types::ArchiveId;
     use non_empty_string::NonEmptyString;
-    use search_result_listener::SearchResult;
+    use search_result_listener::ResultEncoder;
+    use search_result_listener::ResultEncoding;
 
     use super::Cli;
-    use super::format_result;
+    use super::OutputEncoder;
+    use super::OutputEncoding;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
+    const MESSAGE: &str = "{\"msg\":\"Transmitted block\"}\n";
+    const TIMESTAMP: i64 = 1_700_000_000_123;
 
     /// # Returns
     ///
-    /// A result of the archive [`ARCHIVE_ID`].
-    fn search_result() -> SearchResult {
-        SearchResult {
-            archive_id: ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
-            timestamp: 1_700_000_000_123,
-            message: "{\"msg\":\"Transmitted block\"}\n".to_owned(),
-        }
+    /// An encoder of the results of the archive [`ARCHIVE_ID`], in the format `raw` selects.
+    fn output_encoder(raw: bool) -> OutputEncoder {
+        OutputEncoding { raw }.encoder(ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"))
     }
 
     #[test]
@@ -362,21 +390,43 @@ mod tests {
 
     #[test]
     fn default_format_prefixes_the_archive_id_and_timestamp() {
-        let mut line = Vec::new();
-        format_result(&mut line, &search_result(), false);
+        let mut encoder = output_encoder(false);
+        encoder.encode(TIMESTAMP, MESSAGE);
         assert_eq!(
-            String::from_utf8(line).expect("the line should be UTF-8"),
+            String::from_utf8(encoder.take_batch()).expect("the line should be UTF-8"),
             format!("{ARCHIVE_ID} 1700000000123: {{\"msg\":\"Transmitted block\"}}\n")
         );
     }
 
     #[test]
     fn raw_format_prints_only_the_message() {
-        let mut line = Vec::new();
-        format_result(&mut line, &search_result(), true);
+        let mut encoder = output_encoder(true);
+        encoder.encode(TIMESTAMP, MESSAGE);
         assert_eq!(
-            String::from_utf8(line).expect("the line should be UTF-8"),
+            String::from_utf8(encoder.take_batch()).expect("the line should be UTF-8"),
             "{\"msg\":\"Transmitted block\"}\n"
+        );
+    }
+
+    #[test]
+    fn results_of_one_batch_are_printed_as_whole_lines() {
+        let mut encoder = output_encoder(false);
+        encoder.encode(TIMESTAMP, MESSAGE);
+        encoder.encode(-1, "second\n");
+        let first_batch = encoder.take_batch();
+        encoder.encode(0, "third\n");
+        let second_batch = encoder.take_batch();
+
+        assert_eq!(
+            String::from_utf8(first_batch).expect("the batch should be UTF-8"),
+            format!(
+                "{ARCHIVE_ID} 1700000000123: {{\"msg\":\"Transmitted block\"}}\n{ARCHIVE_ID} -1: \
+                 second\n"
+            )
+        );
+        assert_eq!(
+            String::from_utf8(second_batch).expect("the batch should be UTF-8"),
+            format!("{ARCHIVE_ID} 0: third\n")
         );
     }
 }

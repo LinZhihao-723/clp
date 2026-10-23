@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::sync::DropGuard;
 
 use crate::Error;
+use crate::ResultEncoding;
 use crate::Session;
 use crate::SessionConfig;
 use crate::connection;
@@ -54,15 +55,19 @@ impl Default for ListenerConfig {
 ///
 /// Dropping the listener stops accepting connections. Sessions that are already running keep
 /// serving their open connections.
-pub struct ResultListener {
-    sessions: Arc<session::Registry>,
+///
+/// # Type Parameters
+///
+/// * `EncodingType` - The encoding of the results the listener's sessions deliver.
+pub struct ResultListener<EncodingType: ResultEncoding> {
+    sessions: Arc<session::Registry<EncodingType>>,
     accept_barrier: AcceptBarrier,
     advertised_host: NonEmptyString,
     port: NonZeroU16,
     _accept_loop_guard: DropGuard,
 }
 
-impl ResultListener {
+impl<EncodingType: ResultEncoding> ResultListener<EncodingType> {
     /// Binds a listener and starts accepting connections in a background task.
     ///
     /// # Returns
@@ -139,7 +144,7 @@ impl ResultListener {
         self.port
     }
 
-    /// Opens a session for one query job.
+    /// Opens a session for one query job, whose results are delivered encoded with `encoding`.
     ///
     /// The session is registered before this method returns, so it accepts connections as soon
     /// as the job is submitted with the session's network output.
@@ -148,13 +153,18 @@ impl ResultListener {
     ///
     /// The newly opened session.
     #[must_use]
-    pub fn open_session(&self, config: SessionConfig) -> Session {
+    pub fn open_session(
+        &self,
+        config: SessionConfig,
+        encoding: EncodingType,
+    ) -> Session<EncodingType> {
         Session::open(
             Arc::clone(&self.sessions),
             self.accept_barrier.clone(),
             self.advertised_host.clone(),
             self.port,
             config,
+            encoding,
         )
     }
 }
@@ -222,19 +232,23 @@ impl Drop for PendingHandshake {
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// The background task that accepts connections and serves each one in its own task.
-struct AcceptLoop {
+///
+/// # Type Parameters
+///
+/// * `EncodingType` - The encoding of the results the listener's sessions deliver.
+struct AcceptLoop<EncodingType: ResultEncoding> {
     tcp_listener: TcpListener,
 
     /// A second handle to the listening socket, for accepting the queued connections directly
     /// instead of waiting for the runtime to report the socket as readable.
     queued_connections: std::net::TcpListener,
 
-    sessions: Arc<session::Registry>,
+    sessions: Arc<session::Registry<EncodingType>>,
     num_pending_handshakes: Arc<watch::Sender<usize>>,
     handshake_timeout: Duration,
 }
 
-impl AcceptLoop {
+impl<EncodingType: ResultEncoding> AcceptLoop<EncodingType> {
     /// Accepts connections and answers barrier requests until `shutdown` is cancelled.
     async fn run(
         self,

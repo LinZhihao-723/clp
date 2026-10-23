@@ -17,7 +17,6 @@ use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
 use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
-use clp_rust_utils::types::ArchiveId;
 use dashmap::DashMap;
 use futures::Stream;
 use non_empty_string::NonEmptyString;
@@ -28,17 +27,18 @@ use tokio_util::task::TaskTracker;
 
 use crate::Error;
 use crate::JobStatusSource;
+use crate::ResultEncoding;
 use crate::cursor::TaskCursor;
 use crate::listener::AcceptBarrier;
 
 /// The sessions of a listener, keyed by their tokens.
-pub type Registry = DashMap<SessionToken, Arc<State>>;
+pub type Registry<EncodingType> = DashMap<SessionToken, Arc<State<EncodingType>>>;
 
 /// Per-session configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionConfig {
-    /// The number of results buffered for the consumer before the connections stop reading from
-    /// their sockets.
+    /// The number of batches buffered for the consumer, each holding the results a connection
+    /// claimed from one socket read, before the connections stop reading from their sockets.
     pub channel_capacity: NonZeroUsize,
 
     /// How long a connection may wait on its socket without claiming a result once its job has
@@ -49,19 +49,11 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            channel_capacity: NonZeroUsize::new(1024)
+            channel_capacity: NonZeroUsize::new(16)
                 .expect("default channel capacity should not be zero"),
             drain_grace_period: Duration::from_secs(5),
         }
     }
-}
-
-/// A search result emitted by a session.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchResult {
-    pub archive_id: ArchiveId,
-    pub timestamp: i64,
-    pub message: String,
 }
 
 /// Statistics of a session's connections.
@@ -94,15 +86,19 @@ pub struct SessionOutcome {
 ///
 /// The session stays registered with its listener, accepting connections that present its token,
 /// until its job terminates or it is dropped without being run.
-pub struct Session {
-    registration: Registration,
+///
+/// # Type Parameters
+///
+/// * `EncodingType` - The encoding of the results the session delivers.
+pub struct Session<EncodingType: ResultEncoding> {
+    registration: Registration<EncodingType>,
     accept_barrier: AcceptBarrier,
-    state: Arc<State>,
-    results_receiver: mpsc::Receiver<SearchResult>,
+    state: Arc<State<EncodingType>>,
+    batches_receiver: mpsc::Receiver<EncodingType::Batch>,
     network_output: NetworkOutput,
 }
 
-impl Session {
+impl<EncodingType: ResultEncoding> Session<EncodingType> {
     #[must_use]
     pub const fn token(&self) -> SessionToken {
         self.registration.token
@@ -131,21 +127,21 @@ impl Session {
     ///
     /// A tuple containing:
     ///
-    /// * The stream of the job's results, which must be consumed for the session to complete unless
-    ///   it is dropped. Dropping it doesn't stop the session, which then discards the job's
-    ///   remaining results.
+    /// * The stream of the job's results, in batches, which must be consumed for the session to
+    ///   complete unless it is dropped. Dropping it doesn't stop the session, which then discards
+    ///   the job's remaining results.
     /// * A future that resolves to the session's outcome once the stream has ended. Dropping it
     ///   doesn't stop the session.
     pub fn run<JobStatusSourceType: JobStatusSource + 'static>(
         self,
         query_job_id: QueryJobId,
         status_source: JobStatusSourceType,
-    ) -> (ResultStream, OutcomeFuture) {
+    ) -> (ResultStream<EncodingType::Batch>, OutcomeFuture) {
         let Self {
             registration,
             accept_barrier,
             state,
-            results_receiver,
+            batches_receiver,
             ..
         } = self;
         let session_task = tokio::spawn(drive(
@@ -156,7 +152,7 @@ impl Session {
             status_source,
         ));
         (
-            ResultStream { results_receiver },
+            ResultStream { batches_receiver },
             OutcomeFuture { session_task },
         )
     }
@@ -173,17 +169,19 @@ impl Session {
     ///
     /// Panics if the fresh token is already registered, which a random UUID rules out.
     pub(crate) fn open(
-        sessions: Arc<Registry>,
+        sessions: Arc<Registry<EncodingType>>,
         accept_barrier: AcceptBarrier,
         advertised_host: NonEmptyString,
         port: NonZeroU16,
         config: SessionConfig,
+        encoding: EncodingType,
     ) -> Self {
         let token = SessionToken::new_v4();
-        let (results_sender, results_receiver) = mpsc::channel(config.channel_capacity.get());
+        let (batches_sender, batches_receiver) = mpsc::channel(config.channel_capacity.get());
         let state = Arc::new(State {
             cursors: DashMap::new(),
-            results_sender,
+            encoding,
+            batches_sender,
             draining: CancellationToken::new(),
             drain_grace_period: config.drain_grace_period,
             connections: TaskTracker::new(),
@@ -202,7 +200,7 @@ impl Session {
             registration: Registration { sessions, token },
             accept_barrier,
             state,
-            results_receiver,
+            batches_receiver,
             network_output: NetworkOutput {
                 host: advertised_host,
                 port,
@@ -212,19 +210,23 @@ impl Session {
     }
 }
 
-/// The stream of a session's results.
+/// The stream of a session's results, in the batches its connections encoded them into.
 ///
 /// The stream ends once the session's job has terminated and its connections have drained.
 /// Dropping the stream earlier doesn't end the session.
-pub struct ResultStream {
-    results_receiver: mpsc::Receiver<SearchResult>,
+///
+/// # Type Parameters
+///
+/// * `BatchType` - The type of a batch of encoded results.
+pub struct ResultStream<BatchType> {
+    batches_receiver: mpsc::Receiver<BatchType>,
 }
 
-impl Stream for ResultStream {
-    type Item = SearchResult;
+impl<BatchType> Stream for ResultStream<BatchType> {
+    type Item = BatchType;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.results_receiver.poll_recv(cx)
+        self.batches_receiver.poll_recv(cx)
     }
 }
 
@@ -244,9 +246,14 @@ impl Future for OutcomeFuture {
 }
 
 /// The state of a session shared with its connections.
-pub struct State {
+///
+/// # Type Parameters
+///
+/// * `EncodingType` - The encoding of the results the session delivers.
+pub struct State<EncodingType: ResultEncoding> {
     pub cursors: DashMap<QueryTaskIndex, Arc<TaskCursor>>,
-    pub results_sender: mpsc::Sender<SearchResult>,
+    pub encoding: EncodingType,
+    pub batches_sender: mpsc::Sender<EncodingType::Batch>,
 
     /// Cancelled once the session's job has terminated and its connections should drain.
     pub draining: CancellationToken,
@@ -261,7 +268,7 @@ pub struct State {
     num_results_discarded: AtomicU64,
 }
 
-impl State {
+impl<EncodingType: ResultEncoding> State<EncodingType> {
     /// Records that a connection has joined the session.
     ///
     /// # Returns
@@ -308,12 +315,16 @@ impl State {
 }
 
 /// Keeps a session registered with its listener until dropped.
-struct Registration {
-    sessions: Arc<Registry>,
+///
+/// # Type Parameters
+///
+/// * `EncodingType` - The encoding of the results the session delivers.
+struct Registration<EncodingType: ResultEncoding> {
+    sessions: Arc<Registry<EncodingType>>,
     token: SessionToken,
 }
 
-impl Drop for Registration {
+impl<EncodingType: ResultEncoding> Drop for Registration<EncodingType> {
     fn drop(&mut self) {
         self.sessions.remove(&self.token);
     }
@@ -323,6 +334,7 @@ impl Drop for Registration {
 ///
 /// # Type Parameters
 ///
+/// * `EncodingType` - The encoding of the results the session delivers.
 /// * `JobStatusSourceType` - The source of the query job's status.
 ///
 /// # Returns
@@ -335,10 +347,10 @@ impl Drop for Registration {
 ///
 /// * Forwards [`wait_for_terminal_status`]'s return values on failure, after shutting the session
 ///   down.
-async fn drive<JobStatusSourceType: JobStatusSource>(
-    registration: Registration,
+async fn drive<EncodingType: ResultEncoding, JobStatusSourceType: JobStatusSource>(
+    registration: Registration<EncodingType>,
     accept_barrier: AcceptBarrier,
-    state: Arc<State>,
+    state: Arc<State<EncodingType>>,
     query_job_id: QueryJobId,
     status_source: JobStatusSourceType,
 ) -> Result<SessionOutcome, Error> {
@@ -352,7 +364,7 @@ async fn drive<JobStatusSourceType: JobStatusSource>(
     state.connections.wait().await;
 
     let session_stats = state.stats();
-    // The connections have released their references, so dropping this one drops the results
+    // The connections have released their references, so dropping this one drops the batches
     // sender and ends the result stream.
     drop(state);
 
