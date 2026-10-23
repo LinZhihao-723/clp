@@ -1,4 +1,5 @@
-//! Serving a connection from a search task: its handshake, then the results it streams.
+//! Serving a connection from a search task: its handshake, then the results it streams, then the
+//! trailer that the connection's acknowledgement answers.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use std::time::Duration;
 use bytes::BufMut;
 use bytes::BytesMut;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::time::Instant;
 use tokio_util::task::task_tracker::TaskTrackerToken;
@@ -19,8 +21,11 @@ use crate::cursor::TaskCursor;
 use crate::error::ConnectionError;
 use crate::error::ProtocolError;
 use crate::listener::PendingHandshake;
+use crate::protocol::Ack;
+use crate::protocol::Frame;
 use crate::protocol::Handshake;
 use crate::protocol::ResultFrame;
+use crate::protocol::Trailer;
 use crate::session;
 
 /// Serves a connection from a search task until it ends, and logs how it ended.
@@ -94,43 +99,26 @@ pub async fn serve<EncodingType: ResultEncoding>(
             "Discarded the results of a connection since the session's result stream was dropped."
         );
     }
-    match end {
-        Ok(End::Eof) => {}
-        Ok(End::DrainTimedOut) => tracing::debug!(
-            peer_addr = % peer_addr,
-            session_token = % handshake.session_token,
-            task_index = handshake.task_index,
-            "Stopped reading a connection that claimed no result within the grace period after \
-             its job terminated."
-        ),
-        Err(e) => {
-            if matches!(e, ConnectionError::Protocol(_)) {
-                connection.stats.num_protocol_errors += 1;
-            }
-            tracing::warn!(
-                peer_addr = % peer_addr,
-                session_token = % handshake.session_token,
-                task_index = handshake.task_index,
-                error = % e,
-                "Connection ended abnormally."
-            );
-        }
+    let Err(e) = end else {
+        return;
+    };
+    if matches!(e, ConnectionError::Protocol(_)) {
+        connection.stats.num_protocol_errors += 1;
+    } else {
+        connection.stats.num_incomplete_connections += 1;
     }
+    tracing::warn!(
+        peer_addr = % peer_addr,
+        session_token = % handshake.session_token,
+        task_index = handshake.task_index,
+        error = % e,
+        "Closing a connection without acknowledging its results."
+    );
 }
 
 /// The most bytes a connection reads from its socket at once while streaming results, which bounds
 /// the results in one batch.
 const READ_BUFFER_CAPACITY: usize = 64 * 1024;
-
-/// How a connection that joined a session ended normally.
-enum End {
-    /// The search task closed the connection after its last result.
-    Eof,
-
-    /// The session's job terminated, and the connection then waited on its socket for the grace
-    /// period without claiming a result.
-    DrainTimedOut,
-}
 
 /// A connection that joined a session, streaming the results of one attempt of a task.
 ///
@@ -142,6 +130,14 @@ struct Connection<EncodingType: ResultEncoding> {
     cursor: Arc<TaskCursor>,
     encoder: EncodingType::Encoder,
     num_pending_results: u64,
+
+    /// The number of results the connection streamed, claimed or not, which is also the index of
+    /// the next result it must stream.
+    num_results: u64,
+
+    /// The trailer, once the connection has sent it.
+    trailer: Option<Trailer>,
+
     stats: SessionStats,
 
     /// Declared last so that it is dropped last: the session's drain completes only after this
@@ -184,6 +180,8 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
             session,
             cursor,
             num_pending_results: 0,
+            num_results: 0,
+            trailer: None,
             stats: SessionStats::default(),
             _session_connection_token: session_connection_token,
         })
@@ -191,16 +189,13 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
 
     /// Claims the results the connection streams, encodes the results claimed from each socket
     /// read into one batch, and sends the batch to the session's consumer, or discards it once the
-    /// consumer has dropped the result stream.
+    /// consumer has dropped the result stream. Once the connection has sent its trailer and EOF,
+    /// and its last batch has been sent or discarded, acknowledges its results.
     ///
-    /// Reading stops at EOF. Once the session's job has terminated, it also stops when the
-    /// connection has waited on its socket for the session's grace period without claiming a
-    /// result. Delivering a claimed batch is never cut short, and doesn't count toward the grace
-    /// period.
-    ///
-    /// # Returns
-    ///
-    /// How the connection ended on success.
+    /// Once the session's job has terminated, reading also stops when the connection has waited
+    /// on its socket for the session's drain grace period without claiming a result. Delivering a
+    /// claimed batch and writing the acknowledgement are never cut short, and don't count toward
+    /// the grace period.
     ///
     /// # Errors
     ///
@@ -208,15 +203,20 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
     ///
     /// * [`ProtocolError::ArchiveIdMismatch`] if the cursor of the handshake's task is bound to
     ///   another archive.
+    /// * [`ConnectionError::DrainTimedOut`] if the connection waits on its socket for the grace
+    ///   period after the session's job has terminated.
+    /// * [`ConnectionError::MissingTrailer`] if the connection closes between two frames before
+    ///   sending its trailer.
     /// * [`ConnectionError::TruncatedFrame`] if the connection closes in the middle of a frame.
     /// * Forwards [`Connection::claim_buffered_frames`]'s return values on failure.
     /// * Forwards [`AsyncReadExt::read_buf`]'s return values on failure.
+    /// * Forwards [`AsyncWriteExt::write_all`]'s return values on failure.
     async fn run(
         &mut self,
         handshake: &Handshake,
         stream: &mut TcpStream,
         mut buffer: BytesMut,
-    ) -> Result<End, ConnectionError> {
+    ) -> Result<(), ConnectionError> {
         let archive_id = self.cursor.archive_id();
         if archive_id != handshake.archive_id {
             return Err(ProtocolError::ArchiveIdMismatch {
@@ -239,16 +239,15 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
             buffer.reserve(READ_BUFFER_CAPACITY);
             let mut read_window = (&mut buffer).limit(READ_BUFFER_CAPACITY);
             let num_bytes_read = if self.session.draining.is_cancelled() {
+                let drain_grace_period = self.session.drain_grace_period();
                 let read_started_at = Instant::now();
                 let Ok(read_result) = tokio::time::timeout(
-                    self.session
-                        .drain_grace_period
-                        .saturating_sub(read_time_since_last_claim),
+                    drain_grace_period.saturating_sub(read_time_since_last_claim),
                     stream.read_buf(&mut read_window),
                 )
                 .await
                 else {
-                    return Ok(End::DrainTimedOut);
+                    return Err(ConnectionError::DrainTimedOut(drain_grace_period));
                 };
                 read_time_since_last_claim += read_started_at.elapsed();
                 read_result?
@@ -259,43 +258,98 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
                     () = self.session.draining.cancelled() => continue,
                 }
             };
-            if 0 == num_bytes_read {
-                if buffer.is_empty() {
-                    return Ok(End::Eof);
-                }
-                return Err(ConnectionError::TruncatedFrame);
+            if 0 != num_bytes_read {
+                continue;
             }
+            if let Some(trailer) = self.trailer {
+                stream
+                    .write_all(
+                        &Ack {
+                            num_results: trailer.num_results,
+                        }
+                        .encode(),
+                    )
+                    .await?;
+                return Ok(());
+            }
+            if buffer.is_empty() {
+                return Err(ConnectionError::MissingTrailer);
+            }
+            return Err(ConnectionError::TruncatedFrame);
         }
     }
 
-    /// Claims each complete frame in `buffer`, encoding the claimed results into the pending batch.
+    /// Decodes each complete frame in `buffer`, encoding the claimed results into the pending
+    /// batch, and checks the trailer against the results the connection streamed.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     ///
-    /// * Forwards [`ResultFrame::decode`]'s return values on failure.
-    /// * Forwards [`TaskCursor::try_claim`]'s return values on failure.
+    /// * [`ProtocolError::DataAfterTrailer`] if any byte follows the trailer.
+    /// * [`ProtocolError::ResultCountMismatch`] if the trailer doesn't count the results the
+    ///   connection streamed.
+    /// * Forwards [`Frame::decode`]'s return values on failure.
+    /// * Forwards [`Connection::claim`]'s return values on failure.
     fn claim_buffered_frames(
         &mut self,
         handshake: &Handshake,
         buffer: &mut BytesMut,
     ) -> Result<(), ProtocolError> {
-        while let Some(frame) = ResultFrame::decode(buffer)? {
-            if Claim::Duplicate == self.cursor.try_claim(frame.result_index)? {
-                self.stats.num_duplicates_dropped += 1;
-                continue;
+        loop {
+            if self.trailer.is_some() {
+                if buffer.is_empty() {
+                    return Ok(());
+                }
+                return Err(ProtocolError::DataAfterTrailer);
             }
-            if self.session.record_claimed_result() {
-                tracing::debug!(
-                    session_token = % handshake.session_token,
-                    task_index = handshake.task_index,
-                    "Claimed the session's first result."
-                );
+            let Some(frame) = Frame::decode(buffer)? else {
+                return Ok(());
+            };
+            match frame {
+                Frame::Result(result) => self.claim(handshake, &result)?,
+                Frame::Trailer(trailer) => {
+                    if trailer.num_results != self.num_results {
+                        return Err(ProtocolError::ResultCountMismatch {
+                            trailer_num_results: trailer.num_results,
+                            num_results: self.num_results,
+                        });
+                    }
+                    self.trailer = Some(trailer);
+                }
             }
-            self.encoder.encode(frame.timestamp, &frame.message);
-            self.num_pending_results += 1;
         }
+    }
+
+    /// Claims `result` on the task's cursor, encoding it into the pending batch unless an attempt
+    /// of the task already emitted it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ProtocolError::UnexpectedResultIndex`] if `result` isn't the connection's next result.
+    fn claim(&mut self, handshake: &Handshake, result: &ResultFrame) -> Result<(), ProtocolError> {
+        if result.result_index != self.num_results {
+            return Err(ProtocolError::UnexpectedResultIndex {
+                expected: self.num_results,
+                received: result.result_index,
+            });
+        }
+        self.num_results += 1;
+        if Claim::Duplicate == self.cursor.claim(result.result_index) {
+            self.stats.num_duplicates_dropped += 1;
+            return Ok(());
+        }
+        if self.session.record_claimed_result() {
+            tracing::debug!(
+                session_token = % handshake.session_token,
+                task_index = handshake.task_index,
+                "Claimed the session's first result."
+            );
+        }
+        self.encoder.encode(result.timestamp, &result.message);
+        self.num_pending_results += 1;
         Ok(())
     }
 

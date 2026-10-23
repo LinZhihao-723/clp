@@ -242,6 +242,7 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
             num_results_emitted = stats.num_results_emitted,
             num_duplicates_dropped = stats.num_duplicates_dropped,
             num_protocol_errors = stats.num_protocol_errors,
+            num_incomplete_connections = stats.num_incomplete_connections,
             "The query job succeeded."
         );
     } else {
@@ -251,6 +252,7 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
             num_results_emitted = stats.num_results_emitted,
             num_duplicates_dropped = stats.num_duplicates_dropped,
             num_protocol_errors = stats.num_protocol_errors,
+            num_incomplete_connections = stats.num_incomplete_connections,
             "The query job didn't succeed."
         );
     }

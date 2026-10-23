@@ -109,7 +109,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "example": "event: job\ndata: {\"query_job_id\":1}\n\ndata: {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: {\"status\":\"Succeeded\",\"num_results_emitted\":1,\"num_duplicates_dropped\":0,\"num_protocol_errors\":0}\n\n"
+                "example": "event: job\ndata: {\"query_job_id\":1}\n\ndata: {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: {\"status\":\"Succeeded\",\"num_results_emitted\":1,\"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\"num_incomplete_connections\":0}\n\n"
               }
             }
           },
@@ -450,13 +450,20 @@
           "status",
           "num_results_emitted",
           "num_duplicates_dropped",
-          "num_protocol_errors"
+          "num_protocol_errors",
+          "num_incomplete_connections"
         ],
         "properties": {
           "num_duplicates_dropped": {
             "type": "integer",
             "format": "int64",
             "description": "The number of results dropped because a retried search task had already streamed them.",
+            "minimum": 0
+          },
+          "num_incomplete_connections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number of connections from search tasks that ended before their results were\nacknowledged, without violating the wire protocol.",
             "minimum": 0
           },
           "num_protocol_errors": {

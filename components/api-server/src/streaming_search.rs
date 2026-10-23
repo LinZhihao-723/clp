@@ -321,6 +321,7 @@ async fn cancel_and_wait<QueryJobTableType: QueryJobTable>(
             num_results_discarded = stats.num_results_discarded,
             num_duplicates_dropped = stats.num_duplicates_dropped,
             num_protocol_errors = stats.num_protocol_errors,
+            num_incomplete_connections = stats.num_incomplete_connections,
             "The query job of a dropped streaming search terminated."
         ),
         Err(e) => tracing::warn!(

@@ -40,8 +40,8 @@ pub enum ProtocolError {
         received: ArchiveId,
     },
 
-    #[error("result index {received} is above the task's next unclaimed result index {expected}")]
-    IndexGap { expected: u64, received: u64 },
+    #[error("bytes followed the trailer")]
+    DataAfterTrailer,
 
     #[error("invalid archive ID: {0}")]
     InvalidArchiveId(#[from] ParseArchiveIdError),
@@ -52,6 +52,18 @@ pub enum ProtocolError {
     #[error("malformed frame: {0}")]
     MalformedFrame(String),
 
+    #[error(
+        "the trailer counts {trailer_num_results} results, but the connection streamed \
+         {num_results}"
+    )]
+    ResultCountMismatch {
+        trailer_num_results: u64,
+        num_results: u64,
+    },
+
+    #[error("expected result index {expected} on the connection, got {received}")]
+    UnexpectedResultIndex { expected: u64, received: u64 },
+
     #[error("unknown session token {0}")]
     UnknownSession(SessionToken),
 
@@ -59,14 +71,20 @@ pub enum ProtocolError {
     UnsupportedVersion(u64),
 }
 
-/// Reasons a connection from a search task ends abnormally.
+/// Reasons a connection from a search task ends without an acknowledgement.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
+    #[error("the connection claimed no result within {0:?} after its job terminated")]
+    DrainTimedOut(Duration),
+
     #[error("no handshake arrived within {0:?}")]
     HandshakeTimeout(Duration),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("the connection closed without a trailer")]
+    MissingTrailer,
 
     #[error(transparent)]
     Protocol(#[from] ProtocolError),

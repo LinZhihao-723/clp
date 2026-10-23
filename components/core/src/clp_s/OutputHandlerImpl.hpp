@@ -99,7 +99,7 @@ public:
     };
 
     // Constants
-    static constexpr uint8_t cProtocolVersion{1};
+    static constexpr uint8_t cProtocolVersion{2};
 
     // Constructors
     NetworkOutputHandler(std::string host, int port, std::string session_token, uint64_t task_idx);
@@ -142,6 +142,17 @@ public:
      */
     auto write(std::string_view message) -> void override;
 
+    /**
+     * Sends the trailer, shuts down the write side of the connection, and waits for the listener's
+     * acknowledgement. Returns immediately if no result was written.
+     *
+     * @return ErrorCodeSuccess on success.
+     * @return ErrorCodeFailureNetwork if sending the trailer, shutting down the write side, or
+     * receiving the acknowledgement fails, or if the acknowledgement is malformed or doesn't match
+     * the number of results sent.
+     */
+    [[nodiscard]] auto finish() -> ErrorCode override;
+
 private:
     // Methods
     /**
@@ -158,6 +169,16 @@ private:
      * @throw OperationFailed if sending fails.
      */
     auto send_buffer() -> void;
+
+    /**
+     * Receives the listener's acknowledgement and validates it against the number of results sent.
+     *
+     * @return ErrorCodeSuccess on success.
+     * @return ErrorCodeFailureNetwork if receiving fails, the listener closes the connection before
+     * acknowledging, or the acknowledgement is malformed or doesn't match the number of results
+     * sent.
+     */
+    [[nodiscard]] auto receive_ack() const -> ErrorCode;
 
     // Variables
     std::string m_host;

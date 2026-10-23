@@ -42,7 +42,9 @@ pub struct SessionConfig {
     pub channel_capacity: NonZeroUsize,
 
     /// How long a connection may wait on its socket without claiming a result once its job has
-    /// terminated, before the session stops reading from it.
+    /// terminated, before the session stops reading from it. Once the job has succeeded, the
+    /// session stops reading as soon as a connection waits at all, since every task of the job
+    /// has had its results acknowledged.
     pub drain_grace_period: Duration,
 }
 
@@ -68,6 +70,11 @@ pub struct SessionStats {
 
     /// The number of the session's connections closed because they violated the wire protocol.
     pub num_protocol_errors: u64,
+
+    /// The number of the session's connections that ended without a protocol violation but before
+    /// their results were acknowledged: they closed before their trailer, failed, or were cut off
+    /// once the job terminated.
+    pub num_incomplete_connections: u64,
 
     /// The number of claimed results discarded because the consumer had dropped the result stream.
     pub num_results_discarded: u64,
@@ -184,12 +191,14 @@ impl<EncodingType: ResultEncoding> Session<EncodingType> {
             batches_sender,
             draining: CancellationToken::new(),
             drain_grace_period: config.drain_grace_period,
+            has_job_succeeded: AtomicBool::new(false),
             connections: TaskTracker::new(),
             has_joined_connection: AtomicBool::new(false),
             has_claimed_result: AtomicBool::new(false),
             num_results_emitted: AtomicU64::new(0),
             num_duplicates_dropped: AtomicU64::new(0),
             num_protocol_errors: AtomicU64::new(0),
+            num_incomplete_connections: AtomicU64::new(0),
             num_results_discarded: AtomicU64::new(0),
         });
         assert!(
@@ -258,17 +267,34 @@ pub struct State<EncodingType: ResultEncoding> {
     /// Cancelled once the session's job has terminated and its connections should drain.
     pub draining: CancellationToken,
 
-    pub drain_grace_period: Duration,
     pub connections: TaskTracker,
+    drain_grace_period: Duration,
+
+    /// Set before [`Self::draining`] is cancelled if the session's job succeeded.
+    has_job_succeeded: AtomicBool,
+
     has_joined_connection: AtomicBool,
     has_claimed_result: AtomicBool,
     num_results_emitted: AtomicU64,
     num_duplicates_dropped: AtomicU64,
     num_protocol_errors: AtomicU64,
+    num_incomplete_connections: AtomicU64,
     num_results_discarded: AtomicU64,
 }
 
 impl<EncodingType: ResultEncoding> State<EncodingType> {
+    /// # Returns
+    ///
+    /// How long a connection may wait on its socket without claiming a result once the session
+    /// drains: zero if the session's job succeeded, or the session's grace period otherwise.
+    pub fn drain_grace_period(&self) -> Duration {
+        if self.has_job_succeeded.load(Ordering::Acquire) {
+            Duration::ZERO
+        } else {
+            self.drain_grace_period
+        }
+    }
+
     /// Records that a connection has joined the session.
     ///
     /// # Returns
@@ -297,6 +323,8 @@ impl<EncodingType: ResultEncoding> State<EncodingType> {
             .fetch_add(stats.num_duplicates_dropped, Ordering::Relaxed);
         self.num_protocol_errors
             .fetch_add(stats.num_protocol_errors, Ordering::Relaxed);
+        self.num_incomplete_connections
+            .fetch_add(stats.num_incomplete_connections, Ordering::Relaxed);
         self.num_results_discarded
             .fetch_add(stats.num_results_discarded, Ordering::Relaxed);
     }
@@ -309,6 +337,7 @@ impl<EncodingType: ResultEncoding> State<EncodingType> {
             num_results_emitted: self.num_results_emitted.load(Ordering::Relaxed),
             num_duplicates_dropped: self.num_duplicates_dropped.load(Ordering::Relaxed),
             num_protocol_errors: self.num_protocol_errors.load(Ordering::Relaxed),
+            num_incomplete_connections: self.num_incomplete_connections.load(Ordering::Relaxed),
             num_results_discarded: self.num_results_discarded.load(Ordering::Relaxed),
         }
     }
@@ -359,6 +388,9 @@ async fn drive<EncodingType: ResultEncoding, JobStatusSourceType: JobStatusSourc
     // Tasks connect before they finish, so their connections have reached the socket by now.
     accept_barrier.wait().await;
     drop(registration);
+    if matches!(status, Ok(QueryJobStatus::Succeeded)) {
+        state.has_job_succeeded.store(true, Ordering::Release);
+    }
     state.draining.cancel();
     state.connections.close();
     state.connections.wait().await;

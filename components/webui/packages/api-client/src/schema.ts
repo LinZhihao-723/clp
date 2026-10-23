@@ -214,6 +214,12 @@ export interface components {
             num_duplicates_dropped: number;
             /**
              * Format: int64
+             * @description The number of connections from search tasks that ended before their results were
+             *     acknowledged, without violating the wire protocol.
+             */
+            num_incomplete_connections: number;
+            /**
+             * Format: int64
              * @description The number of connections from search tasks closed because they violated the wire protocol.
              */
             num_protocol_errors: number;
@@ -364,7 +370,7 @@ export interface operations {
                      *     data: {"archive_id":"018e90e5-8b2a-4a61-a2fc-cac799936caf","timestamp":1633036800000,"message":"Example log message"}
                      *
                      *     event: end
-                     *     data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0}
+                     *     data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0,"num_incomplete_connections":0}
                      */
                     "text/event-stream": string;
                 };

@@ -1,7 +1,8 @@
-//! Decoding of wire protocol v1, which `clp-s` uses to stream a search task's results.
+//! Wire protocol v2, which `clp-s` uses to stream a search task's results.
 //!
 //! A connection carries msgpack arrays without length prefixes: one handshake, followed by one
-//! frame per result. `clp-s` closes the connection once it has sent every result.
+//! frame per result and a trailer that counts them. `clp-s` then shuts down its side of the
+//! connection and waits for the listener's acknowledgement before it reports success.
 
 use bytes::Buf;
 use bytes::BytesMut;
@@ -15,7 +16,7 @@ use rmp::decode::bytes::BytesReadError;
 
 use crate::error::ProtocolError;
 
-pub const PROTOCOL_VERSION: u64 = 1;
+pub const PROTOCOL_VERSION: u64 = 2;
 
 /// The frame a search task sends first on every connection.
 #[derive(Debug, Eq, PartialEq)]
@@ -41,7 +42,7 @@ impl Handshake {
     ///
     /// * [`ProtocolError::UnsupportedVersion`] if the handshake's version isn't
     ///   [`PROTOCOL_VERSION`].
-    /// * [`ProtocolError::MalformedFrame`] if the bytes don't form a v1 handshake.
+    /// * [`ProtocolError::MalformedFrame`] if the bytes don't form a v2 handshake.
     /// * [`ProtocolError::InvalidSessionToken`] if the session token isn't a valid UUID.
     /// * [`ProtocolError::InvalidArchiveId`] if the archive ID isn't a valid UUID.
     pub fn decode(buffer: &mut BytesMut) -> Result<Option<Self>, ProtocolError> {
@@ -68,6 +69,58 @@ impl Handshake {
     }
 }
 
+/// A frame that follows the handshake.
+#[derive(Debug, Eq, PartialEq)]
+pub enum Frame {
+    /// One result of the task.
+    Result(ResultFrame),
+
+    /// The last frame, sent once the task has sent every result.
+    Trailer(Trailer),
+}
+
+impl Frame {
+    /// Decodes a frame from the front of `buffer`, consuming its bytes. The number of fields of
+    /// the frame's array tells a result from a trailer.
+    ///
+    /// # Returns
+    ///
+    /// On success:
+    ///
+    /// * The decoded frame.
+    /// * `None` if `buffer` doesn't hold a complete frame yet, leaving `buffer` untouched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ProtocolError::MalformedFrame`] if the bytes don't form a v2 result frame or trailer.
+    pub fn decode(buffer: &mut BytesMut) -> Result<Option<Self>, ProtocolError> {
+        decode_frame(buffer, |reader| {
+            match rmp::decode::read_array_len(reader)? {
+                NUM_RESULT_FIELDS => {
+                    let result_index = rmp::decode::read_int(reader)?;
+                    let timestamp = rmp::decode::read_int(reader)?;
+                    let message = read_str(reader, usize::MAX)?.to_owned();
+                    Ok(Self::Result(ResultFrame {
+                        result_index,
+                        timestamp,
+                        message,
+                    }))
+                }
+                NUM_TRAILER_FIELDS => Ok(Self::Trailer(Trailer {
+                    num_results: rmp::decode::read_int(reader)?,
+                })),
+                num_fields => Err(ProtocolError::MalformedFrame(format!(
+                    "expected {NUM_RESULT_FIELDS} fields for a result or {NUM_TRAILER_FIELDS} for \
+                     a trailer, got {num_fields}"
+                ))
+                .into()),
+            }
+        })
+    }
+}
+
 /// The frame a search task sends for each result.
 #[derive(Debug, Eq, PartialEq)]
 pub struct ResultFrame {
@@ -76,38 +129,47 @@ pub struct ResultFrame {
     pub message: String,
 }
 
-impl ResultFrame {
-    /// Decodes a result frame from the front of `buffer`, consuming its bytes.
-    ///
+/// The frame a search task sends after its last result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Trailer {
+    /// The number of results the task sent on the connection.
+    pub num_results: u64,
+}
+
+/// The acknowledgement the listener sends once it has taken responsibility for every result of a
+/// connection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Ack {
+    /// The number of results the connection's trailer counted.
+    pub num_results: u64,
+}
+
+impl Ack {
+    /// The size of every encoded acknowledgement.
+    pub const ENCODED_LEN: usize = 10;
+
     /// # Returns
     ///
-    /// On success:
-    ///
-    /// * The decoded result frame.
-    /// * `None` if `buffer` doesn't hold a complete result frame yet, leaving `buffer` untouched.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    ///
-    /// * [`ProtocolError::MalformedFrame`] if the bytes don't form a v1 result frame.
-    pub fn decode(buffer: &mut BytesMut) -> Result<Option<Self>, ProtocolError> {
-        decode_frame(buffer, |reader| {
-            expect_num_fields(rmp::decode::read_array_len(reader)?, NUM_RESULT_FIELDS)?;
-            let result_index = rmp::decode::read_int(reader)?;
-            let timestamp = rmp::decode::read_int(reader)?;
-            let message = read_str(reader, usize::MAX)?.to_owned();
-            Ok(Self {
-                result_index,
-                timestamp,
-                message,
-            })
-        })
+    /// The msgpack array `[num_results]`, with the count always encoded as a `uint 64`.
+    #[must_use]
+    pub fn encode(self) -> [u8; Self::ENCODED_LEN] {
+        let mut encoded = [0; Self::ENCODED_LEN];
+        encoded[0] = ACK_ARRAY_MARKER;
+        encoded[1] = ACK_UINT64_MARKER;
+        encoded[2..].copy_from_slice(&self.num_results.to_be_bytes());
+        encoded
     }
 }
 
 const NUM_HANDSHAKE_FIELDS: u32 = 4;
 const NUM_RESULT_FIELDS: u32 = 3;
+const NUM_TRAILER_FIELDS: u32 = 1;
+
+/// The msgpack marker of an array of one element.
+const ACK_ARRAY_MARKER: u8 = 0x91;
+
+/// The msgpack marker of a `uint 64`.
+const ACK_UINT64_MARKER: u8 = 0xcf;
 
 /// The longest string a handshake may carry. Every textual UUID form fits, and the bound keeps an
 /// unauthenticated peer from making the listener buffer an arbitrarily long frame.
@@ -249,8 +311,12 @@ mod tests {
     use clp_rust_utils::job_config::SessionToken;
     use clp_rust_utils::types::ArchiveId;
 
+    use super::Ack;
+    use super::Frame;
     use super::Handshake;
+    use super::PROTOCOL_VERSION;
     use super::ResultFrame;
+    use super::Trailer;
     use crate::error::ProtocolError;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
@@ -271,9 +337,37 @@ mod tests {
         bytes
     }
 
+    /// # Returns
+    ///
+    /// The bytes of a trailer counting `num_results`, encoded the way `clp-s` does.
+    fn encode_trailer(num_results: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        rmp::encode::write_array_len(&mut bytes, 1).expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_uint(&mut bytes, num_results)
+            .expect("writing to a `Vec` shouldn't fail");
+        bytes
+    }
+
+    /// # Returns
+    ///
+    /// The frames decoded from `bytes`, which must hold only complete frames.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bytes` doesn't hold only complete, valid frames.
+    fn decode_frames(bytes: &[u8]) -> Vec<Frame> {
+        let mut buffer = BytesMut::from(bytes);
+        let mut frames = Vec::new();
+        while let Some(frame) = Frame::decode(&mut buffer).expect("frames should be valid") {
+            frames.push(frame);
+        }
+        assert_eq!(&buffer[..], &[] as &[u8]);
+        frames
+    }
+
     #[test]
     fn handshake_decodes_only_once_complete() {
-        let encoded = encode_handshake(1);
+        let encoded = encode_handshake(PROTOCOL_VERSION);
         let mut buffer = BytesMut::new();
         for &byte in &encoded[..encoded.len() - 1] {
             buffer.extend_from_slice(&[byte]);
@@ -299,20 +393,23 @@ mod tests {
     }
 
     #[test]
-    fn handshake_with_another_version_is_rejected_before_its_other_fields() {
-        let mut buffer = BytesMut::from(&encode_handshake(2)[..2]);
-        let error = Handshake::decode(&mut buffer).expect_err("version 2 should be rejected");
-        assert!(
-            matches!(error, ProtocolError::UnsupportedVersion(2)),
-            "unexpected error: {error:?}"
-        );
+    fn handshake_of_another_version_is_rejected_before_its_other_fields() {
+        for version in [1, 3] {
+            let mut buffer = BytesMut::from(&encode_handshake(version)[..2]);
+            let error = Handshake::decode(&mut buffer).expect_err("the version should be rejected");
+            assert!(
+                matches!(error, ProtocolError::UnsupportedVersion(rejected) if version == rejected),
+                "unexpected error: {error:?}"
+            );
+        }
     }
 
     #[test]
     fn handshake_with_an_overlong_string_is_rejected_before_it_arrives() {
         let mut bytes = Vec::new();
         rmp::encode::write_array_len(&mut bytes, 4).expect("writing to a `Vec` shouldn't fail");
-        rmp::encode::write_uint(&mut bytes, 1).expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_uint(&mut bytes, PROTOCOL_VERSION)
+            .expect("writing to a `Vec` shouldn't fail");
         rmp::encode::write_str_len(&mut bytes, 1 << 20).expect("writing to a `Vec` shouldn't fail");
         let mut buffer = BytesMut::from(&bytes[..]);
 
@@ -341,22 +438,23 @@ mod tests {
         rmp::encode::write_u64(&mut bytes, 1_700_000_000_001)
             .expect("writing to a `Vec` shouldn't fail");
         rmp::encode::write_str(&mut bytes, "last\n").expect("writing to a `Vec` shouldn't fail");
-        let mut buffer = BytesMut::from(&bytes[..]);
 
-        let mut frames = Vec::new();
-        while let Some(frame) = ResultFrame::decode(&mut buffer).expect("frames should be valid") {
-            frames.push((frame.result_index, frame.timestamp, frame.message));
-        }
+        let result = |result_index: u64, timestamp: i64, message: &str| {
+            Frame::Result(ResultFrame {
+                result_index,
+                timestamp,
+                message: message.to_owned(),
+            })
+        };
         assert_eq!(
-            frames,
+            decode_frames(&bytes),
             [
-                (0, 0, "message\n".to_owned()),
-                (300, -5, "message\n".to_owned()),
-                (70_000, 1_700_000_000_000, "message\n".to_owned()),
-                (3, 1_700_000_000_001, "last\n".to_owned()),
+                result(0, 0, "message\n"),
+                result(300, -5, "message\n"),
+                result(70_000, 1_700_000_000_000, "message\n"),
+                result(3, 1_700_000_000_001, "last\n"),
             ]
         );
-        assert_eq!(&buffer[..], &[] as &[u8]);
     }
 
     #[test]
@@ -367,7 +465,7 @@ mod tests {
         rmp::encode::write_u64(&mut bytes, u64::MAX).expect("writing to a `Vec` shouldn't fail");
         let mut buffer = BytesMut::from(&bytes[..]);
 
-        let error = ResultFrame::decode(&mut buffer).expect_err("the timestamp should be rejected");
+        let error = Frame::decode(&mut buffer).expect_err("the timestamp should be rejected");
         assert!(
             matches!(error, ProtocolError::MalformedFrame(_)),
             "unexpected error: {error:?}"
@@ -384,10 +482,134 @@ mod tests {
         bytes.push(0xff);
         let mut buffer = BytesMut::from(&bytes[..]);
 
-        let error = ResultFrame::decode(&mut buffer).expect_err("invalid UTF-8 should be rejected");
+        let error = Frame::decode(&mut buffer).expect_err("invalid UTF-8 should be rejected");
         assert!(
             matches!(error, ProtocolError::MalformedFrame(_)),
             "unexpected error: {error:?}"
         );
+    }
+
+    #[test]
+    fn trailer_decodes_at_every_uint_width_only_once_complete() {
+        for (num_results, encoded_len) in [
+            (0_u64, 2),
+            (127, 2),
+            (128, 3),
+            (255, 3),
+            (256, 4),
+            (65_535, 4),
+            (65_536, 6),
+            (u64::from(u32::MAX), 6),
+            (u64::from(u32::MAX) + 1, 10),
+            (u64::MAX, 10),
+        ] {
+            let encoded = encode_trailer(num_results);
+            assert_eq!(encoded.len(), encoded_len, "{num_results}");
+            let mut buffer = BytesMut::new();
+            for &byte in &encoded[..encoded.len() - 1] {
+                buffer.extend_from_slice(&[byte]);
+                assert_eq!(
+                    Frame::decode(&mut buffer).expect("a trailer prefix should be valid"),
+                    None,
+                    "{num_results}"
+                );
+            }
+            assert_eq!(buffer.len(), encoded.len() - 1, "{num_results}");
+
+            buffer.extend_from_slice(&encoded[encoded.len() - 1..]);
+            buffer.extend_from_slice(&[0x93]);
+            assert_eq!(
+                Frame::decode(&mut buffer).expect("the trailer should be valid"),
+                Some(Frame::Trailer(Trailer { num_results })),
+                "{num_results}"
+            );
+            assert_eq!(&buffer[..], &[0x93], "{num_results}");
+        }
+    }
+
+    #[test]
+    fn trailer_follows_the_results_it_counts() {
+        let mut bytes = Vec::new();
+        rmp::encode::write_array_len(&mut bytes, 3).expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_uint(&mut bytes, 0).expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_sint(&mut bytes, 1).expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_str(&mut bytes, "only\n").expect("writing to a `Vec` shouldn't fail");
+        bytes.extend(encode_trailer(1));
+
+        assert_eq!(
+            decode_frames(&bytes),
+            [
+                Frame::Result(ResultFrame {
+                    result_index: 0,
+                    timestamp: 1,
+                    message: "only\n".to_owned(),
+                }),
+                Frame::Trailer(Trailer { num_results: 1 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_frames_are_rejected() {
+        let mut malformed_frames = Vec::new();
+        for num_fields in [0, 2, 4] {
+            let mut bytes = Vec::new();
+            rmp::encode::write_array_len(&mut bytes, num_fields)
+                .expect("writing to a `Vec` shouldn't fail");
+            rmp::encode::write_uint(&mut bytes, 0).expect("writing to a `Vec` shouldn't fail");
+            malformed_frames.push(bytes);
+        }
+        let mut negative_count = Vec::new();
+        rmp::encode::write_array_len(&mut negative_count, 1)
+            .expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_sint(&mut negative_count, -1)
+            .expect("writing to a `Vec` shouldn't fail");
+        malformed_frames.push(negative_count);
+        let mut string_count = Vec::new();
+        rmp::encode::write_array_len(&mut string_count, 1)
+            .expect("writing to a `Vec` shouldn't fail");
+        rmp::encode::write_str(&mut string_count, "1").expect("writing to a `Vec` shouldn't fail");
+        malformed_frames.push(string_count);
+        let mut not_an_array = Vec::new();
+        rmp::encode::write_uint(&mut not_an_array, 1).expect("writing to a `Vec` shouldn't fail");
+        malformed_frames.push(not_an_array);
+
+        for bytes in malformed_frames {
+            let mut buffer = BytesMut::from(&bytes[..]);
+            let error = Frame::decode(&mut buffer).expect_err("the frame should be rejected");
+            assert!(
+                matches!(error, ProtocolError::MalformedFrame(_)),
+                "{bytes:02x?}: unexpected error: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ack_is_a_one_element_array_of_a_uint64() {
+        for (num_results, count_bytes) in [
+            (0_u64, [0, 0, 0, 0, 0, 0, 0, 0]),
+            (1, [0, 0, 0, 0, 0, 0, 0, 1]),
+            (20_000, [0, 0, 0, 0, 0, 0, 0x4e, 0x20]),
+            (
+                0x0102_0304_0506_0708,
+                [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+            ),
+            (u64::MAX, [0xff; 8]),
+        ] {
+            let encoded = Ack { num_results }.encode();
+            assert_eq!(encoded[..2], [0x91, 0xcf], "{num_results}");
+            assert_eq!(encoded[2..], count_bytes, "{num_results}");
+
+            let mut reader = rmp::decode::Bytes::new(&encoded);
+            assert_eq!(
+                rmp::decode::read_array_len(&mut reader).expect("the ack should be an array"),
+                1
+            );
+            assert_eq!(
+                rmp::decode::read_u64(&mut reader).expect("the count should be a `uint 64`"),
+                num_results
+            );
+            assert_eq!(reader.remaining_slice(), &[] as &[u8]);
+        }
     }
 }

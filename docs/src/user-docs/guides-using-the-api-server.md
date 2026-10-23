@@ -90,7 +90,7 @@ data: {"query_job_id":100}
 data: {"archive_id":"018e90e5-8b2a-4a61-a2fc-cac799936caf","timestamp":1767225600000,"message":"Example log message"}
 
 event: end
-data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0}
+data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0,"num_incomplete_connections":0}
 ```
 
 Results from different archives arrive in no particular order. Streaming search doesn't support

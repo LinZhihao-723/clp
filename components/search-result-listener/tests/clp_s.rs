@@ -1,11 +1,13 @@
 //! Tests that drive a [`ResultListener`] with a real `clp-s` binary, whose path is read from the
-//! `CLP_S_BINARY` environment variable. The tests are skipped when the variable isn't set.
+//! `CLP_S_BINARY` environment variable, and that check that `clp-s` fails when its results aren't
+//! acknowledged. The tests are skipped when the variable isn't set.
 
 mod common;
 
 use std::fmt::Write;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,11 +17,14 @@ use clp_rust_utils::job_config::QueryJobStatus;
 use clp_rust_utils::types::ArchiveId;
 use common::FakeJobStatusSource;
 use futures::StreamExt;
+use non_empty_string::NonEmptyString;
 use search_result_listener::ListenerConfig;
 use search_result_listener::ResultListener;
 use search_result_listener::SearchResultEncoding;
 use search_result_listener::SessionConfig;
 use search_result_listener::SessionStats;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpListener;
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -38,6 +43,21 @@ async fn clp_s_attempts_of_one_task_emit_each_result_once() -> anyhow::Result<()
     let work_dir = std::env::temp_dir().join(format!("search-result-listener-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&work_dir)?;
     let result = run_attempts(&clp_s, &work_dir).await;
+    std::fs::remove_dir_all(&work_dir)?;
+    result
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a clp-s binary; set `CLP_S_BINARY` to its path"]
+async fn clp_s_fails_when_the_listener_closes_without_an_acknowledgement() -> anyhow::Result<()> {
+    // CI runs the ignored tests without building clp-s.
+    let Some(clp_s) = std::env::var_os("CLP_S_BINARY").map(PathBuf::from) else {
+        eprintln!("Skipping the test since `CLP_S_BINARY` isn't set.");
+        return Ok(());
+    };
+    let work_dir = std::env::temp_dir().join(format!("search-result-listener-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&work_dir)?;
+    let result = search_without_acknowledgement(&clp_s, &work_dir).await;
     std::fs::remove_dir_all(&work_dir)?;
     result
 }
@@ -126,11 +146,68 @@ async fn run_attempts(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
                 num_results_emitted: num_expected,
                 num_duplicates_dropped: 2 * num_expected,
                 num_protocol_errors: 0,
+                num_incomplete_connections: 0,
                 num_results_discarded: 0,
             },
         "unexpected statistics: {:?}",
         outcome.stats
     );
+    Ok(())
+}
+
+/// Compresses a small log file into one archive, then streams the archive's search results to a
+/// peer that reads the whole stream and closes the connection without acknowledging it.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// * [`anyhow::Error`] if:
+///   * The bound port is zero.
+///   * clp-s succeeds.
+///   * The peer receives nothing.
+/// * Forwards [`compress`]'s return values on failure.
+/// * Forwards [`TcpListener::bind`]'s return values on failure.
+/// * Forwards [`TcpListener::local_addr`]'s return values on failure.
+/// * Forwards [`NonEmptyString::new`]'s return values on failure.
+/// * Forwards [`tokio::time::timeout`]'s return values on failure.
+/// * Forwards [`tokio::task::JoinHandle`]'s return values on failure.
+/// * Forwards [`TcpListener::accept`]'s return values on failure.
+/// * Forwards [`AsyncReadExt::read_to_end`]'s return values on failure.
+async fn search_without_acknowledgement(clp_s: &Path, work_dir: &Path) -> anyhow::Result<()> {
+    let archives_dir = work_dir.join("archives");
+    let archive_name = compress(clp_s, work_dir, &archives_dir).await?;
+    let tcp_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+    let port = NonZeroU16::new(tcp_listener.local_addr()?.port())
+        .ok_or_else(|| anyhow::anyhow!("the bound port should be nonzero"))?;
+    let peer = tokio::spawn(async move {
+        let (mut stream, _) = tcp_listener.accept().await?;
+        let mut received = Vec::new();
+        stream.read_to_end(&mut received).await?;
+        anyhow::Ok(received)
+    });
+    let network_output = NetworkOutput {
+        host: NonEmptyString::new(Ipv4Addr::LOCALHOST.to_string())
+            .map_err(|_| anyhow::anyhow!("the host should be non-empty"))?,
+        port,
+        session_token: Uuid::new_v4(),
+    };
+
+    let searched = search_to_listener(
+        clp_s,
+        &archives_dir,
+        &archive_name,
+        QUERY,
+        &network_output,
+        0,
+    )
+    .await;
+    let received = tokio::time::timeout(TIMEOUT, peer).await???;
+    anyhow::ensure!(
+        searched.is_err(),
+        "clp-s should fail when its results aren't acknowledged"
+    );
+    anyhow::ensure!(!received.is_empty(), "clp-s should stream its results");
     Ok(())
 }
 

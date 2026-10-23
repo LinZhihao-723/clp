@@ -217,7 +217,8 @@ struct QueryResultsUri {
                 {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":\
                 1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: \
                 {\"status\":\"Succeeded\",\"num_results_emitted\":1,\
-                \"num_duplicates_dropped\":0,\"num_protocol_errors\":0}\n\n"
+                \"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\
+                \"num_incomplete_connections\":0}\n\n"
         ),
         (
             status = BAD_REQUEST,
@@ -277,6 +278,10 @@ struct StreamingSearchEnd {
 
     /// The number of connections from search tasks closed because they violated the wire protocol.
     num_protocol_errors: u64,
+
+    /// The number of connections from search tasks that ended before their results were
+    /// acknowledged, without violating the wire protocol.
+    num_incomplete_connections: u64,
 }
 
 impl From<SessionOutcome> for StreamingSearchEnd {
@@ -286,6 +291,7 @@ impl From<SessionOutcome> for StreamingSearchEnd {
             num_results_emitted: outcome.stats.num_results_emitted,
             num_duplicates_dropped: outcome.stats.num_duplicates_dropped,
             num_protocol_errors: outcome.stats.num_protocol_errors,
+            num_incomplete_connections: outcome.stats.num_incomplete_connections,
         }
     }
 }
@@ -1369,7 +1375,7 @@ mod stream_query_tests {
                     .await
                     .expect("connecting to the listener should succeed");
             let handshake = rmp_serde::to_vec(&(
-                1_u8,
+                2_u8,
                 network_output.session_token.to_string(),
                 0_u64,
                 ARCHIVE_ID,
@@ -1395,6 +1401,35 @@ mod stream_query_tests {
                 .write_all(&bytes)
                 .await
                 .expect("sending results should succeed");
+        }
+
+        /// Ends the stream the way `clp-s` does: sends a trailer counting `num_results` results,
+        /// then EOF, and reads until the listener closes the connection.
+        ///
+        /// # Returns
+        ///
+        /// The bytes the listener sent back.
+        ///
+        /// # Panics
+        ///
+        /// Panics if sending the trailer or EOF, or reading the reply, fails.
+        async fn finish(mut self, num_results: u64) -> Vec<u8> {
+            let trailer =
+                rmp_serde::to_vec(&(num_results,)).expect("encoding the trailer shouldn't fail");
+            self.stream
+                .write_all(&trailer)
+                .await
+                .expect("sending the trailer should succeed");
+            self.stream
+                .shutdown()
+                .await
+                .expect("sending EOF should succeed");
+            let mut reply = Vec::new();
+            timeout(TIMEOUT, self.stream.read_to_end(&mut reply))
+                .await
+                .expect("the listener should close the connection")
+                .expect("reading the reply should succeed");
+            reply
         }
 
         /// Sends the results at `result_indices`.
@@ -1483,6 +1518,16 @@ mod stream_query_tests {
 
     /// # Returns
     ///
+    /// The listener's acknowledgement of `num_results` results: the msgpack array `[num_results]`
+    /// with the count encoded as a `uint 64`.
+    fn acknowledgement(num_results: u64) -> Vec<u8> {
+        let mut bytes = vec![0x91, 0xcf];
+        bytes.extend_from_slice(&num_results.to_be_bytes());
+        bytes
+    }
+
+    /// # Returns
+    ///
     /// Each of [`TRICKY_MESSAGES`], paired with one of [`TRICKY_TIMESTAMPS`] in turn.
     fn tricky_results() -> Vec<(i64, &'static str)> {
         TRICKY_TIMESTAMPS
@@ -1552,6 +1597,32 @@ mod stream_query_tests {
         Ok(())
     }
 
+    #[test]
+    fn end_event_carries_the_session_statistics() -> anyhow::Result<()> {
+        let end = StreamingSearchEnd::from(SessionOutcome {
+            status: QueryJobStatus::Failed,
+            stats: SessionStats {
+                num_results_emitted: 3,
+                num_duplicates_dropped: 2,
+                num_protocol_errors: 1,
+                num_incomplete_connections: 4,
+                num_results_discarded: 5,
+            },
+        });
+
+        assert_eq!(
+            serde_json::to_value(&end)?,
+            json!({
+                "status": "Failed",
+                "num_results_emitted": 3,
+                "num_duplicates_dropped": 2,
+                "num_protocol_errors": 1,
+                "num_incomplete_connections": 4
+            })
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn named_events_match_axum() -> anyhow::Result<()> {
         let job = StreamingSearchJob { query_job_id: 7 };
@@ -1561,6 +1632,7 @@ mod stream_query_tests {
                 num_results_emitted: 3,
                 num_duplicates_dropped: 2,
                 num_protocol_errors: 1,
+                num_incomplete_connections: 4,
                 num_results_discarded: 0,
             },
         });
@@ -1606,7 +1678,10 @@ mod stream_query_tests {
         let results = tricky_results();
         let mut clp_s = harness.connect(1).await;
         clp_s.send_timestamped_messages(&results).await;
-        drop(clp_s);
+        assert_eq!(
+            clp_s.finish(results.len() as u64).await,
+            acknowledgement(results.len() as u64)
+        );
         harness
             .query_job_table
             .set_status(1, QueryJobStatus::Succeeded);
@@ -1752,7 +1827,10 @@ mod stream_query_tests {
 
         let mut clp_s = FakeClpS::connect(&network_output).await;
         clp_s.send_results(0..NUM_RESULTS).await;
-        drop(clp_s);
+        assert_eq!(
+            clp_s.finish(NUM_RESULTS).await,
+            acknowledgement(NUM_RESULTS)
+        );
         let mut results = Vec::new();
         for _ in 0..NUM_RESULTS {
             let result_event = events.next_event().await.expect("a result should arrive");
@@ -1784,7 +1862,8 @@ mod stream_query_tests {
                 "status": "Succeeded",
                 "num_results_emitted": NUM_RESULTS,
                 "num_duplicates_dropped": 0,
-                "num_protocol_errors": 0
+                "num_protocol_errors": 0,
+                "num_incomplete_connections": 0
             })
         );
         assert_eq!(
@@ -1871,7 +1950,7 @@ mod stream_query_tests {
         events.next_event().await.expect("a result should arrive");
         harness
             .query_job_table
-            .set_status(query_job_id, QueryJobStatus::Succeeded);
+            .set_status(query_job_id, QueryJobStatus::Failed);
         sleep(Duration::from_millis(100)).await;
 
         drop(events);
@@ -1882,7 +1961,7 @@ mod stream_query_tests {
         );
         assert_eq!(
             harness.query_job_table.status(query_job_id),
-            QueryJobStatus::Succeeded
+            QueryJobStatus::Failed
         );
     }
 
