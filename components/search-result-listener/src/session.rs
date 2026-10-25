@@ -2,7 +2,7 @@
 
 use std::future::Future;
 use std::num::NonZeroU16;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -20,14 +20,15 @@ use clp_rust_utils::task_io::query::QueryTaskIndex;
 use dashmap::DashMap;
 use futures::Stream;
 use non_empty_string::NonEmptyString;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::EncodedBatch;
 use crate::Error;
 use crate::JobStatusSource;
 use crate::ResultEncoding;
+use crate::channel;
 use crate::cursor::TaskCursor;
 use crate::listener::AcceptBarrier;
 
@@ -37,9 +38,10 @@ pub type Registry<EncodingType> = DashMap<SessionToken, Arc<State<EncodingType>>
 /// Per-session configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionConfig {
-    /// The number of batches buffered for the consumer, each holding the results a connection
-    /// claimed from one socket read, before the connections stop reading from their sockets.
-    pub channel_capacity: NonZeroUsize,
+    /// The bytes of the batches buffered for the consumer, each holding the results a connection
+    /// claimed from one socket read, before the connections stop reading from their sockets. A
+    /// batch larger than this is buffered alone.
+    pub channel_size: NonZeroU32,
 
     /// How long a connection may wait on its socket without claiming a result once its job has
     /// terminated, before the session stops reading from it. Once the job has succeeded, the
@@ -51,8 +53,8 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            channel_capacity: NonZeroUsize::new(16)
-                .expect("default channel capacity should not be zero"),
+            channel_size: NonZeroU32::new(16 * 1024 * 1024)
+                .expect("default channel size should not be zero"),
             drain_grace_period: Duration::from_secs(5),
         }
     }
@@ -101,7 +103,7 @@ pub struct Session<EncodingType: ResultEncoding> {
     registration: Registration<EncodingType>,
     accept_barrier: AcceptBarrier,
     state: Arc<State<EncodingType>>,
-    batches_receiver: mpsc::Receiver<EncodingType::Batch>,
+    batches_receiver: channel::Receiver<EncodingType::Batch>,
     network_output: NetworkOutput,
 }
 
@@ -184,7 +186,7 @@ impl<EncodingType: ResultEncoding> Session<EncodingType> {
         encoding: EncodingType,
     ) -> Self {
         let token = SessionToken::new_v4();
-        let (batches_sender, batches_receiver) = mpsc::channel(config.channel_capacity.get());
+        let (batches_sender, batches_receiver) = channel::channel(config.channel_size);
         let state = Arc::new(State {
             cursors: DashMap::new(),
             encoding,
@@ -227,11 +229,11 @@ impl<EncodingType: ResultEncoding> Session<EncodingType> {
 /// # Type Parameters
 ///
 /// * `BatchType` - The type of a batch of encoded results.
-pub struct ResultStream<BatchType> {
-    batches_receiver: mpsc::Receiver<BatchType>,
+pub struct ResultStream<BatchType: EncodedBatch> {
+    batches_receiver: channel::Receiver<BatchType>,
 }
 
-impl<BatchType> Stream for ResultStream<BatchType> {
+impl<BatchType: EncodedBatch> Stream for ResultStream<BatchType> {
     type Item = BatchType;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -262,7 +264,7 @@ impl Future for OutcomeFuture {
 pub struct State<EncodingType: ResultEncoding> {
     pub cursors: DashMap<QueryTaskIndex, Arc<TaskCursor>>,
     pub encoding: EncodingType,
-    pub batches_sender: mpsc::Sender<EncodingType::Batch>,
+    pub batches_sender: channel::Sender<EncodingType::Batch>,
 
     /// Cancelled once the session's job has terminated and its connections should drain.
     pub draining: CancellationToken,

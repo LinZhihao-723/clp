@@ -8,6 +8,10 @@ name = "search_result_listener"
 path = "src/lib.rs"
 
 [dependencies]
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-ipc = { workspace = true }
+arrow-schema = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 clp-rust-utils = { workspace = true }
@@ -26,7 +30,9 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+clp-s-arrow = { workspace = true }
 clp-s-reader = { workspace = true }
+clp-s-sinks = { workspace = true }
 clp-s-spider-adapter = { workspace = true }
 serde_json = { workspace = true }
 spider-core = { workspace = true }

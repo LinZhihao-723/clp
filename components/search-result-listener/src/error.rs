@@ -49,6 +49,9 @@ pub enum ProtocolError {
     #[error("invalid session token: {0}")]
     InvalidSessionToken(#[from] uuid::Error),
 
+    #[error("malformed Arrow IPC stream: {0}")]
+    MalformedArrowStream(String),
+
     #[error("malformed frame: {0}")]
     MalformedFrame(String),
 

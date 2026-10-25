@@ -18,6 +18,10 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
+arrow-array = "60.0.0"
+arrow-buffer = "60.0.0"
+arrow-ipc = { version = "60.0.0", default-features = false }
+arrow-schema = "60.0.0"
 async-stream = "0.3.6"
 async-trait = "0.1.92"
 aws-config = "1.10.1"
@@ -28,7 +32,9 @@ bytes = "1.11.1"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.6", features = ["derive"] }
 clp-rust-utils = { path = "components/clp-rust-utils" }
+clp-s-arrow = { path = "components/core/rust/crates/clp-s-arrow" }
 clp-s-reader = { path = "components/core/rust/crates/clp-s-reader" }
+clp-s-sinks = { path = "components/core/rust/crates/clp-s-sinks" }
 clp-s-spider-adapter = { path = "components/core/rust/crates/clp-s-spider-adapter" }
 const_format = "0.2.36"
 dashmap = "6.2.1"

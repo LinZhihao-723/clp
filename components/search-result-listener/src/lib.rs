@@ -1,7 +1,10 @@
-//! A listener that receives the search results `clp-s` search tasks stream over TCP, and delivers
-//! each result of a query job to its consumer exactly once, encoded in batches for the consumer's
-//! transport, even when Spider reruns tasks.
+//! A listener that receives the search results `clp-s` search tasks stream over TCP, as msgpack
+//! frames (protocol v2) or an Arrow IPC stream (protocol v3), and delivers each result of a query
+//! job to its consumer exactly once, encoded in batches for the consumer's transport, even when
+//! Spider reruns tasks.
 
+mod arrow_stream;
+mod channel;
 mod connection;
 mod cursor;
 mod encoding;
@@ -11,6 +14,12 @@ mod listener;
 mod protocol;
 mod session;
 
+pub use arrow_stream::ARCHIVE_ID_COLUMN;
+pub use arrow_stream::ArrowResultBatch;
+pub use arrow_stream::MESSAGE_COLUMN;
+pub use arrow_stream::RESULT_SCHEMA;
+pub use arrow_stream::TIMESTAMP_COLUMN;
+pub use encoding::EncodedBatch;
 pub use encoding::ResultEncoder;
 pub use encoding::ResultEncoding;
 pub use encoding::SearchResult;

@@ -1,5 +1,6 @@
-//! Serving a connection from a search task: its handshake, then the results it streams, then the
-//! trailer that the connection's acknowledgement answers.
+//! Serving a connection from a search task: its handshake, then the results it streams as msgpack
+//! frames (protocol v2) or as an Arrow IPC stream (protocol v3), then the trailer that the
+//! connection's acknowledgement answers.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,11 +17,15 @@ use tokio_util::task::task_tracker::TaskTrackerToken;
 use crate::ResultEncoder;
 use crate::ResultEncoding;
 use crate::SessionStats;
+use crate::arrow_stream::ArrowRead;
+use crate::arrow_stream::ArrowResultBatch;
+use crate::arrow_stream::ArrowStreamReader;
 use crate::cursor::Claim;
 use crate::cursor::TaskCursor;
 use crate::error::ConnectionError;
 use crate::error::ProtocolError;
 use crate::listener::PendingHandshake;
+use crate::protocol::ARROW_PROTOCOL_VERSION;
 use crate::protocol::Ack;
 use crate::protocol::Frame;
 use crate::protocol::Handshake;
@@ -117,7 +122,7 @@ pub async fn serve<EncodingType: ResultEncoding>(
 }
 
 /// The most bytes a connection reads from its socket at once while streaming results, which bounds
-/// the results in one batch.
+/// the results in one batch, unless the IPC message being read needs more.
 const READ_BUFFER_CAPACITY: usize = 64 * 1024;
 
 /// A connection that joined a session, streaming the results of one attempt of a task.
@@ -129,6 +134,10 @@ struct Connection<EncodingType: ResultEncoding> {
     session: Arc<session::State<EncodingType>>,
     cursor: Arc<TaskCursor>,
     encoder: EncodingType::Encoder,
+
+    /// The Arrow IPC stream of a protocol-v3 connection, or `None` for a protocol-v2 connection.
+    arrow_stream: Option<ArrowStreamReader>,
+
     num_pending_results: u64,
 
     /// The number of results the connection streamed, claimed or not, which is also the index of
@@ -177,6 +186,8 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
         );
         Ok(Self {
             encoder: session.encoding.encoder(cursor.archive_id()),
+            arrow_stream: (ARROW_PROTOCOL_VERSION == handshake.version)
+                .then(|| ArrowStreamReader::new(cursor.archive_id())),
             session,
             cursor,
             num_pending_results: 0,
@@ -187,10 +198,11 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
         })
     }
 
-    /// Claims the results the connection streams, encodes the results claimed from each socket
-    /// read into one batch, and sends the batch to the session's consumer, or discards it once the
-    /// consumer has dropped the result stream. Once the connection has sent its trailer and EOF,
-    /// and its last batch has been sent or discarded, acknowledges its results.
+    /// Claims the results the connection streams, each record batch of a protocol-v3 connection as
+    /// one range, encodes the results claimed from each socket read into one batch, and sends the
+    /// batch to the session's consumer, or discards it once the consumer has dropped the result
+    /// stream. Once the connection has sent its trailer and EOF, and its last batch has been
+    /// sent or discarded, acknowledges its results.
     ///
     /// Once the session's job has terminated, reading also stops when the connection has waited
     /// on its socket for the session's drain grace period without claiming a result. Delivering a
@@ -226,6 +238,12 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
             }
             .into());
         }
+        if self.arrow_stream.is_some() {
+            // Moves the stream that follows the handshake to the start of an allocation, which
+            // keeps the buffers of its IPC messages aligned, since every message is a multiple of
+            // 8 bytes long.
+            buffer = BytesMut::from(&buffer[..]);
+        }
 
         let mut read_time_since_last_claim = Duration::ZERO;
         loop {
@@ -234,10 +252,12 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
                 read_time_since_last_claim = Duration::ZERO;
                 self.send_pending_batch().await;
             }
-            claimed?;
+            let read_size = claimed?
+                .saturating_sub(buffer.len())
+                .max(READ_BUFFER_CAPACITY);
 
-            buffer.reserve(READ_BUFFER_CAPACITY);
-            let mut read_window = (&mut buffer).limit(READ_BUFFER_CAPACITY);
+            buffer.reserve(read_size);
+            let mut read_window = (&mut buffer).limit(read_size);
             let num_bytes_read = if self.session.draining.is_cancelled() {
                 let drain_grace_period = self.session.drain_grace_period();
                 let read_started_at = Instant::now();
@@ -282,6 +302,11 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
     /// Decodes each complete frame in `buffer`, encoding the claimed results into the pending
     /// batch, and checks the trailer against the results the connection streamed.
     ///
+    /// # Returns
+    ///
+    /// The number of bytes `buffer` must hold for the next IPC message of a protocol-v3 connection
+    /// to be complete, or 0 if unknown, on success.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -289,24 +314,42 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
     /// * [`ProtocolError::DataAfterTrailer`] if any byte follows the trailer.
     /// * [`ProtocolError::ResultCountMismatch`] if the trailer doesn't count the results the
     ///   connection streamed.
+    /// * [`ProtocolError::MalformedArrowStream`] if a protocol-v3 connection sends a result frame
+    ///   after its Arrow IPC stream.
+    /// * Forwards [`ArrowStreamReader::read`]'s return values on failure.
     /// * Forwards [`Frame::decode`]'s return values on failure.
     /// * Forwards [`Connection::claim`]'s return values on failure.
     fn claim_buffered_frames(
         &mut self,
         handshake: &Handshake,
         buffer: &mut BytesMut,
-    ) -> Result<(), ProtocolError> {
+    ) -> Result<usize, ProtocolError> {
         loop {
             if self.trailer.is_some() {
                 if buffer.is_empty() {
-                    return Ok(());
+                    return Ok(0);
                 }
                 return Err(ProtocolError::DataAfterTrailer);
             }
+            if let Some(arrow_stream) = self.arrow_stream.as_mut()
+                && !arrow_stream.has_ended()
+            {
+                match arrow_stream.read(buffer)? {
+                    ArrowRead::Batch(batch) => self.claim_arrow_batch(handshake, &batch),
+                    ArrowRead::Continue => {}
+                    ArrowRead::Incomplete(num_bytes_needed) => return Ok(num_bytes_needed),
+                }
+                continue;
+            }
             let Some(frame) = Frame::decode(buffer)? else {
-                return Ok(());
+                return Ok(0);
             };
             match frame {
+                Frame::Result(_) if self.arrow_stream.is_some() => {
+                    return Err(ProtocolError::MalformedArrowStream(
+                        "a result frame followed the Arrow IPC stream".to_owned(),
+                    ));
+                }
                 Frame::Result(result) => self.claim(handshake, &result)?,
                 Frame::Trailer(trailer) => {
                     if trailer.num_results != self.num_results {
@@ -348,9 +391,40 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
                 "Claimed the session's first result."
             );
         }
-        self.encoder.encode(result.timestamp, &result.message);
+        self.encoder.encode(
+            result.timestamp,
+            result.message.strip_suffix('\n').unwrap_or(&result.message),
+        );
         self.num_pending_results += 1;
         Ok(())
+    }
+
+    /// Claims the results of `batch`, the connection's next results, on the task's cursor as one
+    /// range, encoding the suffix that no attempt of the task has emitted yet into the pending
+    /// batch.
+    fn claim_arrow_batch(&mut self, handshake: &Handshake, batch: &ArrowResultBatch) {
+        let num_rows = batch.num_rows() as u64;
+        if 0 == num_rows {
+            return;
+        }
+        let num_duplicates = self.cursor.claim_range(self.num_results, num_rows);
+        self.num_results += num_rows;
+        self.stats.num_duplicates_dropped += num_duplicates;
+        if num_duplicates == num_rows {
+            return;
+        }
+        if self.session.record_claimed_result() {
+            tracing::debug!(
+                session_token = % handshake.session_token,
+                task_index = handshake.task_index,
+                "Claimed the session's first result."
+            );
+        }
+        self.encoder.encode_arrow(
+            batch,
+            usize::try_from(num_duplicates).expect("a batch's duplicates should fit in `usize`"),
+        );
+        self.num_pending_results += num_rows - num_duplicates;
     }
 
     /// Sends the pending batch to the session's consumer, or discards it once the consumer has

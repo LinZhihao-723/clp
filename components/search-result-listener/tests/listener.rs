@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::time::Duration;
 use std::time::Instant;
@@ -50,7 +50,7 @@ const BASE_LISTENER_CONFIG: ListenerConfig = ListenerConfig {
 };
 
 const BASE_SESSION_CONFIG: SessionConfig = SessionConfig {
-    channel_capacity: NonZeroUsize::new(1024).expect("1024 is nonzero"),
+    channel_size: NonZeroU32::new(64 * 1024 * 1024).expect("64 MiB is nonzero"),
     drain_grace_period: Duration::from_millis(200),
 };
 
@@ -366,7 +366,7 @@ fn encode_results(task_index: u64, result_indices: impl IntoIterator<Item = u64>
         bytes.extend(encode_result(
             result_index,
             timestamp(result_index),
-            &message(task_index, result_index),
+            &format!("{}\n", message(task_index, result_index)),
         ));
     }
     bytes
@@ -391,9 +391,10 @@ fn timestamp(result_index: u64) -> i64 {
 
 /// # Returns
 ///
-/// The message of the result at `result_index` of task `task_index`.
+/// The message of the result at `result_index` of task `task_index`, without the trailing newline
+/// that protocol v2 sends.
 fn message(task_index: u64, result_index: u64) -> String {
-    format!("{{\"task\":{task_index},\"result\":{result_index}}}\n")
+    format!("{{\"task\":{task_index},\"result\":{result_index}}}")
 }
 
 /// # Returns
@@ -462,7 +463,7 @@ async fn single_attempt_emits_every_result_in_order_and_is_acknowledged() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acknowledgement_waits_until_the_last_batch_is_handed_to_the_consumer() {
     let session_config = SessionConfig {
-        channel_capacity: NonZeroUsize::MIN,
+        channel_size: NonZeroU32::MIN,
         ..BASE_SESSION_CONFIG
     };
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
@@ -1008,7 +1009,7 @@ async fn slow_consumer_stops_the_connection_from_reading() {
     const NUM_RESULTS: u64 = (NUM_BYTES_SENT / MESSAGE_LEN) as u64;
 
     let session_config = SessionConfig {
-        channel_capacity: NonZeroUsize::MIN,
+        channel_size: NonZeroU32::MIN,
         ..BASE_SESSION_CONFIG
     };
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
@@ -1017,13 +1018,13 @@ async fn slow_consumer_stops_the_connection_from_reading() {
         .send_handshake(&harness.network_output, 0, ARCHIVE_ID)
         .await;
     let large_message =
-        |result_index: u64| format!("{result_index:08}{}\n", "x".repeat(MESSAGE_LEN - 9));
+        |result_index: u64| format!("{result_index:08}{}", "x".repeat(MESSAGE_LEN - 9));
     let mut bytes = Vec::with_capacity(NUM_BYTES_SENT + 1024 * 1024);
     for result_index in 0..NUM_RESULTS {
         bytes.extend(encode_result(
             result_index,
             timestamp(result_index),
-            &large_message(result_index),
+            &format!("{}\n", large_message(result_index)),
         ));
     }
     let mut attempt_task = tokio::spawn(async move {
@@ -1069,7 +1070,7 @@ async fn slow_consumer_stops_the_connection_from_reading() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn claimed_batch_reaches_a_slow_consumer_after_the_job_succeeds() {
     let session_config = SessionConfig {
-        channel_capacity: NonZeroUsize::MIN,
+        channel_size: NonZeroU32::MIN,
         ..BASE_SESSION_CONFIG
     };
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
@@ -1106,7 +1107,7 @@ async fn results_still_arriving_reach_a_slow_consumer_after_the_grace_period() {
     const NUM_FIRST_RESULTS: u64 = NUM_RESULTS / 2;
 
     let session_config = SessionConfig {
-        channel_capacity: NonZeroUsize::MIN,
+        channel_size: NonZeroU32::MIN,
         drain_grace_period: Duration::from_millis(500),
     };
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
@@ -1473,7 +1474,7 @@ async fn connection_blocked_on_a_full_channel_keeps_reading_once_the_result_stre
     const NUM_WRITES: u64 = 3;
 
     let session_config = SessionConfig {
-        channel_capacity: NonZeroUsize::MIN,
+        channel_size: NonZeroU32::MIN,
         ..BASE_SESSION_CONFIG
     };
     let mut harness = Harness::start(BASE_LISTENER_CONFIG, session_config).await;
