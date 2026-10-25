@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/clp-s-arrow",
     "crates/clp-s-cli",
     "crates/clp-s-difftest",
     "crates/clp-s-encoding",
@@ -28,11 +29,16 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1.0.104"
+arrow-array = "60.0.0"
+arrow-buffer = "60.0.0"
+arrow-ipc = { version = "60.0.0", default-features = false }
+arrow-schema = "60.0.0"
 aws-config = "1.10.1"
 aws-sdk-s3 = "1.141.0"
 bytes = "1.11.1"
 clap = { version = "4.6.6", features = ["derive"] }
 clp-rust-utils = { path = "../../../components/clp-rust-utils" }
+clp-s-arrow = { path = "crates/clp-s-arrow" }
 clp-s-difftest = { path = "crates/clp-s-difftest" }
 clp-s-encoding = { path = "crates/clp-s-encoding" }
 clp-s-exec = { path = "crates/clp-s-exec" }

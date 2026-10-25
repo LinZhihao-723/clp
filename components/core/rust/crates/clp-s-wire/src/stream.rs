@@ -1,19 +1,30 @@
-//! The protocol-v2 streaming search output (`OutputHandlerImpl.cpp`, `NetworkOutputHandler`): a
-//! handshake followed by one frame per result and a trailer counting them, read by the
-//! search-result listener, which answers with an acknowledgement.
+//! The streaming search output read by the search-result listener: a handshake, the results, and a
+//! trailer counting them, which the listener answers with an acknowledgement. Protocol v2
+//! (`OutputHandlerImpl.cpp`, `NetworkOutputHandler`) sends one msgpack frame per result; protocol
+//! v3 sends the results as an Arrow IPC stream between the handshake and the trailer.
 
 use crate::WireError;
 use crate::encode::msgpack_error;
 use crate::encode::write_message;
 use crate::encode::write_str;
 
-/// The protocol version a [`StreamHandshake`] announces.
-pub const STREAM_PROTOCOL_VERSION: u8 = 2;
+/// The protocol versions a [`StreamHandshake`] can announce.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamProtocolVersion {
+    /// One [`StreamResult`] frame per result, as C++ sends.
+    V2 = 2,
+
+    /// The results as one Arrow IPC stream.
+    V3 = 3,
+}
 
 /// The handshake that opens a stream: the msgpack array
-/// `[version, session_token, task_index, archive_id]`, byte-compatible with C++.
+/// `[version, session_token, task_index, archive_id]`, byte-compatible with C++ for
+/// [`StreamProtocolVersion::V2`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StreamHandshake<'handshake> {
+    pub version: StreamProtocolVersion,
     pub session_token: &'handshake str,
     pub task_index: u64,
     pub archive_id: &'handshake str,
@@ -48,8 +59,7 @@ impl StreamHandshake<'_> {
         const NUM_FIELDS: u32 = 4;
 
         rmp::encode::write_array_len(output, NUM_FIELDS).map_err(msgpack_error)?;
-        rmp::encode::write_uint(output, u64::from(STREAM_PROTOCOL_VERSION))
-            .map_err(msgpack_error)?;
+        rmp::encode::write_uint(output, self.version as u64).map_err(msgpack_error)?;
         write_str(output, "session_token", self.session_token)?;
         rmp::encode::write_uint(output, self.task_index).map_err(msgpack_error)?;
         write_str(output, "archive_id", self.archive_id)?;
@@ -202,6 +212,7 @@ impl StreamAck {
 mod tests {
     use super::StreamAck;
     use super::StreamHandshake;
+    use super::StreamProtocolVersion;
     use super::StreamResult;
     use super::StreamTrailer;
     use crate::WireError;
@@ -226,24 +237,35 @@ mod tests {
         const SESSION_TOKEN: &str = "6f1c1c64-1e0a-4be8-a7a6-6a0e4d3c2b1a";
         const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
 
-        let mut output = vec![0xc0];
-        StreamHandshake {
-            session_token: SESSION_TOKEN,
-            task_index: 300,
-            archive_id: ARCHIVE_ID,
-        }
-        .encode(&mut output)?;
-        let mut expected = vec![0xc0, 0x94, 0x02, 0xd9, 0x24];
-        expected.extend_from_slice(SESSION_TOKEN.as_bytes());
-        expected.extend_from_slice(&[0xcd, 0x01, 0x2c, 0xd9, 0x24]);
-        expected.extend_from_slice(ARCHIVE_ID.as_bytes());
-        assert_eq!(output, expected);
+        for (version, version_byte) in [
+            (StreamProtocolVersion::V2, 0x02),
+            (StreamProtocolVersion::V3, 0x03),
+        ] {
+            let mut output = vec![0xc0];
+            StreamHandshake {
+                version,
+                session_token: SESSION_TOKEN,
+                task_index: 300,
+                archive_id: ARCHIVE_ID,
+            }
+            .encode(&mut output)?;
+            let mut expected = vec![0xc0, 0x94, version_byte, 0xd9, 0x24];
+            expected.extend_from_slice(SESSION_TOKEN.as_bytes());
+            expected.extend_from_slice(&[0xcd, 0x01, 0x2c, 0xd9, 0x24]);
+            expected.extend_from_slice(ARCHIVE_ID.as_bytes());
+            assert_eq!(output, expected);
 
-        let decoded: (u8, String, u64, String) = rmp_serde::from_slice(&output[1..])?;
-        assert_eq!(
-            decoded,
-            (2, SESSION_TOKEN.to_owned(), 300, ARCHIVE_ID.to_owned())
-        );
+            let decoded: (u8, String, u64, String) = rmp_serde::from_slice(&output[1..])?;
+            assert_eq!(
+                decoded,
+                (
+                    version_byte,
+                    SESSION_TOKEN.to_owned(),
+                    300,
+                    ARCHIVE_ID.to_owned()
+                )
+            );
+        }
         Ok(())
     }
 

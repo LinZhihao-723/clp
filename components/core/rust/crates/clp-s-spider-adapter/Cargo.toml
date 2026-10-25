@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 clp-rust-utils = { workspace = true }
+clp-s-arrow = { workspace = true }
 clp-s-reader = { workspace = true, features = ["s3"] }
 clp-s-results-cache = { workspace = true }
 clp-s-sinks = { workspace = true }
@@ -18,6 +19,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+arrow-array = { workspace = true }
+arrow-ipc = { workspace = true }
 clp-s-difftest = { workspace = true }
 clp-s-object-store = { workspace = true, features = ["test-util"] }
 mongodb = { workspace = true }

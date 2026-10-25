@@ -1,8 +1,9 @@
-//! End-to-end tests of the Spider search task's protocol-v2 network output, ignored by default
-//! since they need a C++ `clp-s` with the `network --session-token --task-index` output (`$CLP_S`,
-//! else the repository's `build/core/clp-s`): for the suite's fixture queries, the stream the
-//! in-process search sends is byte-for-byte the stream of the C++ `clp-s` subprocess, up to the
-//! registered divergences, and every in-process attempt sends the same bytes; unsupported archives
+//! End-to-end tests of the Spider search task's network output, ignored by default since they need
+//! a C++ `clp-s` with the `network --session-token --task-index` output (`$CLP_S`, else the
+//! repository's `build/core/clp-s`): for the suite's fixture queries, the protocol-v3 stream the
+//! in-process search sends holds the results of the C++ `clp-s` subprocess's protocol-v2 stream,
+//! in the same order, up to the registered divergences, and every in-process attempt sends the
+//! same bytes; unsupported archives
 //! fall back to `clp-s`, which streams with the task's network arguments; and a task whose stream
 //! the listener closes without acknowledging fails, on every path.
 //!
@@ -22,6 +23,7 @@ use std::sync::OnceLock;
 use std::sync::PoisonError;
 use std::thread::JoinHandle;
 
+use arrow_array::Array;
 use clp_rust_utils::clp_config::package::config::ArchiveOutput;
 use clp_rust_utils::clp_config::package::config::ArchiveOutputStorage;
 use clp_rust_utils::clp_config::package::config::Package;
@@ -422,7 +424,9 @@ fn config() -> SpiderTaskExecutorConfig {
     }
 }
 
-/// Decodes the bytes of one connection.
+/// Decodes the bytes of one connection: a protocol-v2 stream of result frames, or a protocol-v3
+/// Arrow IPC stream whose rows become frames numbered from 0, each message followed by `\n` as in
+/// v2.
 ///
 /// # Returns
 ///
@@ -433,13 +437,42 @@ fn config() -> SpiderTaskExecutorConfig {
 ///
 /// Returns an error if:
 ///
-/// * [`anyhow::Error`] if bytes follow the trailer.
+/// * [`anyhow::Error`] if:
+///   * Bytes follow the trailer.
+///   * A column of a v3 record batch has an unexpected type.
 /// * Forwards [`rmp_serde::decode::from_read`]'s return values on failure (`data` is not a
 ///   handshake followed by frames and an optional trailer).
+/// * Forwards [`arrow_ipc::reader::StreamReader::try_new`]'s return values on failure.
+/// * Forwards [`arrow_ipc::reader::StreamReader`]'s batch errors on failure.
 fn decode(data: &[u8]) -> anyhow::Result<Stream> {
     let mut remaining = data;
-    let handshake = rmp_serde::decode::from_read(&mut remaining)?;
+    let handshake: Handshake = rmp_serde::decode::from_read(&mut remaining)?;
     let mut frames = Vec::new();
+    if 3 == handshake.0 {
+        for batch in arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)? {
+            let batch = batch?;
+            let timestamps = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .ok_or_else(|| anyhow::anyhow!("timestamps aren't `Int64`"))?;
+            let messages = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .ok_or_else(|| anyhow::anyhow!("messages aren't strings"))?;
+            for row in 0..batch.num_rows() {
+                frames.push((
+                    frames.len() as u64,
+                    timestamps.value(row),
+                    format!("{}\n", messages.value(row)),
+                ));
+            }
+        }
+        let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
+        anyhow::ensure!(remaining.is_empty(), "bytes follow the trailer");
+        return Ok((handshake, frames, Some(num_results)));
+    }
     while !remaining.is_empty() {
         if 0x91 == remaining[0] {
             let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
@@ -451,9 +484,9 @@ fn decode(data: &[u8]) -> anyhow::Result<Stream> {
     Ok((handshake, frames, None))
 }
 
-/// Compares the C++ stream with the Rust stream of the same task: the same handshake, then the
-/// same frames in the same order, with messages equal up to DV-01/DV-02 and timestamps equal up
-/// to DV-27, then the same trailer.
+/// Compares the C++ stream with the Rust stream of the same task: the same handshake but for the
+/// protocol version (2 for C++, 3 for Rust), then the same frames in the same order, with messages
+/// equal up to DV-01/DV-02 and timestamps equal up to DV-27, then the same trailer.
 ///
 /// # Returns
 ///
@@ -479,7 +512,10 @@ fn compare_streams(cpp: &[Vec<u8>], rust: &[Vec<u8>]) -> Result<Agreement, Strin
                 decode(cpp).map_err(|error| format!("C++: {error}"))?;
             let (rust_handshake, rust_frames, rust_trailer) =
                 decode(rust).map_err(|error| format!("Rust: {error}"))?;
-            if cpp_handshake != rust_handshake {
+            if (2, 3) != (cpp_handshake.0, rust_handshake.0)
+                || (&cpp_handshake.1, cpp_handshake.2, &cpp_handshake.3)
+                    != (&rust_handshake.1, rust_handshake.2, &rust_handshake.3)
+            {
                 return Err(format!(
                     "handshakes differ: {cpp_handshake:?} != {rust_handshake:?}"
                 ));
@@ -580,7 +616,7 @@ fn query_option(case: &QueryCase) -> ClpSQueryOption {
 }
 
 #[test]
-#[ignore = "needs a C++ clp-s with the protocol-v2 network output (`CLP_S`)"]
+#[ignore = "needs a C++ clp-s with the network output (`CLP_S`)"]
 fn fs_network_streams_equal_the_clp_s_subprocess() -> anyhow::Result<()> {
     let harness = Harness::get();
     let cases = fixture_cases(&harness.corpus);
@@ -629,7 +665,7 @@ fn fs_network_streams_equal_the_clp_s_subprocess() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "needs a C++ clp-s with the protocol-v2 network output (`CLP_S`)"]
+#[ignore = "needs a C++ clp-s with the network output (`CLP_S`)"]
 fn network_unsupported_archives_fall_back_to_clp_s() -> anyhow::Result<()> {
     let harness = Harness::get();
     let reject = prototype_root().join("tests/fixtures/archives/reject");
@@ -674,7 +710,7 @@ fn network_unsupported_archives_fall_back_to_clp_s() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "needs a C++ clp-s with the protocol-v2 network output (`CLP_S`)"]
+#[ignore = "needs a C++ clp-s with the network output (`CLP_S`)"]
 fn network_tasks_fail_without_an_acknowledgement() -> anyhow::Result<()> {
     let harness = Harness::get();
     let archives = prototype_root().join("tests/fixtures/archives");

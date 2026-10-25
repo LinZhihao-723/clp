@@ -164,9 +164,9 @@ Files changed:
 
 `stream.rs` mirrors `NetworkOutputHandler` in `components/core/src/clp_s/OutputHandlerImpl.cpp`:
 
-- `StreamHandshake { session_token, task_index, archive_id }` encodes as a msgpack array of 4:
-  the version `STREAM_PROTOCOL_VERSION = 2`, the token string, the task index and the archive id
-  string.
+- `StreamHandshake { version, session_token, task_index, archive_id }` encodes as a msgpack array
+  of 4: the version (`StreamProtocolVersion::V2` = 2, or `V3` = 3 for the Arrow stream below), the
+  token string, the task index and the archive id string.
 - `StreamResult { result_index, timestamp_ms, message }` encodes as a msgpack array of 3: the
   result index, the timestamp and the message. The message is the record's JSON followed by `\n`,
   with invalid UTF-8 replaced by U+FFFD, as the reader's msgpack tuples already do (DV-45). The
@@ -188,6 +188,15 @@ format's bytes and tests are unchanged.
 
 The result: the Rust bytes equal the C++ bytes, frame by frame, apart from the float formatting
 divergence of the JSON text ([§5.2](#52-comparison-with-the-c-network-output)).
+
+**Protocol v3.** The in-process search now streams with protocol v3 (`clp-s-arrow`'s
+`ArrowNetworkSink`); the `clp-s` subprocess fallback still streams v2. A v3 connection sends the
+v3 handshake, then one Arrow IPC stream of the schema `{archive_id: Dictionary<Int32, Utf8>,
+timestamp: Int64 (epoch ms), message: Utf8 (no trailing newline)}`: the schema, exactly one
+non-delta dictionary batch holding the handshake's archive id, record batches whose keys are all 0
+(one or more per consumed batch, each at most 4,096 rows and 1 MiB), and the end-of-stream marker.
+The trailer and the acknowledgement are the v2 ones; result indices are implicit (the rows streamed
+so far on the connection).
 
 ### 3.3 `clp-s-sinks`: `NetworkSink`
 

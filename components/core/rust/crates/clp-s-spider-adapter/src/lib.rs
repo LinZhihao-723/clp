@@ -1,6 +1,6 @@
 //! An in-process Spider search task: the counterpart of
 //! `components/clp-tdl-package/src/task/query/search.rs` that searches one archive through the
-//! reader library and writes the results into the results cache or a protocol-v2 network stream,
+//! reader library and writes the results into the results cache or a protocol-v3 network stream,
 //! instead of spawning `clp-s`. Archives the library does not support are searched by spawning the
 //! C++ `clp-s`, exactly as the package does today.
 

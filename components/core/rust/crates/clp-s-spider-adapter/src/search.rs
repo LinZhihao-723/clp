@@ -18,6 +18,8 @@ use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
+use clp_s_arrow::ArrowNetworkSink;
+use clp_s_arrow::ResultBatchLimits;
 use clp_s_reader::ArchiveLocation;
 use clp_s_reader::ByteSource;
 use clp_s_reader::ErrorKind;
@@ -36,7 +38,6 @@ use clp_s_reader::s3::S3SourceConfig;
 use clp_s_results_cache::ResultsCacheConfig;
 use clp_s_results_cache::ResultsCacheSink;
 use clp_s_sinks::NetworkDestination;
-use clp_s_sinks::NetworkSink;
 use non_empty_string::NonEmptyString;
 
 use crate::AdapterResources;
@@ -213,7 +214,7 @@ impl<'task> SearchTask<'task> {
     }
 
     /// Resolves the archive location and the sink of the task's output (the results cache or a
-    /// protocol-v2 network stream), then searches the archive.
+    /// protocol-v3 network stream), then searches the archive.
     ///
     /// # Returns
     ///
@@ -256,13 +257,16 @@ impl<'task> SearchTask<'task> {
                 port,
                 session_token,
             } => {
-                let sink = NetworkSink::new(NetworkDestination {
-                    host: host.to_owned(),
-                    port: port.get(),
-                    session_token: session_token.to_string(),
-                    task_index: self.task_index,
-                    archive_id: clp_s_reader::ArchiveId::from(self.archive_id.to_string()),
-                });
+                let sink = ArrowNetworkSink::new(
+                    NetworkDestination {
+                        host: host.to_owned(),
+                        port: port.get(),
+                        session_token: session_token.to_string(),
+                        task_index: self.task_index,
+                        archive_id: clp_s_reader::ArchiveId::from(self.archive_id.to_string()),
+                    },
+                    ResultBatchLimits::default(),
+                );
                 self.search_or_fall_back(resources, &location, sink)
             }
         }
@@ -440,7 +444,8 @@ pub enum TaskOutput<'task> {
     /// The results cache at `uri`; the collection is the query job's ID.
     ResultsCache { uri: &'task str },
 
-    /// A search-result listener, streamed to with protocol v2.
+    /// A search-result listener, streamed to with protocol v3 in-process, or with protocol v2 by
+    /// the `clp-s` subprocess.
     Network {
         host: &'task str,
         port: NonZeroU16,
@@ -985,7 +990,7 @@ mod tests {
         })
     }
 
-    /// Decodes the bytes of one connection.
+    /// Decodes the bytes of one protocol-v3 connection, numbering its rows from 0 as frames.
     ///
     /// # Returns
     ///
@@ -993,25 +998,44 @@ mod tests {
     ///
     /// * The handshake.
     /// * The result frames.
-    /// * The trailer's count, if the connection ends with a trailer.
+    /// * The trailer's count.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     ///
+    /// * [`anyhow::Error`] if a column of a record batch has an unexpected type.
     /// * Forwards [`rmp_serde::decode::from_read`]'s return values on failure.
+    /// * Forwards [`arrow_ipc::reader::StreamReader::try_new`]'s return values on failure.
+    /// * Forwards [`arrow_ipc::reader::StreamReader`]'s batch errors on failure.
     fn decode_stream(data: &[u8]) -> anyhow::Result<(Handshake, Vec<Frame>, Option<u64>)> {
+        use arrow_array::Array;
+
         let mut remaining = data;
         let handshake = rmp_serde::decode::from_read(&mut remaining)?;
         let mut frames = Vec::new();
-        while !remaining.is_empty() {
-            if 0x91 == remaining[0] {
-                let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
-                return Ok((handshake, frames, Some(num_results)));
+        for batch in arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)? {
+            let batch = batch?;
+            let timestamps = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .ok_or_else(|| anyhow::anyhow!("timestamps aren't `Int64`"))?;
+            let messages = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .ok_or_else(|| anyhow::anyhow!("messages aren't strings"))?;
+            for row in 0..batch.num_rows() {
+                frames.push((
+                    frames.len() as u64,
+                    timestamps.value(row),
+                    messages.value(row).to_owned(),
+                ));
             }
-            frames.push(rmp_serde::decode::from_read(&mut remaining)?);
         }
-        Ok((handshake, frames, None))
+        let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
+        Ok((handshake, frames, Some(num_results)))
     }
 
     /// Runs one task over the test archive with `output_handle`.
@@ -1482,7 +1506,7 @@ mod tests {
         assert_eq!(
             handshake,
             (
-                2,
+                3,
                 SESSION_TOKEN.to_owned(),
                 TASK_INDEX,
                 ARCHIVE_ID.to_owned()
@@ -1491,7 +1515,7 @@ mod tests {
         let mut result_indices = Vec::new();
         for (result_index, timestamp_ms, message) in frames {
             assert!(timestamp_ms > 0, "{message}");
-            assert!(message.ends_with("}\n"), "{message}");
+            assert!(message.ends_with('}'), "{message}");
             result_indices.push(result_index);
         }
         assert!(result_indices.len() > 1);
