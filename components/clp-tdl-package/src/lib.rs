@@ -15,6 +15,8 @@ use spider_tdl::TdlError;
 /// * Forwards [`common::init_config`]'s return values on failure.
 /// * Forwards [`common::init_clp_home`]'s return values on failure.
 /// * Forwards [`common::init_stderr_tracing_subscriber`]'s return values on failure.
+/// * Forwards [`common::init_search_engine`]'s return values on failure.
+/// * Forwards [`common::init_rust_search_resources`]'s return values on failure.
 fn package_init() -> Result<(), TdlError> {
     common::init_runtime().map_err(|e| TdlError::ExecutionError(format!("{e:#}")))?;
     common::init_config().map_err(|e| TdlError::ExecutionError(format!("{e:#}")))?;
@@ -22,6 +24,12 @@ fn package_init() -> Result<(), TdlError> {
     common::init_stderr_tracing_subscriber().map_err(|e| {
         TdlError::ExecutionError(format!("failed to install the tracing subscriber: {e}"))
     })?;
+    common::init_search_engine().map_err(|e| TdlError::ExecutionError(format!("{e:#}")))?;
+    common::init_rust_search_resources().map_err(|e| TdlError::ExecutionError(format!("{e:#}")))?;
+    tracing::info!(
+        search_engine = ? common::search_engine(),
+        "clp TDL package initialized."
+    );
     Ok(())
 }
 

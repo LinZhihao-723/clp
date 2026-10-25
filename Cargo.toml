@@ -9,6 +9,7 @@ members = [
     "components/query-coordinator",
     "components/search-result-listener",
 ]
+exclude = ["components/core/rust"]
 resolver = "3"
 
 [workspace.package]
@@ -27,6 +28,8 @@ bytes = "1.11.1"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.6", features = ["derive"] }
 clp-rust-utils = { path = "components/clp-rust-utils" }
+clp-s-reader = { path = "components/core/rust/crates/clp-s-reader" }
+clp-s-spider-adapter = { path = "components/core/rust/crates/clp-s-spider-adapter" }
 const_format = "0.2.36"
 dashmap = "6.2.1"
 futures = "0.3.33"

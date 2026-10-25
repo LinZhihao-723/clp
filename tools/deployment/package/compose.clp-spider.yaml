@@ -15,6 +15,7 @@ services:
       CLP_CONFIG_PATH: "/etc/clp-config.yaml"
       CLP_DB_PASS: "${CLP_DB_PASS:?Please set a value.}"
       CLP_DB_USER: "${CLP_DB_USER:-clp-user}"
+      CLP_SPIDER_SEARCH_ENGINE: "${CLP_SPIDER_SEARCH_ENGINE:-clp-s}"
     volumes:
       - type: "bind"
         source: "${CLP_LOGS_DIR_HOST:-./var/log}/.clp-config.yaml"

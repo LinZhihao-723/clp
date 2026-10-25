@@ -1001,6 +1001,191 @@ dependencies = [
 ]
 
 [[package]]
+name = "clp-s-encoding"
+version = "0.1.0-dev"
+dependencies = [
+ "itoa",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-exec"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-format",
+ "clp-s-io",
+ "clp-s-json",
+ "clp-s-query",
+ "clp-s-resources",
+ "clp-s-search",
+ "clp-s-table",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "clp-s-format"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-encoding",
+ "clp-s-resources",
+ "clp-s-timestamp",
+ "thiserror",
+ "zstd-safe",
+]
+
+[[package]]
+name = "clp-s-io"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-format",
+ "clp-s-resources",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "clp-s-json"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-encoding",
+ "clp-s-format",
+ "clp-s-resources",
+ "clp-s-table",
+ "clp-s-timestamp",
+ "itoa",
+ "parking_lot",
+ "ryu",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-object-store"
+version = "0.1.0-dev"
+dependencies = [
+ "aws-config",
+ "aws-sdk-s3",
+ "clp-s-io",
+ "clp-s-resources",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "clp-s-query"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-resources",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-reader"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-exec",
+ "clp-s-format",
+ "clp-s-io",
+ "clp-s-json",
+ "clp-s-object-store",
+ "clp-s-query",
+ "clp-s-resources",
+ "clp-s-search",
+ "clp-s-table",
+]
+
+[[package]]
+name = "clp-s-resources"
+version = "0.1.0-dev"
+dependencies = [
+ "bytes",
+ "parking_lot",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-results-cache"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-reader",
+ "clp-s-wire",
+ "mongodb",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "clp-s-search"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-encoding",
+ "clp-s-format",
+ "clp-s-query",
+ "clp-s-resources",
+ "clp-s-table",
+ "rmp-serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-sinks"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-reader",
+ "clp-s-wire",
+ "parking_lot",
+]
+
+[[package]]
+name = "clp-s-spider-adapter"
+version = "0.1.0-dev"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-s3",
+ "clp-rust-utils",
+ "clp-s-reader",
+ "clp-s-results-cache",
+ "clp-s-sinks",
+ "non-empty-string",
+ "spider-tdl",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "clp-s-table"
+version = "0.1.0-dev"
+dependencies = [
+ "clp-s-encoding",
+ "clp-s-format",
+ "clp-s-resources",
+ "memchr",
+ "thiserror",
+ "zerocopy",
+]
+
+[[package]]
+name = "clp-s-timestamp"
+version = "0.1.0-dev"
+dependencies = [
+ "itoa",
+ "thiserror",
+]
+
+[[package]]
+name = "clp-s-wire"
+version = "0.1.0-dev"
+dependencies = [
+ "rmp",
+ "thiserror",
+]
+
+[[package]]
 name = "clp-tdl-package"
 version = "0.13.1-dev"
 dependencies = [
@@ -1008,6 +1193,8 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "clp-rust-utils",
+ "clp-s-reader",
+ "clp-s-spider-adapter",
  "non-empty-string",
  "rmp-serde",
  "secrecy",
@@ -3753,6 +3940,8 @@ dependencies = [
  "async-trait",
  "bytes",
  "clp-rust-utils",
+ "clp-s-reader",
+ "clp-s-spider-adapter",
  "const_format",
  "dashmap",
  "futures",
@@ -3760,6 +3949,8 @@ dependencies = [
  "non-empty-string",
  "rmp",
  "serde_json",
+ "spider-core",
+ "spider-tdl",
  "sqlx",
  "thiserror",
  "tokio",
