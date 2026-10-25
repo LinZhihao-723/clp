@@ -36,7 +36,7 @@ use utoipa::IntoParams;
 use utoipa::ToSchema;
 
 pub use crate::error::ClientError;
-use crate::sse::SseEncoding;
+use crate::negotiation::NegotiatedEncoding;
 use crate::streaming_search::MariaDbQueryJobTable;
 use crate::streaming_search::StreamingSearch;
 
@@ -334,7 +334,7 @@ pub struct Client {
     config: Config,
 
     /// `None` unless the package runs queries on Spider.
-    streaming_search: Option<Arc<StreamingSearch<MariaDbQueryJobTable, SseEncoding>>>,
+    streaming_search: Option<Arc<StreamingSearch<MariaDbQueryJobTable, NegotiatedEncoding>>>,
 }
 
 impl Client {
@@ -404,7 +404,9 @@ impl Client {
     ///
     /// The runner of streaming searches, or `None` if the package doesn't run queries on Spider.
     #[must_use]
-    pub fn streaming_search(&self) -> Option<&StreamingSearch<MariaDbQueryJobTable, SseEncoding>> {
+    pub fn streaming_search(
+        &self,
+    ) -> Option<&StreamingSearch<MariaDbQueryJobTable, NegotiatedEncoding>> {
         self.streaming_search.as_deref()
     }
 

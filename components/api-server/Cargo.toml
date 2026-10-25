@@ -17,6 +17,10 @@ path = "src/bin/openapi_codegen.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-ipc = { workspace = true }
+arrow-schema = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 aws-sdk-s3 = { workspace = true }

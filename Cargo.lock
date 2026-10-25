@@ -101,6 +101,10 @@ name = "api-server"
 version = "0.13.1-dev"
 dependencies = [
  "anyhow",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-ipc",
+ "arrow-schema",
  "async-stream",
  "async-trait",
  "aws-sdk-s3",

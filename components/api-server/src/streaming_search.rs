@@ -14,6 +14,7 @@ use clp_rust_utils::database::mysql::submit_query_job;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::SearchJobConfig;
 use futures::Stream;
+use search_result_listener::EncodedBatch;
 use search_result_listener::JobStatusSource;
 use search_result_listener::MariaDbJobStatusSource;
 use search_result_listener::OutcomeFuture;
@@ -207,7 +208,7 @@ pub enum SearchEvent<BatchType> {
 ///
 /// * `QueryJobTableType` - The query jobs table that the search was submitted to.
 /// * `BatchType` - The type of a batch of encoded results.
-pub struct SearchStream<QueryJobTableType: QueryJobTable, BatchType> {
+pub struct SearchStream<QueryJobTableType: QueryJobTable, BatchType: EncodedBatch> {
     query_job_id: QueryJobId,
     results: ResultStream<BatchType>,
     have_results_ended: bool,
@@ -218,7 +219,9 @@ pub struct SearchStream<QueryJobTableType: QueryJobTable, BatchType> {
     query_job_table: QueryJobTableType,
 }
 
-impl<QueryJobTableType: QueryJobTable, BatchType> SearchStream<QueryJobTableType, BatchType> {
+impl<QueryJobTableType: QueryJobTable, BatchType: EncodedBatch>
+    SearchStream<QueryJobTableType, BatchType>
+{
     #[must_use]
     pub const fn query_job_id(&self) -> QueryJobId {
         self.query_job_id
@@ -243,7 +246,7 @@ impl<QueryJobTableType: QueryJobTable, BatchType> SearchStream<QueryJobTableType
     }
 }
 
-impl<QueryJobTableType: QueryJobTable, BatchType> Stream
+impl<QueryJobTableType: QueryJobTable, BatchType: EncodedBatch> Stream
     for SearchStream<QueryJobTableType, BatchType>
 {
     type Item = SearchEvent<BatchType>;
@@ -268,7 +271,7 @@ impl<QueryJobTableType: QueryJobTable, BatchType> Stream
     }
 }
 
-impl<QueryJobTableType: QueryJobTable, BatchType> Drop
+impl<QueryJobTableType: QueryJobTable, BatchType: EncodedBatch> Drop
     for SearchStream<QueryJobTableType, BatchType>
 {
     fn drop(&mut self) {

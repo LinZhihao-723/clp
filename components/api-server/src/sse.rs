@@ -65,10 +65,7 @@ impl SseEncoder {
         self.batch.extend_from_slice(&self.event_prefix);
         serde_json::to_writer(&mut self.batch, &timestamp)?;
         self.batch.extend_from_slice(b",\"message\":");
-        serde_json::to_writer(
-            &mut self.batch,
-            message.strip_suffix('\n').unwrap_or(message),
-        )?;
+        serde_json::to_writer(&mut self.batch, message)?;
         self.batch.extend_from_slice(b"}\n\n");
         Ok(())
     }

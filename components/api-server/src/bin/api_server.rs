@@ -1,4 +1,5 @@
 use anyhow::Context;
+use axum::serve::ListenerExt;
 use clap::Parser;
 use clp_rust_utils::clp_config::package;
 use clp_rust_utils::serde::yaml;
@@ -70,7 +71,12 @@ async fn main() -> anyhow::Result<()> {
     );
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .context(format!("Cannot listen to {addr}"))?;
+        .context(format!("Cannot listen to {addr}"))?
+        .tap_io(|tcp_stream| {
+            if let Err(e) = tcp_stream.set_nodelay(true) {
+                tracing::warn!(error = % e, "Failed to set `TCP_NODELAY` on a connection.");
+            }
+        });
 
     let client = api_server::client::Client::connect(&config, &credentials)
         .await

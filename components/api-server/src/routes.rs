@@ -3,8 +3,10 @@ use axum::body::Bytes;
 use axum::extract::Path;
 use axum::extract::Query;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::response::Sse;
 use axum::response::sse::Event;
 use axum::response::sse::KeepAlive;
@@ -26,17 +28,20 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::arrow_ipc;
+use crate::arrow_ipc::ArrowStreamResponse;
 use crate::client::Client;
 use crate::client::ClientError;
 use crate::client::CompressionUsage;
 use crate::client::CompressionUsageParams;
 use crate::client::QueryConfig;
 use crate::client::ValidatedCompressionUsageParams;
+use crate::negotiation::NegotiatedEncoding;
 use crate::sse;
-use crate::sse::SseEncoding;
 use crate::sse::SseResponse;
 use crate::streaming_search::QueryJobTable;
 use crate::streaming_search::SearchEvent;
+use crate::streaming_search::SearchStream;
 use crate::streaming_search::StreamingSearch;
 
 /// Factory method to create an Axum router configured with all API routes.
@@ -189,10 +194,12 @@ struct QueryResultsUri {
 #[utoipa::path(
     post,
     path = "/query/stream",
-    description = "Submits a new search job and streams its results back as Server-Sent Events \
-        (SSE) in the same response. Only available when the package runs queries on Spider. If \
-        the client disconnects before the `end` event, or the job's status can no longer be \
-        tracked, the job is marked as cancelling.",
+    description = "Submits a new search job and streams its results back in the same response: \
+        as an Arrow IPC stream if the `Accept` header accepts \
+        `application/vnd.apache.arrow.stream`, or as Server-Sent Events (SSE) otherwise. Only \
+        available when the package runs queries on Spider. If the client disconnects before the \
+        end of the response, or the job's status can no longer be tracked, the job is marked as \
+        cancelling.",
     request_body(
         content = QueryConfig,
         example = json!({
@@ -205,20 +212,39 @@ struct QueryResultsUri {
     responses(
         (
             status = OK,
-            body = String,
-            content_type = "text/event-stream",
-            description = "Server-Sent Events stream of the search: first a `job` event whose \
-                data is a `StreamingSearchJob`, then one unnamed event per result whose data is a \
-                `StreamingSearchResult`, and finally an `end` event whose data is a \
-                `StreamingSearchEnd`, sent once the job has terminated. If the job's status can't \
-                be tracked, an `error` event whose data is a `StreamingSearchError` replaces the \
-                `end` event.",
-            example = "event: job\ndata: {\"query_job_id\":1}\n\ndata: \
-                {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":\
-                1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: \
-                {\"status\":\"Succeeded\",\"num_results_emitted\":1,\
-                \"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\
-                \"num_incomplete_connections\":0}\n\n"
+            description = "The search's stream, in the negotiated content type.\n\n\
+                `text/event-stream`: first a `job` event whose data is a `StreamingSearchJob`, \
+                then one unnamed event per result whose data is a `StreamingSearchResult`, and \
+                finally an `end` event whose data is a `StreamingSearchEnd`, sent once the job has \
+                terminated. If the job's status can't be tracked, an `error` event whose data is a \
+                `StreamingSearchError` replaces the `end` event.\n\n\
+                `application/vnd.apache.arrow.stream`: an Arrow IPC stream of the results with \
+                the schema `{archive_id: Dictionary<Int32, Utf8>, timestamp: Int64 (epoch \
+                milliseconds), message: Utf8 (without its trailing newline)}`, in which each \
+                record batch follows its own replacement dictionary of archive IDs. Once the job \
+                has terminated, the stream ends, and a second IPC stream of one row follows: \
+                `{status: Utf8, num_results_emitted: UInt64, num_duplicates_dropped: UInt64, \
+                num_protocol_errors: UInt64, num_incomplete_connections: UInt64}`, with the \
+                fields of `StreamingSearchEnd`, all null if the job's status can't be tracked.",
+            headers(
+                (
+                    "X-Clp-Query-Job-Id" = i32,
+                    description = "The ID of the search's query job. Only sent with an Arrow IPC \
+                        stream."
+                )
+            ),
+            content(
+                (
+                    String = "text/event-stream",
+                    example = "event: job\ndata: {\"query_job_id\":1}\n\ndata: \
+                        {\"archive_id\":\"018e90e5-8b2a-4a61-a2fc-cac799936caf\",\"timestamp\":\
+                        1633036800000,\"message\":\"Example log message\"}\n\nevent: end\ndata: \
+                        {\"status\":\"Succeeded\",\"num_results_emitted\":1,\
+                        \"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\
+                        \"num_incomplete_connections\":0}\n\n"
+                ),
+                ("application/vnd.apache.arrow.stream")
+            )
         ),
         (
             status = BAD_REQUEST,
@@ -236,9 +262,15 @@ struct QueryResultsUri {
 )]
 async fn stream_query(
     State(client): State<Client>,
+    headers: HeaderMap,
     Json(query_config): Json<QueryConfig>,
-) -> Result<SseResponse<impl Stream<Item = Result<Bytes, HandlerError>>>, HandlerError> {
-    serve_streaming_search(client.streaming_search(), query_config).await
+) -> Result<Response, HandlerError> {
+    serve_streaming_search(
+        client.streaming_search(),
+        query_config,
+        NegotiatedEncoding::from_headers(&headers),
+    )
+    .await
 }
 
 /// The data of a streaming search's `job` event.
@@ -303,11 +335,54 @@ struct StreamingSearchError {
     message: String,
 }
 
-/// Submits a streaming search, and streams its events back as Server-Sent Events.
+/// Submits a streaming search, and streams its events back with `encoding`.
 ///
 /// # Type Parameters
 ///
 /// * `QueryJobTableType` - The query jobs table that the search is submitted to.
+///
+/// # Returns
+///
+/// The response on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// * [`HandlerError::NotImplemented`] if `streaming_search` is `None`, i.e., the package doesn't
+///   run queries on Spider.
+/// * Forwards [`StreamingSearch::submit`]'s return values on failure.
+/// * Forwards [`sse_response`]'s return values on failure.
+async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
+    streaming_search: Option<&StreamingSearch<QueryJobTableType, NegotiatedEncoding>>,
+    query_config: QueryConfig,
+    encoding: NegotiatedEncoding,
+) -> Result<Response, HandlerError> {
+    tracing::debug!(
+        query_config = ? query_config,
+        encoding = ? encoding,
+        "Received a streaming search request."
+    );
+    let Some(streaming_search) = streaming_search else {
+        return Err(HandlerError::NotImplemented(
+            "streaming search requires the package to run queries on Spider".to_owned(),
+        ));
+    };
+    let search_stream = streaming_search
+        .submit(query_config, encoding)
+        .await
+        .inspect_err(|e| tracing::error!(error = % e, "Failed to submit a streaming search."))?;
+    match encoding {
+        NegotiatedEncoding::Sse => Ok(sse_response(search_stream)?.into_response()),
+        NegotiatedEncoding::ArrowIpc => Ok(arrow_response(search_stream).into_response()),
+    }
+}
+
+/// Streams the events of a submitted streaming search back as Server-Sent Events.
+///
+/// # Type Parameters
+///
+/// * `QueryJobTableType` - The query jobs table that the search was submitted to.
 ///
 /// # Returns
 ///
@@ -317,13 +392,9 @@ struct StreamingSearchError {
 ///
 /// Returns an error if:
 ///
-/// * [`HandlerError::NotImplemented`] if `streaming_search` is `None`, i.e., the package doesn't
-///   run queries on Spider.
-/// * Forwards [`StreamingSearch::submit`]'s return values on failure.
 /// * Forwards [`sse::encode_event`]'s return values on failure.
-async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
-    streaming_search: Option<&StreamingSearch<QueryJobTableType, SseEncoding>>,
-    query_config: QueryConfig,
+fn sse_response<QueryJobTableType: QueryJobTable>(
+    search_stream: SearchStream<QueryJobTableType, Vec<Bytes>>,
 ) -> Result<
     SseResponse<impl Stream<Item = Result<Bytes, HandlerError>> + use<QueryJobTableType>>,
     HandlerError,
@@ -332,55 +403,98 @@ async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
     const ERROR_EVENT: &str = "error";
     const JOB_EVENT: &str = "job";
 
-    tracing::debug!(
-        query_config = ? query_config,
-        "Received a streaming search request."
-    );
-    let Some(streaming_search) = streaming_search else {
-        return Err(HandlerError::NotImplemented(
-            "streaming search requires the package to run queries on Spider".to_owned(),
-        ));
-    };
-    let search_stream = streaming_search
-        .submit(query_config, SseEncoding)
-        .await
-        .inspect_err(|e| tracing::error!(error = % e, "Failed to submit a streaming search."))?;
     let query_job_id = search_stream.query_job_id();
-
     let job_event = sse::encode_event(JOB_EVENT, &StreamingSearchJob { query_job_id })?;
     let mut has_streamed_result = false;
-    let events = search_stream.map(move |search_event| match search_event {
-        SearchEvent::Results(batch) => {
-            if !has_streamed_result {
-                has_streamed_result = true;
-                tracing::debug!(
-                    query_job_id,
-                    "Yielding the streaming search's first result."
-                );
+    let events = search_stream.flat_map(move |search_event| {
+        let chunks: Vec<Result<Bytes, HandlerError>> = match search_event {
+            SearchEvent::Results(batch) => {
+                if !has_streamed_result {
+                    has_streamed_result = true;
+                    tracing::debug!(
+                        query_job_id,
+                        "Yielding the streaming search's first result."
+                    );
+                }
+                batch.into_iter().map(Ok).collect()
             }
-            Ok(batch)
-        }
-        SearchEvent::End(Ok(outcome)) => Ok(sse::encode_event(
-            END_EVENT,
-            &StreamingSearchEnd::from(outcome),
-        )?),
-        SearchEvent::End(Err(e)) => {
-            tracing::error!(
-                query_job_id,
-                error = % e,
-                "Failed to wait for the streaming search's query job to terminate."
-            );
-            Ok(sse::encode_event(
-                ERROR_EVENT,
-                &StreamingSearchError {
-                    message: "failed to wait for the query job to terminate".to_owned(),
-                },
-            )?)
-        }
+            SearchEvent::End(Ok(outcome)) => vec![
+                sse::encode_event(END_EVENT, &StreamingSearchEnd::from(outcome))
+                    .map_err(HandlerError::from),
+            ],
+            SearchEvent::End(Err(e)) => {
+                tracing::error!(
+                    query_job_id,
+                    error = % e,
+                    "Failed to wait for the streaming search's query job to terminate."
+                );
+                vec![
+                    sse::encode_event(
+                        ERROR_EVENT,
+                        &StreamingSearchError {
+                            message: "failed to wait for the query job to terminate".to_owned(),
+                        },
+                    )
+                    .map_err(HandlerError::from),
+                ]
+            }
+        };
+        futures::stream::iter(chunks)
     });
     Ok(SseResponse::new(
         futures::stream::once(std::future::ready(Ok(job_event))).chain(events),
     ))
+}
+
+/// Streams the events of a submitted streaming search back as an Arrow IPC stream, followed by
+/// the summary stream.
+///
+/// # Type Parameters
+///
+/// * `QueryJobTableType` - The query jobs table that the search was submitted to.
+///
+/// # Returns
+///
+/// The Arrow IPC stream response.
+fn arrow_response<QueryJobTableType: QueryJobTable>(
+    search_stream: SearchStream<QueryJobTableType, Vec<Bytes>>,
+) -> ArrowStreamResponse<
+    impl Stream<Item = Result<Bytes, std::convert::Infallible>> + use<QueryJobTableType>,
+> {
+    let query_job_id = search_stream.query_job_id();
+    let mut has_streamed_result = false;
+    let chunks = search_stream.flat_map(move |search_event| {
+        let chunks: Vec<Bytes> = match search_event {
+            SearchEvent::Results(batch) => {
+                if !has_streamed_result {
+                    has_streamed_result = true;
+                    tracing::debug!(
+                        query_job_id,
+                        "Yielding the streaming search's first result."
+                    );
+                }
+                batch
+            }
+            SearchEvent::End(outcome) => {
+                if let Err(e) = &outcome {
+                    tracing::error!(
+                        query_job_id,
+                        error = % e,
+                        "Failed to wait for the streaming search's query job to terminate."
+                    );
+                }
+                vec![
+                    Bytes::from_static(arrow_ipc::END_OF_STREAM),
+                    arrow_ipc::summary_stream(outcome.as_ref().ok()),
+                ]
+            }
+        };
+        futures::stream::iter(chunks.into_iter().map(Ok))
+    });
+    ArrowStreamResponse::new(
+        query_job_id,
+        futures::stream::once(std::future::ready(Ok(arrow_ipc::schema_message()))).chain(chunks),
+    )
 }
 
 /// Query parameters for the query results endpoint.
@@ -918,8 +1032,10 @@ mod stream_query_tests {
     use axum::Json;
     use axum::body::Body;
     use axum::body::Bytes;
+    use axum::http::HeaderMap;
     use axum::http::Request;
     use axum::http::StatusCode;
+    use axum::http::header::ACCEPT;
     use axum::http::header::CACHE_CONTROL;
     use axum::http::header::CONTENT_TYPE;
     use axum::response::IntoResponse;
@@ -955,8 +1071,11 @@ mod stream_query_tests {
     use super::StreamingSearchJob;
     use super::StreamingSearchResult;
     use super::serve_streaming_search;
+    use crate::arrow_ipc::ARROW_STREAM_CONTENT_TYPE;
+    use crate::arrow_ipc::QUERY_JOB_ID_HEADER;
     use crate::client::ClientError;
     use crate::client::QueryConfig;
+    use crate::negotiation::NegotiatedEncoding;
     use crate::sse;
     use crate::sse::SseEncoding;
     use crate::streaming_search::QueryJobTable;
@@ -1452,6 +1571,270 @@ mod stream_query_tests {
         }
     }
 
+    /// A simulated search task that streams the results of task 0 with protocol v3, aligning the
+    /// buffers of its IPC messages to arrow-rs's default of 64 bytes, unlike the server's 8.
+    struct FakeArrowTask {
+        stream: TcpStream,
+        encoder: arrow_ipc::writer::StreamEncoder,
+        archive_ids: arrow_array::ArrayRef,
+    }
+
+    impl FakeArrowTask {
+        /// Connects to the listener named by `network_output` and sends the v3 handshake.
+        ///
+        /// # Returns
+        ///
+        /// The simulated search task, connected and past its handshake.
+        ///
+        /// # Panics
+        ///
+        /// Panics if connecting or sending the handshake fails.
+        async fn connect(network_output: &NetworkOutput) -> Self {
+            let mut stream =
+                TcpStream::connect((network_output.host.as_str(), network_output.port.get()))
+                    .await
+                    .expect("connecting to the listener should succeed");
+            let handshake = rmp_serde::to_vec(&(
+                3_u8,
+                network_output.session_token.to_string(),
+                0_u64,
+                ARCHIVE_ID,
+            ))
+            .expect("encoding the handshake shouldn't fail");
+            stream
+                .write_all(&handshake)
+                .await
+                .expect("sending the handshake should succeed");
+            Self {
+                stream,
+                encoder: arrow_ipc::writer::StreamEncoder::try_new(
+                    &search_result_listener::RESULT_SCHEMA,
+                )
+                .expect("the result schema should be encodable"),
+                archive_ids: Arc::new(arrow_array::StringArray::from(vec![ARCHIVE_ID])),
+            }
+        }
+
+        /// Sends the results at `result_indices` as one record batch, preceded by the schema and
+        /// the dictionary on the first call.
+        ///
+        /// # Returns
+        ///
+        /// The bytes sent.
+        async fn send_batch(&mut self, result_indices: Range<u64>) -> Vec<u8> {
+            let num_rows = usize::try_from(result_indices.end - result_indices.start)
+                .expect("the number of test results should fit in `usize`");
+            let archive_ids =
+                arrow_array::DictionaryArray::<arrow_array::types::Int32Type>::try_new(
+                    arrow_array::Int32Array::from(vec![0; num_rows]),
+                    Arc::clone(&self.archive_ids),
+                )
+                .expect("the keys should index the dictionary");
+            let batch = arrow_array::RecordBatch::try_new(
+                Arc::clone(&search_result_listener::RESULT_SCHEMA),
+                vec![
+                    Arc::new(archive_ids),
+                    Arc::new(arrow_array::Int64Array::from_iter_values(
+                        result_indices.clone().map(timestamp),
+                    )),
+                    Arc::new(arrow_array::StringArray::from_iter_values(
+                        result_indices.map(message),
+                    )),
+                ],
+            )
+            .expect("the batch should match the result schema");
+            let bytes: Vec<u8> = self
+                .encoder
+                .encode(&batch)
+                .expect("the batch should encode")
+                .iter()
+                .flat_map(|buffer| buffer.to_vec())
+                .collect();
+            self.stream
+                .write_all(&bytes)
+                .await
+                .expect("sending a batch should succeed");
+            bytes
+        }
+
+        /// Ends the stream the way the Rust search task does: sends the end-of-stream marker and
+        /// a trailer counting `num_results` results, then EOF, and reads until the listener closes
+        /// the connection.
+        ///
+        /// # Returns
+        ///
+        /// The bytes the listener sent back.
+        async fn finish(mut self, num_results: u64) -> Vec<u8> {
+            let mut bytes: Vec<u8> = self
+                .encoder
+                .finish()
+                .expect("the stream should end")
+                .iter()
+                .flat_map(|buffer| buffer.to_vec())
+                .collect();
+            bytes.extend(
+                rmp_serde::to_vec(&(num_results,)).expect("encoding the trailer shouldn't fail"),
+            );
+            self.stream
+                .write_all(&bytes)
+                .await
+                .expect("sending the trailer should succeed");
+            self.stream
+                .shutdown()
+                .await
+                .expect("sending EOF should succeed");
+            let mut reply = Vec::new();
+            timeout(TIMEOUT, self.stream.read_to_end(&mut reply))
+                .await
+                .expect("the listener should close the connection")
+                .expect("reading the reply should succeed");
+            reply
+        }
+    }
+
+    /// One result decoded from an Arrow IPC stream response: `(archive_id, timestamp, message)`.
+    type ArrowRow = (String, i64, String);
+
+    /// The summary row of an Arrow IPC stream response.
+    #[derive(Debug, PartialEq, Eq)]
+    struct ArrowSummary {
+        status: Option<String>,
+        num_results_emitted: Option<u64>,
+        num_duplicates_dropped: Option<u64>,
+        num_protocol_errors: Option<u64>,
+        num_incomplete_connections: Option<u64>,
+    }
+
+    /// Decodes the body of an Arrow IPC stream response with arrow-rs's stream reader.
+    ///
+    /// # Returns
+    ///
+    /// The results of the result stream, and the row of the summary stream that follows it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the body isn't a result stream followed by a summary stream of one row.
+    fn decode_arrow_body(body: &[u8]) -> (Vec<ArrowRow>, ArrowSummary) {
+        use arrow_array::Array;
+
+        let mut remaining = body;
+        let mut rows = Vec::new();
+        let reader = arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)
+            .expect("the body should start with the result schema");
+        assert_eq!(reader.schema(), *search_result_listener::RESULT_SCHEMA);
+        for batch in reader {
+            let batch = batch.expect("every result batch should decode");
+            let archive_ids = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow_array::DictionaryArray<arrow_array::types::Int32Type>>()
+                .expect("archive IDs should be a dictionary");
+            let archive_id_values = archive_ids
+                .values()
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .expect("archive ID values should be strings");
+            let timestamps = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .expect("timestamps should be `Int64`");
+            let messages = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .expect("messages should be strings");
+            for row in 0..batch.num_rows() {
+                let key = usize::try_from(archive_ids.keys().value(row))
+                    .expect("keys should be non-negative");
+                rows.push((
+                    archive_id_values.value(key).to_owned(),
+                    timestamps.value(row),
+                    messages.value(row).to_owned(),
+                ));
+            }
+        }
+        let batches: Vec<_> = arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)
+            .expect("the summary stream should follow")
+            .collect::<Result<_, _>>()
+            .expect("the summary should decode");
+        assert_eq!(remaining, &[] as &[u8], "nothing should follow the summary");
+        let [summary] = batches.as_slice() else {
+            panic!("the summary stream should hold one batch: {batches:?}");
+        };
+        assert_eq!(summary.num_rows(), 1);
+        let status = summary
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .expect("the status should be a string");
+        let count = |column: usize| {
+            let counts = summary
+                .column(column)
+                .as_any()
+                .downcast_ref::<arrow_array::UInt64Array>()
+                .expect("the counts should be `UInt64`");
+            (!counts.is_null(0)).then(|| counts.value(0))
+        };
+        (
+            rows,
+            ArrowSummary {
+                status: (!status.is_null(0)).then(|| status.value(0).to_owned()),
+                num_results_emitted: count(1),
+                num_duplicates_dropped: count(2),
+                num_protocol_errors: count(3),
+                num_incomplete_connections: count(4),
+            },
+        )
+    }
+
+    /// Posts `query_config` to `app`'s streaming search route, accepting an Arrow IPC stream.
+    ///
+    /// # Returns
+    ///
+    /// The app's response.
+    async fn post_arrow_query_stream(
+        app: &axum::Router,
+        query_config: &serde_json::Value,
+    ) -> Response {
+        app.clone()
+            .oneshot(
+                Request::post("/query/stream")
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, ARROW_STREAM_CONTENT_TYPE)
+                    .body(Body::from(query_config.to_string()))
+                    .expect("the request should be valid"),
+            )
+            .await
+            .expect("the app should respond")
+    }
+
+    /// # Returns
+    ///
+    /// The body of `response`, once it ends.
+    async fn body_bytes(response: Response) -> Bytes {
+        timeout(TIMEOUT, response.into_body().collect())
+            .await
+            .expect("the body should end")
+            .expect("the body should be readable")
+            .to_bytes()
+    }
+
+    /// # Returns
+    ///
+    /// The rows of the results at `result_indices`, as an Arrow IPC stream response holds them.
+    fn expected_rows(result_indices: Range<u64>) -> Vec<ArrowRow> {
+        result_indices
+            .map(|result_index| {
+                (
+                    ARCHIVE_ID.to_owned(),
+                    timestamp(result_index),
+                    message(result_index),
+                )
+            })
+            .collect()
+    }
+
     /// Builds an app that serves streaming searches through `streaming_search`, the way the API
     /// server's route does.
     ///
@@ -1459,16 +1842,23 @@ mod stream_query_tests {
     ///
     /// A router serving `POST /query/stream`.
     fn streaming_search_app(
-        streaming_search: Option<Arc<StreamingSearch<FakeQueryJobTable, SseEncoding>>>,
+        streaming_search: Option<Arc<StreamingSearch<FakeQueryJobTable, NegotiatedEncoding>>>,
     ) -> axum::Router {
         axum::Router::new().route(
             "/query/stream",
-            post(move |Json(query_config): Json<QueryConfig>| {
-                let streaming_search = streaming_search.clone();
-                async move {
-                    serve_streaming_search(streaming_search.as_deref(), query_config).await
-                }
-            }),
+            post(
+                move |headers: HeaderMap, Json(query_config): Json<QueryConfig>| {
+                    let streaming_search = streaming_search.clone();
+                    async move {
+                        serve_streaming_search(
+                            streaming_search.as_deref(),
+                            query_config,
+                            NegotiatedEncoding::from_headers(&headers),
+                        )
+                        .await
+                    }
+                },
+            ),
         )
     }
 
@@ -1586,7 +1976,8 @@ mod stream_query_tests {
         let mut encoder = SseEncoding.encoder(archive_id);
         let mut axum_events = Vec::new();
         for (timestamp, message) in tricky_results() {
-            encoder.encode(timestamp, message);
+            // The listener hands messages to the encoders without their trailing newline.
+            encoder.encode(timestamp, message.strip_suffix('\n').unwrap_or(message));
             axum_events.push(axum_result_event(archive_id, timestamp, message));
         }
 
@@ -2086,6 +2477,190 @@ mod stream_query_tests {
         assert!(
             detection_latency < MAX_DETECTION_LATENCY,
             "detecting the closed connection took {detection_latency:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn arrow_response_streams_the_schema_then_the_forwarded_batches_then_the_summary() {
+        let harness = Harness::start().await;
+        let response = post_arrow_query_stream(&harness.app, &json!({"query_string": "*"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(ARROW_STREAM_CONTENT_TYPE.as_bytes())
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(QUERY_JOB_ID_HEADER)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(b"1".as_slice())
+        );
+
+        let network_output = harness
+            .query_job_table
+            .search_job_config(1)
+            .network_output
+            .expect("the query job should have a network output");
+        let mut task = FakeArrowTask::connect(&network_output).await;
+        let first = task.send_batch(0..3).await;
+        let second = task.send_batch(3..1000).await;
+        assert_eq!(task.finish(1000).await, acknowledgement(1000));
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Succeeded);
+        let body = body_bytes(response).await;
+        let (rows, summary) = decode_arrow_body(&body);
+
+        assert_eq!(rows, expected_rows(0..1000));
+        assert_eq!(
+            summary,
+            ArrowSummary {
+                status: Some("Succeeded".to_owned()),
+                num_results_emitted: Some(1000),
+                num_duplicates_dropped: Some(0),
+                num_protocol_errors: Some(0),
+                num_incomplete_connections: Some(0),
+            }
+        );
+        // Without the stream's schema message, the producer's bytes hold the dictionary and the
+        // record batch, which the response forwards as they are.
+        let schema_len = 8 + usize::try_from(u32::from_le_bytes(
+            first[4..8]
+                .try_into()
+                .expect("the metadata length should be 4 bytes"),
+        ))
+        .expect("the metadata length should fit in `usize`");
+        for forwarded in [&first[schema_len..], &second[..]] {
+            assert!(
+                body.windows(forwarded.len())
+                    .any(|window| window == forwarded),
+                "the response should forward the producer's messages byte for byte"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn arrow_response_reencodes_only_the_unclaimed_suffix_of_a_partial_duplicate() {
+        let harness = Harness::start().await;
+        let response = post_arrow_query_stream(&harness.app, &json!({"query_string": "*"})).await;
+        let network_output = harness
+            .query_job_table
+            .search_job_config(1)
+            .network_output
+            .expect("the query job should have a network output");
+        let mut failed_attempt = FakeArrowTask::connect(&network_output).await;
+        failed_attempt.send_batch(0..4).await;
+        sleep(Duration::from_millis(200)).await;
+        drop(failed_attempt);
+
+        let mut retry = FakeArrowTask::connect(&network_output).await;
+        retry.send_batch(0..2).await;
+        retry.send_batch(2..6).await;
+        retry.send_batch(6..7).await;
+        assert_eq!(retry.finish(7).await, acknowledgement(7));
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Succeeded);
+        let (rows, summary) = decode_arrow_body(&body_bytes(response).await);
+
+        assert_eq!(rows, expected_rows(0..7));
+        assert_eq!(summary.num_results_emitted, Some(7));
+        assert_eq!(summary.num_duplicates_dropped, Some(4));
+        assert_eq!(summary.num_incomplete_connections, Some(1));
+    }
+
+    #[tokio::test]
+    async fn arrow_response_encodes_protocol_v2_results_row_by_row() {
+        let harness = Harness::start().await;
+        let response = post_arrow_query_stream(&harness.app, &json!({"query_string": "*"})).await;
+        let results = tricky_results();
+        let mut clp_s = harness.connect(1).await;
+        clp_s.send_timestamped_messages(&results).await;
+        assert_eq!(
+            clp_s.finish(results.len() as u64).await,
+            acknowledgement(results.len() as u64)
+        );
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Succeeded);
+        let (rows, summary) = decode_arrow_body(&body_bytes(response).await);
+
+        assert_eq!(
+            rows,
+            results
+                .iter()
+                .map(|(timestamp, message)| (
+                    ARCHIVE_ID.to_owned(),
+                    *timestamp,
+                    message.strip_suffix('\n').unwrap_or(message).to_owned()
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(summary.num_results_emitted, Some(results.len() as u64));
+    }
+
+    #[tokio::test]
+    async fn sse_response_encodes_protocol_v3_results_as_events() {
+        const NUM_RESULTS: u64 = 5;
+
+        let harness = Harness::start().await;
+        let (mut events, query_job_id) = harness.start_search().await;
+        let network_output = harness
+            .query_job_table
+            .search_job_config(query_job_id)
+            .network_output
+            .expect("the query job should have a network output");
+        let mut task = FakeArrowTask::connect(&network_output).await;
+        task.send_batch(0..2).await;
+        task.send_batch(2..NUM_RESULTS).await;
+        assert_eq!(task.finish(NUM_RESULTS).await, acknowledgement(NUM_RESULTS));
+        let mut results = Vec::new();
+        for _ in 0..NUM_RESULTS {
+            let result_event = events.next_event().await.expect("a result should arrive");
+            assert_eq!(result_event.name, None);
+            results.push(result_event.data);
+        }
+
+        assert_eq!(
+            results,
+            (0..NUM_RESULTS)
+                .map(|result_index| json!({
+                    "archive_id": ARCHIVE_ID,
+                    "timestamp": timestamp(result_index),
+                    "message": message(result_index),
+                }))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn arrow_response_of_an_untracked_job_ends_with_a_null_summary() {
+        let harness = Harness::start().await;
+        let response = post_arrow_query_stream(&harness.app, &json!({"query_string": "*"})).await;
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Running);
+        harness.query_job_table.fail_status_polls();
+        let (rows, summary) = decode_arrow_body(&body_bytes(response).await);
+
+        assert_eq!(rows, []);
+        assert_eq!(
+            summary,
+            ArrowSummary {
+                status: None,
+                num_results_emitted: None,
+                num_duplicates_dropped: None,
+                num_protocol_errors: None,
+                num_incomplete_connections: None,
+            }
+        );
+        assert_eq!(
+            harness.query_job_table.wait_for_cancel_requests().await,
+            [1]
         );
     }
 }

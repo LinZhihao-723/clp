@@ -46,7 +46,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Submits a new search job and streams its results back as Server-Sent Events (SSE) in the same response. Only available when the package runs queries on Spider. If the client disconnects before the `end` event, or the job's status can no longer be tracked, the job is marked as cancelling. */
+        /** @description Submits a new search job and streams its results back in the same response: as an Arrow IPC stream if the `Accept` header accepts `application/vnd.apache.arrow.stream`, or as Server-Sent Events (SSE) otherwise. Only available when the package runs queries on Spider. If the client disconnects before the end of the response, or the job's status can no longer be tracked, the job is marked as cancelling. */
         post: operations["stream_query"];
         delete?: never;
         options?: never;
@@ -357,9 +357,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Server-Sent Events stream of the search: first a `job` event whose data is a `StreamingSearchJob`, then one unnamed event per result whose data is a `StreamingSearchResult`, and finally an `end` event whose data is a `StreamingSearchEnd`, sent once the job has terminated. If the job's status can't be tracked, an `error` event whose data is a `StreamingSearchError` replaces the `end` event. */
+            /**
+             * @description The search's stream, in the negotiated content type.
+             *
+             *     `text/event-stream`: first a `job` event whose data is a `StreamingSearchJob`, then one unnamed event per result whose data is a `StreamingSearchResult`, and finally an `end` event whose data is a `StreamingSearchEnd`, sent once the job has terminated. If the job's status can't be tracked, an `error` event whose data is a `StreamingSearchError` replaces the `end` event.
+             *
+             *     `application/vnd.apache.arrow.stream`: an Arrow IPC stream of the results with the schema `{archive_id: Dictionary<Int32, Utf8>, timestamp: Int64 (epoch milliseconds), message: Utf8 (without its trailing newline)}`, in which each record batch follows its own replacement dictionary of archive IDs. Once the job has terminated, the stream ends, and a second IPC stream of one row follows: `{status: Utf8, num_results_emitted: UInt64, num_duplicates_dropped: UInt64, num_protocol_errors: UInt64, num_incomplete_connections: UInt64}`, with the fields of `StreamingSearchEnd`, all null if the job's status can't be tracked.
+             */
             200: {
                 headers: {
+                    /** @description The ID of the search's query job. Only sent with an Arrow IPC stream. */
+                    "X-Clp-Query-Job-Id"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -373,6 +381,7 @@ export interface operations {
                      *     data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0,"num_incomplete_connections":0}
                      */
                     "text/event-stream": string;
+                    "application/vnd.apache.arrow.stream": unknown;
                 };
             };
             /** @description The query config is invalid (e.g., an empty `query_string`, an empty `datasets`, or an invalid dataset name), or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`. */
