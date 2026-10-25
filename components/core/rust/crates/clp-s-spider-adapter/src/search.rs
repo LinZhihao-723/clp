@@ -1,5 +1,6 @@
 //! The in-process clp-s search task.
 
+use std::num::NonZeroU16;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,8 +13,10 @@ use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::dataset::resolve_dataset_name;
 use clp_rust_utils::job_config::QueryJobId;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
+use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use clp_s_reader::ArchiveLocation;
 use clp_s_reader::ByteSource;
@@ -32,6 +35,8 @@ use clp_s_reader::s3::S3Source;
 use clp_s_reader::s3::S3SourceConfig;
 use clp_s_results_cache::ResultsCacheConfig;
 use clp_s_results_cache::ResultsCacheSink;
+use clp_s_sinks::NetworkDestination;
+use clp_s_sinks::NetworkSink;
 use non_empty_string::NonEmptyString;
 
 use crate::AdapterResources;
@@ -51,7 +56,10 @@ pub struct SearchTask<'task> {
     /// The resolved dataset name.
     pub dataset: &'task str,
 
-    pub results_cache_uri: &'task str,
+    pub output: TaskOutput<'task>,
+
+    /// The task's position among the tasks of the query job.
+    pub task_index: QueryTaskIndex,
 }
 
 impl<'task> SearchTask<'task> {
@@ -69,30 +77,40 @@ impl<'task> SearchTask<'task> {
     /// Returns an error if:
     ///
     /// * [`anyhow::Error`] if the package does not use the clp-s storage engine.
-    /// * [`anyhow::Error`] if `output_handle` is not the results cache.
+    /// * [`anyhow::Error`] if `output_handle` is neither the results cache nor the network.
     pub fn new(
         ctx: &'task spider_tdl::TaskContext,
         config: &'task SpiderTaskExecutorConfig,
         query_job_id: QueryJobId,
         clp_s_query_option: &'task ClpSQueryOption,
-        archive_id: ArchiveId,
-        dataset: Option<&'task str>,
+        archive: ArchiveToSearch<'task>,
         output_handle: &'task OutputHandle,
     ) -> anyhow::Result<Self> {
         if StorageEngine::ClpS != config.package.storage_engine {
             anyhow::bail!("the clp-s query task requires the `clp-s` storage engine");
         }
-        let OutputHandle::ResultsCache { uri } = output_handle else {
-            anyhow::bail!("unsupported query output handler");
+        let output = match output_handle {
+            OutputHandle::ResultsCache { uri } => TaskOutput::ResultsCache { uri: uri.as_str() },
+            OutputHandle::Network {
+                host,
+                port,
+                session_token,
+            } => TaskOutput::Network {
+                host: host.as_str(),
+                port: *port,
+                session_token: *session_token,
+            },
+            OutputHandle::File => anyhow::bail!("unsupported query output handler"),
         };
         Ok(Self {
             ctx,
             config,
             query_job_id,
             clp_s_query_option,
-            archive_id,
-            dataset: resolve_dataset_name(dataset),
-            results_cache_uri: uri.as_str(),
+            archive_id: archive.id,
+            dataset: resolve_dataset_name(archive.dataset),
+            output,
+            task_index: archive.task_index,
         })
     }
 
@@ -117,6 +135,7 @@ impl<'task> SearchTask<'task> {
             query_job_id = % self.query_job_id,
             dataset = % self.dataset,
             archive_id = % self.archive_id,
+            task_index = self.task_index,
             "clp-s query task started.",
         );
         // spider-tdl does not catch panics at the task boundary, and a panicking task must not
@@ -136,7 +155,8 @@ impl<'task> SearchTask<'task> {
     }
 
     /// Mirror of the body of `clp-tdl-package`'s `search` task after its input checks: resolves
-    /// the archive input, builds the `clp-s` arguments and runs `clp-s` from the CLP home.
+    /// the archive input, builds the `clp-s` arguments for the task's output and runs `clp-s` from
+    /// the CLP home.
     ///
     /// # Errors
     ///
@@ -162,13 +182,29 @@ impl<'task> SearchTask<'task> {
                 "Failed to resolve the archive input."
             );
         })?;
-        let args = subprocess::build_clp_s_search_args_for_result_cache(
-            &archive_selector,
-            self.clp_s_query_option,
-            self.results_cache_uri,
-            self.query_job_id,
-            self.dataset,
-        );
+        let args = match self.output {
+            TaskOutput::ResultsCache { uri } => {
+                subprocess::build_clp_s_search_args_for_result_cache(
+                    &archive_selector,
+                    self.clp_s_query_option,
+                    uri,
+                    self.query_job_id,
+                    self.dataset,
+                )
+            }
+            TaskOutput::Network {
+                host,
+                port,
+                session_token,
+            } => subprocess::build_clp_s_search_args_for_network(
+                &archive_selector,
+                self.clp_s_query_option,
+                host,
+                port,
+                session_token,
+                self.task_index,
+            ),
+        };
         subprocess::run_clp_s_search(
             &subprocess::clp_binary_path(resources.clp_home(), "clp-s"),
             args,
@@ -176,7 +212,8 @@ impl<'task> SearchTask<'task> {
         )
     }
 
-    /// Resolves the archive location and the results-cache sink, then searches the archive.
+    /// Resolves the archive location and the sink of the task's output (the results cache or a
+    /// protocol-v2 network stream), then searches the archive.
     ///
     /// # Returns
     ///
@@ -203,14 +240,32 @@ impl<'task> SearchTask<'task> {
                         "Failed to resolve the archive location."
                     );
                 })?;
-        let sink = ResultsCacheSink::new(
-            resources.runtime().clone(),
-            resources.results_cache(self.results_cache_uri)?,
-            &self.query_job_id.to_string(),
-            self.dataset,
-            ResultsCacheConfig::default(),
-        )?;
-        self.search_or_fall_back(resources, &location, sink)
+        match self.output {
+            TaskOutput::ResultsCache { uri } => {
+                let sink = ResultsCacheSink::new(
+                    resources.runtime().clone(),
+                    resources.results_cache(uri)?,
+                    &self.query_job_id.to_string(),
+                    self.dataset,
+                    ResultsCacheConfig::default(),
+                )?;
+                self.search_or_fall_back(resources, &location, sink)
+            }
+            TaskOutput::Network {
+                host,
+                port,
+                session_token,
+            } => {
+                let sink = NetworkSink::new(NetworkDestination {
+                    host: host.to_owned(),
+                    port: port.get(),
+                    session_token: session_token.to_string(),
+                    task_index: self.task_index,
+                    archive_id: clp_s_reader::ArchiveId::from(self.archive_id.to_string()),
+                });
+                self.search_or_fall_back(resources, &location, sink)
+            }
+        }
     }
 
     /// Searches the archive at `location` in-process into `sink`; if the reader does not support
@@ -265,7 +320,8 @@ impl<'task> SearchTask<'task> {
     }
 
     /// Builds the scan request of the task: the KQL query (case-insensitive if requested), the
-    /// time bounds, and the order (latest first with a result limit, else scan order).
+    /// time bounds, and the order (latest first with a result limit into the results cache, else
+    /// scan order).
     ///
     /// # Returns
     ///
@@ -289,9 +345,14 @@ impl<'task> SearchTask<'task> {
                 option.begin_timestamp_millisecs,
                 option.end_timestamp_millisecs,
             ))
-            .order(option.max_num_results.map_or(ResultOrder::Scan, |limit| {
-                ResultOrder::LatestFirst { limit }
-            }))
+            .order(match (self.output, option.max_num_results) {
+                (TaskOutput::ResultsCache { .. }, Some(limit)) => {
+                    ResultOrder::LatestFirst { limit }
+                }
+                (TaskOutput::ResultsCache { .. }, None) | (TaskOutput::Network { .. }, _) => {
+                    ResultOrder::Scan
+                }
+            })
             .build()
     }
 
@@ -361,13 +422,41 @@ impl<'task> SearchTask<'task> {
     }
 }
 
-/// Searches one archive in-process and writes the results into the results cache.
+/// The archive that a search task searches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArchiveToSearch<'task> {
+    pub id: ArchiveId,
+
+    /// The archive's dataset, or `None` for the default dataset.
+    pub dataset: Option<&'task str>,
+
+    /// The archive's position among the archives that the query job searches.
+    pub task_index: QueryTaskIndex,
+}
+
+/// Where a search task writes its results.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskOutput<'task> {
+    /// The results cache at `uri`; the collection is the query job's ID.
+    ResultsCache { uri: &'task str },
+
+    /// A search-result listener, streamed to with protocol v2.
+    Network {
+        host: &'task str,
+        port: NonZeroU16,
+        session_token: SessionToken,
+    },
+}
+
+/// Searches one archive in-process and writes the results into the results cache or streams them
+/// to a search-result listener.
 ///
 /// Mirrors `clp-tdl-package`'s `search` task with the same inputs; the process-wide
 /// [`AdapterResources`] replace the package's runtime and the spawned `clp-s` process. An archive
 /// the reader does not support (`ErrorKind::UnsupportedArchive` before any result was written) is
 /// searched by spawning the C++ `clp-s`, exactly as the package does today. Retries are idempotent:
-/// the results cache tolerates duplicate `_id`s.
+/// the results cache tolerates duplicate `_id`s, and every attempt streams the same results with
+/// the same indices, which the listener deduplicates.
 ///
 /// # Errors
 ///
@@ -381,8 +470,7 @@ pub fn search(
     config: &SpiderTaskExecutorConfig,
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
-    archive_id: ArchiveId,
-    dataset: Option<&str>,
+    archive: ArchiveToSearch<'_>,
     output_handle: &OutputHandle,
 ) -> anyhow::Result<()> {
     let task = SearchTask::new(
@@ -390,8 +478,7 @@ pub fn search(
         config,
         query_job_id,
         clp_s_query_option,
-        archive_id,
-        dataset,
+        archive,
         output_handle,
     )?;
     task.run(AdapterResources::global()?).map(drop)
@@ -494,6 +581,12 @@ impl ResolvedLocation {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::io::Write;
+    use std::net::SocketAddr;
+    use std::net::TcpListener;
+    use std::net::TcpStream;
+    use std::num::NonZeroU16;
     use std::panic::AssertUnwindSafe;
     use std::path::Path;
     use std::path::PathBuf;
@@ -536,8 +629,10 @@ mod tests {
     use spider_core::types::id::TaskId;
     use spider_tdl::TaskContext;
 
+    use super::ArchiveToSearch;
     use super::ResolvedLocation;
     use super::SearchTask;
+    use super::TaskOutput;
     use super::resolve_archive_location;
     use super::search;
     use crate::AdapterConfig;
@@ -546,11 +641,19 @@ mod tests {
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
     const DATASET: &str = "ds1";
     const QUERY_JOB_ID: i32 = 7;
+    const TASK_INDEX: u64 = 3;
+    const SESSION_TOKEN: &str = "6f1c1c64-1e0a-4be8-a7a6-6a0e4d3c2b1a";
     const BUCKET: &str = "bucket";
 
     /// A lazily connected results cache that no test reaches: searches without matches never
     /// insert, and every other search fails before inserting.
     const UNREACHABLE_URI: &str = "mongodb://127.0.0.1:1/proto?serverSelectionTimeoutMS=200";
+
+    /// One decoded handshake: `(version, session_token, task_index, archive_id)`.
+    type Handshake = (u8, String, u64, String);
+
+    /// One decoded result frame: `(result_index, timestamp_ms, message)`.
+    type Frame = (u64, i64, String);
 
     /// A CLP home whose `bin/clp-s` records its arguments and its AWS access key instead of
     /// searching, and whose archive-output directory is `archives`.
@@ -737,11 +840,23 @@ mod tests {
 
     /// # Returns
     ///
+    /// The test archive as task `TASK_INDEX` of the job searches it, in `dataset`.
+    fn archive(dataset: Option<&str>) -> ArchiveToSearch<'_> {
+        ArchiveToSearch {
+            id: archive_id(),
+            dataset,
+            task_index: TASK_INDEX,
+        }
+    }
+
+    /// # Returns
+    ///
     /// An executor config for clp-s archives stored on the file system under `archives`.
     fn fs_config() -> SpiderTaskExecutorConfig {
         SpiderTaskExecutorConfig {
             package: Package {
                 storage_engine: StorageEngine::ClpS,
+                ..Package::default()
             },
             archive_output: ArchiveOutput {
                 storage: ArchiveOutputStorage::Fs {
@@ -795,7 +910,6 @@ mod tests {
             begin_timestamp_millisecs: None,
             end_timestamp_millisecs: None,
             ignore_case: false,
-            count_by_time_bucket_size_millisecs: None,
         }
     }
 
@@ -822,6 +936,114 @@ mod tests {
         }
     }
 
+    /// # Returns
+    ///
+    /// An output handle streaming to a listener at `address` in session [`SESSION_TOKEN`].
+    fn network(address: SocketAddr) -> OutputHandle {
+        OutputHandle::Network {
+            host: NonEmptyString::new(address.ip().to_string()).expect("the host is not empty"),
+            port: NonZeroU16::new(address.port()).expect("the bound port is not zero"),
+            session_token: SESSION_TOKEN.parse().expect("valid session token UUID"),
+        }
+    }
+
+    /// Accepts the connections to `listener`, reads each to its end, and acknowledges the results
+    /// its trailer counts if `is_acknowledging`, until a connection closes without sending
+    /// anything.
+    ///
+    /// # Returns
+    ///
+    /// A handle of the thread returning the bytes received on each non-empty connection.
+    fn capture(
+        listener: TcpListener,
+        is_acknowledging: bool,
+    ) -> std::thread::JoinHandle<Vec<Vec<u8>>> {
+        std::thread::spawn(move || {
+            let mut connections = Vec::new();
+            while let Ok((mut stream, _)) = listener.accept() {
+                let mut received = Vec::new();
+                stream
+                    .read_to_end(&mut received)
+                    .expect("the connection can be read");
+                if received.is_empty() {
+                    break;
+                }
+                if is_acknowledging {
+                    let num_results = decode_stream(&received)
+                        .expect("the connection carries a stream")
+                        .2
+                        .expect("the stream ends with a trailer");
+                    let mut ack = vec![0x91, 0xcf];
+                    ack.extend_from_slice(&num_results.to_be_bytes());
+                    stream
+                        .write_all(&ack)
+                        .expect("the acknowledgement can be sent");
+                }
+                connections.push(received);
+            }
+            connections
+        })
+    }
+
+    /// Decodes the bytes of one connection.
+    ///
+    /// # Returns
+    ///
+    /// A tuple on success, containing:
+    ///
+    /// * The handshake.
+    /// * The result frames.
+    /// * The trailer's count, if the connection ends with a trailer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`rmp_serde::decode::from_read`]'s return values on failure.
+    fn decode_stream(data: &[u8]) -> anyhow::Result<(Handshake, Vec<Frame>, Option<u64>)> {
+        let mut remaining = data;
+        let handshake = rmp_serde::decode::from_read(&mut remaining)?;
+        let mut frames = Vec::new();
+        while !remaining.is_empty() {
+            if 0x91 == remaining[0] {
+                let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
+                return Ok((handshake, frames, Some(num_results)));
+            }
+            frames.push(rmp_serde::decode::from_read(&mut remaining)?);
+        }
+        Ok((handshake, frames, None))
+    }
+
+    /// Runs one task over the test archive with `output_handle`.
+    ///
+    /// # Returns
+    ///
+    /// Whether the `clp-s` subprocess searched the archive, on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`SearchTask::new`]'s return values on failure.
+    /// * Forwards [`SearchTask::run`]'s return values on failure.
+    fn run_with_output(
+        resources: &AdapterResources,
+        clp_s_query_option: &ClpSQueryOption,
+        output_handle: &OutputHandle,
+    ) -> anyhow::Result<bool> {
+        let ctx = task_context();
+        let config = fs_config();
+        SearchTask::new(
+            &ctx,
+            &config,
+            QUERY_JOB_ID,
+            clp_s_query_option,
+            archive(Some(DATASET)),
+            output_handle,
+        )?
+        .run(resources)
+    }
+
     /// Runs one task over the test archive.
     ///
     /// # Returns
@@ -846,8 +1068,7 @@ mod tests {
             config,
             QUERY_JOB_ID,
             clp_s_query_option,
-            archive_id(),
-            Some(DATASET),
+            archive(Some(DATASET)),
             &output_handle,
         )?
         .run(resources)
@@ -892,8 +1113,7 @@ mod tests {
             &SpiderTaskExecutorConfig::default(),
             QUERY_JOB_ID,
             &option,
-            archive_id(),
-            None,
+            archive(None),
             &results_cache(UNREACHABLE_URI),
         )
         .expect_err("the clp storage engine is unsupported");
@@ -903,8 +1123,7 @@ mod tests {
             &fs_config(),
             QUERY_JOB_ID,
             &option,
-            archive_id(),
-            None,
+            archive(None),
             &OutputHandle::File,
         )
         .expect_err("the file output handler is unsupported");
@@ -924,12 +1143,17 @@ mod tests {
             &config,
             QUERY_JOB_ID,
             &option,
-            archive_id(),
-            None,
+            archive(None),
             &output_handle,
         )?;
         assert_eq!(task.dataset, "default");
-        assert_eq!(task.results_cache_uri, UNREACHABLE_URI);
+        assert_eq!(
+            task.output,
+            TaskOutput::ResultsCache {
+                uri: UNREACHABLE_URI
+            }
+        );
+        assert_eq!(task.task_index, TASK_INDEX);
 
         let location = resolve_archive_location(&resources, &config, DATASET, &archive_id())?;
         let ArchiveLocation::File(path) = location else {
@@ -1170,8 +1394,7 @@ mod tests {
             &config,
             QUERY_JOB_ID,
             &option,
-            archive_id(),
-            Some(DATASET),
+            archive(Some(DATASET)),
             &output_handle,
         )?;
         let run = |fault| {
@@ -1227,31 +1450,163 @@ mod tests {
     }
 
     #[test]
+    fn supported_archives_are_streamed_in_process() -> anyhow::Result<()> {
+        let home = TestHome::new();
+        home.stage("search.ts.clps");
+        let resources = home.resources(ReaderContext::builder().build()?);
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let address = listener.local_addr()?;
+        let connections = capture(listener, true);
+        assert!(!run_with_output(
+            &resources,
+            &query_option("level: WARN"),
+            &network(address)
+        )?);
+        assert!(!run_with_output(
+            &resources,
+            &query_option("no_such_key: 1"),
+            &network(address)
+        )?);
+        drop(TcpStream::connect(address)?);
+        let connections = connections
+            .join()
+            .map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
+        assert_eq!(home.clp_s_args(), None);
+        assert_eq!(
+            connections.len(),
+            1,
+            "searches without matches never connect"
+        );
+
+        let (handshake, frames, num_results) = decode_stream(&connections[0])?;
+        assert_eq!(
+            handshake,
+            (
+                2,
+                SESSION_TOKEN.to_owned(),
+                TASK_INDEX,
+                ARCHIVE_ID.to_owned()
+            )
+        );
+        let mut result_indices = Vec::new();
+        for (result_index, timestamp_ms, message) in frames {
+            assert!(timestamp_ms > 0, "{message}");
+            assert!(message.ends_with("}\n"), "{message}");
+            result_indices.push(result_index);
+        }
+        assert!(result_indices.len() > 1);
+        assert_eq!(
+            result_indices,
+            (0..result_indices.len() as u64).collect::<Vec<_>>()
+        );
+        assert_eq!(num_results, Some(result_indices.len() as u64));
+        Ok(())
+    }
+
+    #[test]
+    fn in_process_streams_fail_without_an_acknowledgement() -> anyhow::Result<()> {
+        let home = TestHome::new();
+        home.stage("search.ts.clps");
+        let resources = home.resources(ReaderContext::builder().build()?);
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let address = listener.local_addr()?;
+        let connections = capture(listener, false);
+        let error = run_with_output(&resources, &query_option("level: WARN"), &network(address))
+            .expect_err("the listener closes without acknowledging");
+        drop(TcpStream::connect(address)?);
+        let connections = connections
+            .join()
+            .map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
+        assert!(
+            matches!(
+                error.downcast_ref::<ReadError>(),
+                Some(ReadError::Sink(sink)) if matches!(**sink, SinkError::DownstreamClosed)
+            ),
+            "{error:?}"
+        );
+        assert_eq!(home.clp_s_args(), None);
+        assert_eq!(connections.len(), 1);
+        let (_, frames, num_results) = decode_stream(&connections[0])?;
+        assert_eq!(num_results, Some(frames.len() as u64));
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_archives_are_streamed_by_clp_s() -> anyhow::Result<()> {
+        let home = TestHome::new();
+        home.stage("reject/scalars.mfa");
+        let resources = home.resources(ReaderContext::builder().build()?);
+        let address = SocketAddr::from(([127, 0, 0, 1], 4242));
+        let option = ClpSQueryOption {
+            max_num_results: std::num::NonZeroU32::new(5),
+            end_timestamp_millisecs: Some(9),
+            ..query_option("a: 1")
+        };
+        assert!(run_with_output(&resources, &option, &network(address))?);
+        let staging = home.path().join("archives").join(DATASET);
+        let staging = staging.to_string_lossy();
+        let task_index = TASK_INDEX.to_string();
+        assert_eq!(
+            home.clp_s_args()
+                .as_deref()
+                .and_then(|args| args.split_last())
+                .map(|(_, args)| args),
+            Some(
+                [
+                    "s",
+                    staging.as_ref(),
+                    "--archive-id",
+                    ARCHIVE_ID,
+                    "a: 1",
+                    "--tle",
+                    "9",
+                    "network",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "4242",
+                    "--session-token",
+                    SESSION_TOKEN,
+                    "--task-index",
+                    task_index.as_str(),
+                ]
+                .map(str::to_owned)
+                .as_slice()
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn requests_carry_the_time_bounds_and_the_result_limit() -> anyhow::Result<()> {
         let config = fs_config();
         let ctx = task_context();
         let output_handle = results_cache(UNREACHABLE_URI);
+        let network_handle = network(SocketAddr::from(([127, 0, 0, 1], 4242)));
         let limit = std::num::NonZeroU32::new(5).expect("5 is nonzero");
-        for (option, order) in [
-            (query_option("a: 1"), ResultOrder::Scan),
+        let limited = ClpSQueryOption {
+            max_num_results: Some(limit),
+            begin_timestamp_millisecs: Some(10),
+            end_timestamp_millisecs: Some(20),
+            ..query_option("a: 1")
+        };
+        for (option, output_handle, order) in [
+            (query_option("a: 1"), &output_handle, ResultOrder::Scan),
             (
-                ClpSQueryOption {
-                    max_num_results: Some(limit),
-                    begin_timestamp_millisecs: Some(10),
-                    end_timestamp_millisecs: Some(20),
-                    ..query_option("a: 1")
-                },
+                limited.clone(),
+                &output_handle,
                 ResultOrder::LatestFirst { limit },
             ),
+            (query_option("a: 1"), &network_handle, ResultOrder::Scan),
+            (limited, &network_handle, ResultOrder::Scan),
         ] {
             let request = SearchTask::new(
                 &ctx,
                 &config,
                 QUERY_JOB_ID,
                 &option,
-                archive_id(),
-                Some(DATASET),
-                &output_handle,
+                archive(Some(DATASET)),
+                output_handle,
             )?
             .scan_request()?;
             assert_eq!(request.order(), order);

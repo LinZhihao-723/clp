@@ -45,7 +45,7 @@ impl MemoryBudget {
     pub fn try_reserve(self: &Arc<Self>, size: u64) -> Result<MemoryReservation, ResourceError> {
         let limit_size = self.limit_size.unwrap_or(u64::MAX);
         self.reserved_size
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |reserved_size| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |reserved_size| {
                 reserved_size
                     .checked_add(size)
                     .filter(|&new_reserved_size| new_reserved_size <= limit_size)

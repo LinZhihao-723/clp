@@ -41,6 +41,7 @@ use clp_s_difftest::multiset::RecordMultiset;
 use clp_s_reader::ReaderContext;
 use clp_s_spider_adapter::AdapterConfig;
 use clp_s_spider_adapter::AdapterResources;
+use clp_s_spider_adapter::ArchiveToSearch;
 use clp_s_spider_adapter::search;
 use clp_s_spider_adapter::search_with_clp_s_subprocess;
 use mongodb::bson::Document;
@@ -355,6 +356,7 @@ impl Harness {
         SpiderTaskExecutorConfig {
             package: Package {
                 storage_engine: StorageEngine::ClpS,
+                ..Package::default()
             },
             archive_output: ArchiveOutput {
                 storage,
@@ -405,8 +407,11 @@ impl Harness {
             &self.config(storage),
             query_job_id,
             option,
-            archive_id,
-            Some(DATASET),
+            ArchiveToSearch {
+                id: archive_id,
+                dataset: Some(DATASET),
+                task_index: 0,
+            },
             &output_handle,
         )
     }
@@ -688,7 +693,6 @@ fn query_option(case: &QueryCase, limit: Option<NonZeroU32>) -> ClpSQueryOption 
         begin_timestamp_millisecs: case.options.time_begin_ms,
         end_timestamp_millisecs: case.options.time_end_ms,
         ignore_case: case.options.is_case_insensitive,
-        count_by_time_bucket_size_millisecs: None,
     }
 }
 
@@ -788,7 +792,6 @@ fn retried_tasks_insert_no_duplicates() -> anyhow::Result<()> {
         begin_timestamp_millisecs: None,
         end_timestamp_millisecs: None,
         ignore_case: false,
-        count_by_time_bucket_size_millisecs: None,
     };
     for storage in [Storage::Fs, Storage::S3] {
         let query_job_id = harness.next_job_id();
@@ -835,7 +838,6 @@ fn unsupported_archives_fall_back_to_clp_s() -> anyhow::Result<()> {
             begin_timestamp_millisecs: None,
             end_timestamp_millisecs: None,
             ignore_case: false,
-            count_by_time_bucket_size_millisecs: None,
         };
         let query_job_id = harness.next_job_id();
         harness.run_task(storage, query_job_id, archive_id, &option, false)?;

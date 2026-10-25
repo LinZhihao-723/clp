@@ -4,6 +4,7 @@
 
 use std::ffi::OsString;
 use std::io::Read;
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -17,13 +18,16 @@ use clp_rust_utils::clp_config::AwsAuthentication;
 use clp_rust_utils::clp_config::package::config::ArchiveOutputStorage;
 use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::job_config::QueryJobId;
+use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::s3::generate_s3_url;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
+use clp_rust_utils::task_io::query::QueryTaskIndex;
 use clp_rust_utils::types::ArchiveId;
 use non_empty_string::NonEmptyString;
 
 use crate::AdapterResources;
+use crate::search::ArchiveToSearch;
 use crate::search::SearchTask;
 
 /// Searches one archive by spawning the C++ `clp-s`, exactly as `clp-tdl-package`'s `search` task
@@ -41,8 +45,7 @@ pub fn search_with_clp_s_subprocess(
     config: &SpiderTaskExecutorConfig,
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
-    archive_id: ArchiveId,
-    dataset: Option<&str>,
+    archive: ArchiveToSearch<'_>,
     output_handle: &OutputHandle,
 ) -> anyhow::Result<()> {
     let task = SearchTask::new(
@@ -50,8 +53,7 @@ pub fn search_with_clp_s_subprocess(
         config,
         query_job_id,
         clp_s_query_option,
-        archive_id,
-        dataset,
+        archive,
         output_handle,
     )?;
     task.run_clp_s_subprocess(AdapterResources::global()?)
@@ -137,33 +139,7 @@ pub fn build_clp_s_search_args_for_result_cache(
     query_job_id: QueryJobId,
     dataset: &str,
 ) -> Vec<OsString> {
-    let mut args = vec![OsString::from("s")];
-    match archive_selector {
-        ArchiveSelector::Directory { path, archive_id } => {
-            args.push(path.as_os_str().to_os_string());
-            args.push(OsString::from("--archive-id"));
-            args.push(OsString::from(archive_id.to_string()));
-        }
-        ArchiveSelector::ObjectUrl(url) => {
-            args.push(OsString::from(url));
-            args.push(OsString::from("--auth"));
-            args.push(OsString::from("s3"));
-        }
-    }
-
-    args.push(OsString::from(clp_s_query_option.query_string.as_str()));
-    if let Some(begin_timestamp_millisecs) = clp_s_query_option.begin_timestamp_millisecs {
-        args.push(OsString::from("--tge"));
-        args.push(OsString::from(begin_timestamp_millisecs.to_string()));
-    }
-    if let Some(end_timestamp_millisecs) = clp_s_query_option.end_timestamp_millisecs {
-        args.push(OsString::from("--tle"));
-        args.push(OsString::from(end_timestamp_millisecs.to_string()));
-    }
-    if clp_s_query_option.ignore_case {
-        args.push(OsString::from("--ignore-case"));
-    }
-
+    let mut args = build_clp_s_search_query_args(archive_selector, clp_s_query_option);
     args.extend([
         OsString::from("results-cache"),
         OsString::from("--uri"),
@@ -176,6 +152,35 @@ pub fn build_clp_s_search_args_for_result_cache(
         args.push(OsString::from(max_num_results.to_string()));
     }
     args.extend([OsString::from("--dataset"), OsString::from(dataset)]);
+    args
+}
+
+/// Mirror of `clp-tdl-package`'s `build_clp_s_search_args_for_network`: builds the clp-s
+/// command-line arguments for a single-archive search streaming to a network destination.
+///
+/// # Returns
+///
+/// The ordered clp-s arguments.
+pub fn build_clp_s_search_args_for_network(
+    archive_selector: &ArchiveSelector,
+    clp_s_query_option: &ClpSQueryOption,
+    host: &str,
+    port: NonZeroU16,
+    session_token: SessionToken,
+    task_index: QueryTaskIndex,
+) -> Vec<OsString> {
+    let mut args = build_clp_s_search_query_args(archive_selector, clp_s_query_option);
+    args.extend([
+        OsString::from("network"),
+        OsString::from("--host"),
+        OsString::from(host),
+        OsString::from("--port"),
+        OsString::from(port.to_string()),
+        OsString::from("--session-token"),
+        OsString::from(session_token.to_string()),
+        OsString::from("--task-index"),
+        OsString::from(task_index.to_string()),
+    ]);
     args
 }
 
@@ -259,6 +264,45 @@ pub fn clp_binary_path(clp_home: &Path, binary: &str) -> PathBuf {
     clp_home.join("bin").join(binary)
 }
 
+/// Mirror of `clp-tdl-package`'s `build_clp_s_search_query_args`: builds the clp-s command-line
+/// arguments that select the archive and the query to run on it, shared by every output handler.
+///
+/// # Returns
+///
+/// The ordered clp-s arguments, which the caller completes with an output handler.
+fn build_clp_s_search_query_args(
+    archive_selector: &ArchiveSelector,
+    clp_s_query_option: &ClpSQueryOption,
+) -> Vec<OsString> {
+    let mut args = vec![OsString::from("s")];
+    match archive_selector {
+        ArchiveSelector::Directory { path, archive_id } => {
+            args.push(path.as_os_str().to_os_string());
+            args.push(OsString::from("--archive-id"));
+            args.push(OsString::from(archive_id.to_string()));
+        }
+        ArchiveSelector::ObjectUrl(url) => {
+            args.push(OsString::from(url));
+            args.push(OsString::from("--auth"));
+            args.push(OsString::from("s3"));
+        }
+    }
+
+    args.push(OsString::from(clp_s_query_option.query_string.as_str()));
+    if let Some(begin_timestamp_millisecs) = clp_s_query_option.begin_timestamp_millisecs {
+        args.push(OsString::from("--tge"));
+        args.push(OsString::from(begin_timestamp_millisecs.to_string()));
+    }
+    if let Some(end_timestamp_millisecs) = clp_s_query_option.end_timestamp_millisecs {
+        args.push(OsString::from("--tle"));
+        args.push(OsString::from(end_timestamp_millisecs.to_string()));
+    }
+    if clp_s_query_option.ignore_case {
+        args.push(OsString::from("--ignore-case"));
+    }
+    args
+}
+
 /// Mirror of `clp-tdl-package`'s `s3_credential_env`: resolves the AWS credential env vars clp-s
 /// needs to access the S3 objects.
 ///
@@ -331,6 +375,7 @@ fn s3_credential_env(
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::num::NonZeroU16;
     use std::num::NonZeroU32;
     use std::path::Path;
     use std::path::PathBuf;
@@ -349,6 +394,7 @@ mod tests {
     use non_empty_string::NonEmptyString;
 
     use super::ArchiveSelector;
+    use super::build_clp_s_search_args_for_network;
     use super::build_clp_s_search_args_for_result_cache;
     use super::resolve_archive_input;
     use super::run_clp_s_search;
@@ -373,7 +419,6 @@ mod tests {
             begin_timestamp_millisecs: None,
             end_timestamp_millisecs: None,
             ignore_case: false,
-            count_by_time_bucket_size_millisecs: None,
         }
     }
 
@@ -407,6 +452,7 @@ mod tests {
         SpiderTaskExecutorConfig {
             package: Package {
                 storage_engine: StorageEngine::ClpS,
+                ..Package::default()
             },
             archive_output: ArchiveOutput {
                 storage: ArchiveOutputStorage::S3 {
@@ -511,11 +557,86 @@ mod tests {
     }
 
     #[test]
+    fn network_args_carry_every_option_in_the_package_order() {
+        const SESSION_TOKEN: &str = "6f1c1c64-1e0a-4be8-a7a6-6a0e4d3c2b1a";
+
+        let session_token = SESSION_TOKEN.parse().expect("valid session token UUID");
+        let port = NonZeroU16::new(52_000).expect("52000 is nonzero");
+        let clp_s_query_option = ClpSQueryOption {
+            max_num_results: Some(NonZeroU32::new(7).expect("7 is nonzero")),
+            begin_timestamp_millisecs: Some(1_310_138_944_000),
+            end_timestamp_millisecs: Some(1_311_208_074_120),
+            ignore_case: true,
+            ..unbounded_query_option()
+        };
+        assert_eq!(
+            build_clp_s_search_args_for_network(
+                &directory_selector(),
+                &clp_s_query_option,
+                "search-result-listener",
+                port,
+                session_token,
+                12,
+            ),
+            [
+                "s",
+                "/archives/ds1",
+                "--archive-id",
+                ARCHIVE_ID,
+                "level: \"ERROR\"",
+                "--tge",
+                "1310138944000",
+                "--tle",
+                "1311208074120",
+                "--ignore-case",
+                "network",
+                "--host",
+                "search-result-listener",
+                "--port",
+                "52000",
+                "--session-token",
+                SESSION_TOKEN,
+                "--task-index",
+                "12",
+            ]
+            .map(OsString::from)
+        );
+        assert_eq!(
+            build_clp_s_search_args_for_network(
+                &ArchiveSelector::ObjectUrl("https://bucket.s3.amazonaws.com/k".to_owned()),
+                &unbounded_query_option(),
+                "127.0.0.1",
+                port,
+                session_token,
+                0,
+            ),
+            [
+                "s",
+                "https://bucket.s3.amazonaws.com/k",
+                "--auth",
+                "s3",
+                "level: \"ERROR\"",
+                "network",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "52000",
+                "--session-token",
+                SESSION_TOKEN,
+                "--task-index",
+                "0",
+            ]
+            .map(OsString::from)
+        );
+    }
+
+    #[test]
     fn fs_inputs_join_the_dataset_and_need_no_credentials() -> anyhow::Result<()> {
         let runtime = multi_thread_runtime();
         let config = SpiderTaskExecutorConfig {
             package: Package {
                 storage_engine: StorageEngine::ClpS,
+                ..Package::default()
             },
             archive_output: ArchiveOutput {
                 storage: ArchiveOutputStorage::Fs {

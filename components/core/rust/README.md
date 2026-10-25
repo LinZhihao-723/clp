@@ -18,6 +18,8 @@ Documentation:
   semantics.
 - [`docs/prototyping-and-benchmark.md`](docs/prototyping-and-benchmark.md): conformance against
   the C++ `clp-s` and indicative query performance.
+- [`docs/streaming-search-integration-with-spider.md`](docs/streaming-search-integration-with-spider.md):
+  the in-process Rust search on the Spider streaming-search path, and its smoke test.
 - [`docs/api-overview.md`](docs/api-overview.md): the public archive iteration API.
 - [`tests/README.md`](tests/README.md): the C++ ground-truth corpus.
 
@@ -35,13 +37,13 @@ Documentation:
 | `clp-s-json` | JSON rendering of table batches through compiled templates. |
 | `clp-s-query` | KQL parsing, the query IR, normalization and the reference evaluator. |
 | `clp-s-search` | Archive-bound planning (pruning, dictionary prefilter) and vectorized filters. |
-| `clp-s-wire` | Wire formats shared with C++ consumers (msgpack tuples, results-cache fields). |
+| `clp-s-wire` | Wire formats shared with C++ consumers (msgpack tuples, protocol-v2 stream, results-cache fields). |
 | `clp-s-exec` | The execution engine: archives, scans, sessions, sinks protocol, top-k, errors. |
 | `clp-s-reader` | The public facade of the reader library. |
-| `clp-s-sinks` | Built-in sinks: JSON lines, msgpack file/network, in-memory collector. |
+| `clp-s-sinks` | Built-in sinks: JSON lines, msgpack file/network, protocol-v2 stream, in-memory collector. |
 | `clp-s-results-cache` | The MongoDB results-cache sink. |
 | `clp-s-cli` | `clp-s-rs`, the command-line front end (`extract`, `search`). |
-| `clp-s-spider-adapter` | An in-process Spider search task that writes into the results cache. |
+| `clp-s-spider-adapter` | An in-process Spider search task that writes into the results cache or a protocol-v2 stream. |
 | `clp-s-difftest` | `clp-s-difftest`, the differential harness against the C++ `clp-s`. |
 
 ## Build, lint and test
@@ -66,7 +68,9 @@ cargo test --workspace
   `--ignored`. Tests that need MongoDB, S3 or both run through
   `crates/clp-s-results-cache/scripts/run-mongo-tests.sh`,
   `crates/clp-s-object-store/scripts/run-s3-tests.sh` and
-  `crates/clp-s-spider-adapter/scripts/run-e2e-tests.sh` (docker).
+  `crates/clp-s-spider-adapter/scripts/run-e2e-tests.sh` (docker). The protocol-v2 network tests
+  of the Spider adapter only need a C++ `clp-s` with that output:
+  `CLP_S=<clp-s> cargo test -p clp-s-spider-adapter --test network -- --ignored`.
 
 ## Differential tests
 

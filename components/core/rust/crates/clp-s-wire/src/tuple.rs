@@ -1,6 +1,9 @@
 //! The msgpack search-result tuple (`OutputHandlerImpl.cpp`, `FileOutputHandler::write`).
 
 use crate::WireError;
+use crate::encode::msgpack_error;
+use crate::encode::write_message;
+use crate::encode::write_str;
 
 /// One search result as the C++ file and network outputs write it: the msgpack array
 /// `(timestamp, message, orig_file_path, archive_id, log_event_idx)`, byte-compatible with C++.
@@ -53,65 +56,12 @@ impl SearchResultTuple<'_> {
 
         rmp::encode::write_array_len(output, NUM_FIELDS).map_err(msgpack_error)?;
         rmp::encode::write_sint(output, self.timestamp_ms).map_err(msgpack_error)?;
-        let message = String::from_utf8_lossy(self.message);
-        let message_size = message
-            .len()
-            .checked_add(1)
-            .ok_or_else(|| too_long("message", message.len()))?;
-        write_str_header(output, "message", message_size)?;
-        output.extend_from_slice(message.as_bytes());
-        output.push(b'\n');
+        write_message(output, "message", self.message)?;
         write_str(output, "orig_file_path", self.orig_file_path)?;
         write_str(output, "archive_id", self.archive_id)?;
         rmp::encode::write_sint(output, self.log_event_idx).map_err(msgpack_error)?;
         Ok(())
     }
-}
-
-/// Appends the msgpack string `text` to `output`.
-///
-/// # Errors
-///
-/// Returns an error if:
-///
-/// * Forwards [`write_str_header`]'s return values on failure.
-fn write_str(output: &mut Vec<u8>, field: &str, text: &str) -> Result<(), WireError> {
-    write_str_header(output, field, text.len())?;
-    output.extend_from_slice(text.as_bytes());
-    Ok(())
-}
-
-/// Appends the header of a msgpack string of `size` bytes to `output`.
-///
-/// # Errors
-///
-/// Returns an error if:
-///
-/// * [`WireError::Msgpack`] if `size` exceeds msgpack's `u32` length limit.
-fn write_str_header(output: &mut Vec<u8>, field: &str, size: usize) -> Result<(), WireError> {
-    let length = u32::try_from(size).map_err(|_| too_long(field, size))?;
-    rmp::encode::write_str_len(output, length).map_err(msgpack_error)?;
-    Ok(())
-}
-
-/// # Returns
-///
-/// The error of a `field` string of `size` bytes that msgpack cannot hold.
-fn too_long(field: &str, size: usize) -> WireError {
-    WireError::Msgpack(
-        format!("the {field} of {size} bytes exceeds the msgpack string limit").into(),
-    )
-}
-
-/// # Type Parameters
-///
-/// * `ErrorType` - The error of the failed msgpack write.
-///
-/// # Returns
-///
-/// The wire error of a failed msgpack write.
-fn msgpack_error<ErrorType: std::fmt::Display>(error: ErrorType) -> WireError {
-    WireError::Msgpack(error.to_string().into())
 }
 
 #[cfg(test)]
