@@ -85,6 +85,12 @@ impl EncodedBatch for Bytes {
     }
 }
 
+impl EncodedBatch for Vec<u8> {
+    fn size(&self) -> usize {
+        self.len()
+    }
+}
+
 impl EncodedBatch for Vec<Bytes> {
     fn size(&self) -> usize {
         self.iter().map(Bytes::len).sum()

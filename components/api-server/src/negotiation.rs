@@ -28,26 +28,33 @@ impl NegotiatedEncoding {
     /// # Returns
     ///
     /// [`Self::ArrowIpc`] if the request accepts [`ARROW_STREAM_CONTENT_TYPE`] with a nonzero
-    /// quality, or [`Self::Sse`] otherwise.
+    /// quality that is at least the quality of `text/event-stream`, or [`Self::Sse`] otherwise.
     #[must_use]
     pub fn from_headers(headers: &HeaderMap) -> Self {
-        let accepts_arrow = headers
+        let media_ranges: Vec<MediaRange<'_>> = headers
             .get_all(ACCEPT)
             .iter()
             .filter_map(|value| value.to_str().ok())
             .flat_map(|value| value.split(','))
-            .any(|media_range| {
-                let mut parameters = media_range.split(';').map(str::trim);
-                parameters.next().is_some_and(|media_type| {
-                    media_type.eq_ignore_ascii_case(ARROW_STREAM_CONTENT_TYPE)
-                }) && !parameters.any(|parameter| {
-                    parameter
-                        .strip_prefix("q=")
-                        .and_then(|quality| quality.parse::<f32>().ok())
-                        .is_some_and(|quality| quality <= 0.0)
+            .filter_map(MediaRange::parse)
+            .collect();
+        let quality_of = |most_specific_first: &[&str]| {
+            most_specific_first
+                .iter()
+                .find_map(|media_type| {
+                    media_ranges
+                        .iter()
+                        .filter(|media_range| {
+                            media_range.media_type.eq_ignore_ascii_case(media_type)
+                        })
+                        .map(|media_range| media_range.quality)
+                        .reduce(f32::max)
                 })
-            });
-        if accepts_arrow {
+                .unwrap_or(0.0)
+        };
+        let arrow_quality = quality_of(&[ARROW_STREAM_CONTENT_TYPE]);
+        let sse_quality = quality_of(&[SSE_CONTENT_TYPE, "text/*", "*/*"]);
+        if arrow_quality > 0.0 && arrow_quality >= sse_quality {
             Self::ArrowIpc
         } else {
             Self::Sse
@@ -100,6 +107,38 @@ impl ResultEncoder for NegotiatedEncoder {
     }
 }
 
+const SSE_CONTENT_TYPE: &str = "text/event-stream";
+const DEFAULT_QUALITY: f32 = 1.0;
+
+/// One media range of an `Accept` header.
+struct MediaRange<'header_lifetime> {
+    media_type: &'header_lifetime str,
+    quality: f32,
+}
+
+impl<'header_lifetime> MediaRange<'header_lifetime> {
+    /// Parses a media range, ignoring a quality parameter that isn't a number.
+    ///
+    /// # Returns
+    ///
+    /// The parsed media range, or `None` if `media_range` names no media type.
+    fn parse(media_range: &'header_lifetime str) -> Option<Self> {
+        let mut parameters = media_range.split(';').map(str::trim);
+        let media_type = parameters
+            .next()
+            .filter(|media_type| !media_type.is_empty())?;
+        let quality = parameters
+            .filter_map(|parameter| parameter.split_once('='))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
+            .and_then(|(_, quality)| quality.trim().parse::<f32>().ok())
+            .unwrap_or(DEFAULT_QUALITY);
+        Some(Self {
+            media_type,
+            quality,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::HeaderMap;
@@ -133,6 +172,27 @@ mod tests {
             (
                 &["application/vnd.apache.arrow.file"][..],
                 NegotiatedEncoding::Sse,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream;Q=0"][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream;q=0.1, text/event-stream"][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream;q=0.5, */*"][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream;q=0.5, text/*;q=0.5"][..],
+                NegotiatedEncoding::ArrowIpc,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream;q=0.5, text/*;q=0.9, \
+                   text/event-stream;q=0.2"][..],
+                NegotiatedEncoding::ArrowIpc,
             ),
         ] {
             let mut headers = HeaderMap::new();

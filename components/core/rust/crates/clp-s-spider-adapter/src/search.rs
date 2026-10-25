@@ -975,9 +975,8 @@ mod tests {
                 }
                 if is_acknowledging {
                     let num_results = decode_stream(&received)
-                        .expect("the connection carries a stream")
-                        .2
-                        .expect("the stream ends with a trailer");
+                        .expect("the connection carries a stream ending with a trailer")
+                        .2;
                     let mut ack = vec![0x91, 0xcf];
                     ack.extend_from_slice(&num_results.to_be_bytes());
                     stream
@@ -1008,7 +1007,7 @@ mod tests {
     /// * Forwards [`rmp_serde::decode::from_read`]'s return values on failure.
     /// * Forwards [`arrow_ipc::reader::StreamReader::try_new`]'s return values on failure.
     /// * Forwards [`arrow_ipc::reader::StreamReader`]'s batch errors on failure.
-    fn decode_stream(data: &[u8]) -> anyhow::Result<(Handshake, Vec<Frame>, Option<u64>)> {
+    fn decode_stream(data: &[u8]) -> anyhow::Result<(Handshake, Vec<Frame>, u64)> {
         use arrow_array::Array;
 
         let mut remaining = data;
@@ -1035,7 +1034,7 @@ mod tests {
             }
         }
         let (num_results,): (u64,) = rmp_serde::decode::from_read(&mut remaining)?;
-        Ok((handshake, frames, Some(num_results)))
+        Ok((handshake, frames, num_results))
     }
 
     /// Runs one task over the test archive with `output_handle`.
@@ -1523,7 +1522,7 @@ mod tests {
             result_indices,
             (0..result_indices.len() as u64).collect::<Vec<_>>()
         );
-        assert_eq!(num_results, Some(result_indices.len() as u64));
+        assert_eq!(num_results, result_indices.len() as u64);
         Ok(())
     }
 
@@ -1551,7 +1550,7 @@ mod tests {
         assert_eq!(home.clp_s_args(), None);
         assert_eq!(connections.len(), 1);
         let (_, frames, num_results) = decode_stream(&connections[0])?;
-        assert_eq!(num_results, Some(frames.len() as u64));
+        assert_eq!(num_results, frames.len() as u64);
         Ok(())
     }
 

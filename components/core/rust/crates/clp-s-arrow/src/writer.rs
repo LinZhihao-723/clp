@@ -296,8 +296,6 @@ fn message_array(
             None,
         )
     };
-    // The construction validates the UTF-8 of the copied texts once, so that only a batch with
-    // invalid UTF-8 pays for the per-record replacement.
     build(false).or_else(|_| build(true))
 }
 

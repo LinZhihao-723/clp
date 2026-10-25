@@ -25,10 +25,10 @@ use crate::cursor::TaskCursor;
 use crate::error::ConnectionError;
 use crate::error::ProtocolError;
 use crate::listener::PendingHandshake;
-use crate::protocol::ARROW_PROTOCOL_VERSION;
 use crate::protocol::Ack;
 use crate::protocol::Frame;
 use crate::protocol::Handshake;
+use crate::protocol::ProtocolVersion;
 use crate::protocol::ResultFrame;
 use crate::protocol::Trailer;
 use crate::session;
@@ -186,8 +186,10 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
         );
         Ok(Self {
             encoder: session.encoding.encoder(cursor.archive_id()),
-            arrow_stream: (ARROW_PROTOCOL_VERSION == handshake.version)
-                .then(|| ArrowStreamReader::new(cursor.archive_id())),
+            arrow_stream: match handshake.version {
+                ProtocolVersion::V2 => None,
+                ProtocolVersion::V3 => Some(ArrowStreamReader::new(cursor.archive_id())),
+            },
             session,
             cursor,
             num_pending_results: 0,
@@ -239,9 +241,6 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
             .into());
         }
         if self.arrow_stream.is_some() {
-            // Moves the stream that follows the handshake to the start of an allocation, which
-            // keeps the buffers of its IPC messages aligned, since every message is a multiple of
-            // 8 bytes long.
             buffer = BytesMut::from(&buffer[..]);
         }
 

@@ -72,10 +72,6 @@ impl TaskCursor {
     /// Claims the results at `first_result_index..first_result_index + num_results` for the
     /// calling connection, as one batch.
     ///
-    /// The batch may overlap results that another attempt of the task already emitted. Since every
-    /// attempt streams the same results in the same order, only the unclaimed suffix of the batch
-    /// must be emitted, wherever the batch boundaries of the attempts fall.
-    ///
     /// # Returns
     ///
     /// The number of leading results of the batch that have already been emitted. The caller must

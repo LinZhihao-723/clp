@@ -123,6 +123,12 @@ pub struct ArrowStreamReader {
 }
 
 impl ArrowStreamReader {
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// A reader of the stream of a connection that streams the results of the archive
+    /// `archive_id`.
     #[must_use]
     pub fn new(archive_id: ArchiveId) -> Self {
         Self {
@@ -297,6 +303,9 @@ const IPC_ALIGNMENT: usize = 8;
 /// The bytes before an IPC message's metadata: the continuation marker and the metadata length.
 const IPC_PREFIX_LEN: usize = 8;
 
+const MAX_IPC_METADATA_LEN: usize = 1024 * 1024;
+const MAX_IPC_MESSAGE_LEN: usize = 64 * 1024 * 1024;
+
 /// The state of an [`ArrowStreamReader`].
 #[derive(Debug)]
 enum State {
@@ -364,9 +373,10 @@ enum IpcFrame {
 ///
 /// * [`ProtocolError::MalformedArrowStream`] if:
 ///   * The frame doesn't start with the continuation marker.
-///   * The metadata length isn't a multiple of 8.
+///   * The metadata length isn't a multiple of 8, or exceeds [`MAX_IPC_METADATA_LEN`].
 ///   * The metadata isn't a valid `Message` flatbuffer.
-///   * The message's body length is negative.
+///   * The message's body length is negative or isn't a multiple of 8.
+///   * The message's length exceeds [`MAX_IPC_MESSAGE_LEN`].
 fn split_message(buffer: &mut BytesMut) -> Result<IpcFrame, ProtocolError> {
     if buffer.len() < IPC_PREFIX_LEN {
         return Ok(IpcFrame::Incomplete(IPC_PREFIX_LEN));
@@ -390,6 +400,12 @@ fn split_message(buffer: &mut BytesMut) -> Result<IpcFrame, ProtocolError> {
             "IPC metadata of {metadata_len} bytes isn't 8-byte aligned"
         )));
     }
+    if metadata_len > MAX_IPC_METADATA_LEN {
+        return Err(malformed(&format!(
+            "IPC metadata of {metadata_len} bytes exceeds the limit of {MAX_IPC_METADATA_LEN} \
+             bytes"
+        )));
+    }
     let header_len = IPC_PREFIX_LEN + metadata_len;
     if buffer.len() < header_len {
         return Ok(IpcFrame::Incomplete(header_len));
@@ -398,9 +414,17 @@ fn split_message(buffer: &mut BytesMut) -> Result<IpcFrame, ProtocolError> {
         .map_err(|e| malformed(&format!("invalid IPC metadata: {e}")))?;
     let body_len = usize::try_from(message.bodyLength())
         .map_err(|_| malformed("negative IPC message body length"))?;
-    let message_len = header_len
-        .checked_add(body_len)
-        .ok_or_else(|| malformed("IPC message length overflows"))?;
+    if !body_len.is_multiple_of(IPC_ALIGNMENT) {
+        return Err(malformed(&format!(
+            "IPC message body of {body_len} bytes isn't 8-byte aligned"
+        )));
+    }
+    let message_len = header_len.saturating_add(body_len);
+    if message_len > MAX_IPC_MESSAGE_LEN {
+        return Err(malformed(&format!(
+            "IPC message of {message_len} bytes exceeds the limit of {MAX_IPC_MESSAGE_LEN} bytes"
+        )));
+    }
     if buffer.len() < message_len {
         return Ok(IpcFrame::Incomplete(message_len));
     }
@@ -720,5 +744,47 @@ mod tests {
         let mut garbage = vec![0xff, 0xff, 0xff, 0xff, 16, 0, 0, 0];
         garbage.extend_from_slice(&[0xab; 16]);
         expect_malformed(&garbage, "invalid IPC metadata");
+
+        let oversized_metadata = [0xff, 0xff, 0xff, 0xff, 0xf8, 0xff, 0xff, 0x7f];
+        expect_malformed(&oversized_metadata, "exceeds the limit");
+    }
+
+    #[test]
+    fn oversized_or_unaligned_body_is_rejected_before_it_arrives() {
+        let messages = messages(&stream(&RESULT_SCHEMA, &[batch(&[ARCHIVE_ID], &[1])]));
+        let dictionary = &messages[1];
+        let metadata_len = usize::try_from(u32::from_le_bytes(
+            dictionary[4..8]
+                .try_into()
+                .expect("the metadata length should be 4 bytes"),
+        ))
+        .expect("the metadata length should fit in `usize`");
+        let header_len = 8 + metadata_len;
+        let body_len = u64::try_from(dictionary.len() - header_len)
+            .expect("the body length should fit in `u64`");
+        let body_len_position = dictionary[8..header_len]
+            .windows(8)
+            .position(|window| window == body_len.to_le_bytes())
+            .expect("the metadata should hold the body length")
+            + 8;
+
+        for (patched_body_len, description) in [
+            (1_u64 << 40, "exceeds the limit"),
+            ((u64::MAX >> 1) & !7, "exceeds the limit"),
+            (body_len + 1, "isn't 8-byte aligned"),
+        ] {
+            let mut header = dictionary[..header_len].to_vec();
+            header[body_len_position..body_len_position + 8]
+                .copy_from_slice(&patched_body_len.to_le_bytes());
+            let error = split_message(&mut BytesMut::from(&header[..]))
+                .expect_err("the body length should be rejected");
+            let ProtocolError::MalformedArrowStream(actual) = &error else {
+                panic!("expected a malformed Arrow stream, got {error:?}");
+            };
+            assert!(
+                actual.contains(description),
+                "expected {description:?}, got {actual:?}"
+            );
+        }
     }
 }

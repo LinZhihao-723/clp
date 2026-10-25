@@ -196,7 +196,8 @@ struct QueryResultsUri {
     path = "/query/stream",
     description = "Submits a new search job and streams its results back in the same response: \
         as an Arrow IPC stream if the `Accept` header accepts \
-        `application/vnd.apache.arrow.stream`, or as Server-Sent Events (SSE) otherwise. Only \
+        `application/vnd.apache.arrow.stream` with a nonzero quality that is at least the quality \
+        of `text/event-stream`, or as Server-Sent Events (SSE) otherwise. Only \
         available when the package runs queries on Spider. If the client disconnects before the \
         end of the response, or the job's status can no longer be tracked, the job is marked as \
         cancelling.",
@@ -243,7 +244,7 @@ struct QueryResultsUri {
                         \"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\
                         \"num_incomplete_connections\":0}\n\n"
                 ),
-                ("application/vnd.apache.arrow.stream")
+                (arrow_ipc::ArrowIpcStream = "application/vnd.apache.arrow.stream")
             )
         ),
         (

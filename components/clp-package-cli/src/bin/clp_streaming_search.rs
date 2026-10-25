@@ -108,6 +108,7 @@ impl ResultEncoder for OutputEncoder {
             write!(self.batch, "{timestamp}: ").expect("writing to a `Vec` shouldn't fail");
         }
         self.batch.extend_from_slice(message.as_bytes());
+        self.batch.push(b'\n');
     }
 
     fn take_batch(&mut self) -> Vec<u8> {
@@ -317,7 +318,7 @@ mod tests {
     use super::OutputEncoding;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
-    const MESSAGE: &str = "{\"msg\":\"Transmitted block\"}\n";
+    const MESSAGE: &str = "{\"msg\":\"Transmitted block\"}";
     const TIMESTAMP: i64 = 1_700_000_000_123;
 
     /// # Returns
@@ -414,9 +415,9 @@ mod tests {
     fn results_of_one_batch_are_printed_as_whole_lines() {
         let mut encoder = output_encoder(false);
         encoder.encode(TIMESTAMP, MESSAGE);
-        encoder.encode(-1, "second\n");
+        encoder.encode(-1, "second");
         let first_batch = encoder.take_batch();
-        encoder.encode(0, "third\n");
+        encoder.encode(0, "third");
         let second_batch = encoder.take_batch();
 
         assert_eq!(

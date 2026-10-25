@@ -46,7 +46,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Submits a new search job and streams its results back in the same response: as an Arrow IPC stream if the `Accept` header accepts `application/vnd.apache.arrow.stream`, or as Server-Sent Events (SSE) otherwise. Only available when the package runs queries on Spider. If the client disconnects before the end of the response, or the job's status can no longer be tracked, the job is marked as cancelling. */
+        /** @description Submits a new search job and streams its results back in the same response: as an Arrow IPC stream if the `Accept` header accepts `application/vnd.apache.arrow.stream` with a nonzero quality that is at least the quality of `text/event-stream`, or as Server-Sent Events (SSE) otherwise. Only available when the package runs queries on Spider. If the client disconnects before the end of the response, or the job's status can no longer be tracked, the job is marked as cancelling. */
         post: operations["stream_query"];
         delete?: never;
         options?: never;
@@ -109,6 +109,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Format: binary
+         * @description The body of an Arrow IPC stream response.
+         */
+        ArrowIpcStream: string;
         /** @enum {string} */
         CompressionJobStatus: "Pending" | "Running" | "Succeeded" | "Failed" | "Killed";
         /** @description Resource usage statistics for the compression job with the specified ID. */
@@ -381,7 +386,7 @@ export interface operations {
                      *     data: {"status":"Succeeded","num_results_emitted":1,"num_duplicates_dropped":0,"num_protocol_errors":0,"num_incomplete_connections":0}
                      */
                     "text/event-stream": string;
-                    "application/vnd.apache.arrow.stream": unknown;
+                    "application/vnd.apache.arrow.stream": components["schemas"]["ArrowIpcStream"];
                 };
             };
             /** @description The query config is invalid (e.g., an empty `query_string`, an empty `datasets`, or an invalid dataset name), or sets an option that streaming search doesn't support: a nonzero `max_num_results`, `buffer_results_in_mongodb`, or `count_by_time_bucket_size_millisecs`. */

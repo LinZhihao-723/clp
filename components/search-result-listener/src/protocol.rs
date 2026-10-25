@@ -18,18 +18,34 @@ use rmp::decode::bytes::BytesReadError;
 
 use crate::error::ProtocolError;
 
-/// The protocol version whose connections send one msgpack frame per result.
-pub const PROTOCOL_VERSION: u64 = 2;
+/// A protocol version the listener accepts, with its value in the handshake as its discriminant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub enum ProtocolVersion {
+    /// Connections send one msgpack frame per result.
+    V2 = 2,
 
-/// The protocol version whose connections send their results as an Arrow IPC stream between the
-/// handshake and the trailer.
-pub const ARROW_PROTOCOL_VERSION: u64 = 3;
+    /// Connections send their results as an Arrow IPC stream between the handshake and the
+    /// trailer.
+    V3 = 3,
+}
+
+impl TryFrom<u64> for ProtocolVersion {
+    type Error = ProtocolError;
+
+    fn try_from(version: u64) -> Result<Self, ProtocolError> {
+        match version {
+            2 => Ok(Self::V2),
+            3 => Ok(Self::V3),
+            _ => Err(ProtocolError::UnsupportedVersion(version)),
+        }
+    }
+}
 
 /// The frame a search task sends first on every connection.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Handshake {
-    /// Either [`PROTOCOL_VERSION`] or [`ARROW_PROTOCOL_VERSION`].
-    pub version: u64,
+    pub version: ProtocolVersion,
     pub session_token: SessionToken,
     pub task_index: QueryTaskIndex,
     pub archive_id: ArchiveId,
@@ -49,18 +65,15 @@ impl Handshake {
     ///
     /// Returns an error if:
     ///
-    /// * [`ProtocolError::UnsupportedVersion`] if the handshake's version is neither
-    ///   [`PROTOCOL_VERSION`] nor [`ARROW_PROTOCOL_VERSION`].
+    /// * [`ProtocolError::UnsupportedVersion`] if the handshake's version isn't a
+    ///   [`ProtocolVersion`].
     /// * [`ProtocolError::MalformedFrame`] if the bytes don't form a handshake.
     /// * [`ProtocolError::InvalidSessionToken`] if the session token isn't a valid UUID.
     /// * [`ProtocolError::InvalidArchiveId`] if the archive ID isn't a valid UUID.
     pub fn decode(buffer: &mut BytesMut) -> Result<Option<Self>, ProtocolError> {
         decode_frame(buffer, |reader| {
             let num_fields = rmp::decode::read_array_len(reader)?;
-            let version: u64 = rmp::decode::read_int(reader)?;
-            if PROTOCOL_VERSION != version && ARROW_PROTOCOL_VERSION != version {
-                return Err(ProtocolError::UnsupportedVersion(version).into());
-            }
+            let version = ProtocolVersion::try_from(rmp::decode::read_int::<u64, _>(reader)?)?;
             expect_num_fields(num_fields, NUM_HANDSHAKE_FIELDS)?;
             let session_token =
                 SessionToken::parse_str(read_str(reader, MAX_HANDSHAKE_STRING_LEN)?)
@@ -321,11 +334,10 @@ mod tests {
     use clp_rust_utils::job_config::SessionToken;
     use clp_rust_utils::types::ArchiveId;
 
-    use super::ARROW_PROTOCOL_VERSION;
     use super::Ack;
     use super::Frame;
     use super::Handshake;
-    use super::PROTOCOL_VERSION;
+    use super::ProtocolVersion;
     use super::ResultFrame;
     use super::Trailer;
     use crate::error::ProtocolError;
@@ -378,7 +390,7 @@ mod tests {
 
     #[test]
     fn handshake_decodes_only_once_complete() {
-        let encoded = encode_handshake(PROTOCOL_VERSION);
+        let encoded = encode_handshake(ProtocolVersion::V2 as u64);
         let mut buffer = BytesMut::new();
         for &byte in &encoded[..encoded.len() - 1] {
             buffer.extend_from_slice(&[byte]);
@@ -395,7 +407,7 @@ mod tests {
         assert_eq!(
             handshake,
             Some(Handshake {
-                version: PROTOCOL_VERSION,
+                version: ProtocolVersion::V2,
                 session_token: SessionToken::parse_str(SESSION_TOKEN).expect("valid UUID"),
                 task_index: 7,
                 archive_id: ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"),
@@ -406,11 +418,11 @@ mod tests {
 
     #[test]
     fn handshake_of_the_arrow_protocol_carries_its_version() {
-        let mut buffer = BytesMut::from(&encode_handshake(ARROW_PROTOCOL_VERSION)[..]);
+        let mut buffer = BytesMut::from(&encode_handshake(ProtocolVersion::V3 as u64)[..]);
         let handshake = Handshake::decode(&mut buffer)
             .expect("the handshake should be valid")
             .expect("the handshake should be complete");
-        assert_eq!(handshake.version, ARROW_PROTOCOL_VERSION);
+        assert_eq!(handshake.version, ProtocolVersion::V3);
         assert_eq!(handshake.task_index, 7);
     }
 
@@ -430,7 +442,7 @@ mod tests {
     fn handshake_with_an_overlong_string_is_rejected_before_it_arrives() {
         let mut bytes = Vec::new();
         rmp::encode::write_array_len(&mut bytes, 4).expect("writing to a `Vec` shouldn't fail");
-        rmp::encode::write_uint(&mut bytes, PROTOCOL_VERSION)
+        rmp::encode::write_uint(&mut bytes, ProtocolVersion::V2 as u64)
             .expect("writing to a `Vec` shouldn't fail");
         rmp::encode::write_str_len(&mut bytes, 1 << 20).expect("writing to a `Vec` shouldn't fail");
         let mut buffer = BytesMut::from(&bytes[..]);

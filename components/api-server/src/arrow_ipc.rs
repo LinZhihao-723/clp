@@ -42,10 +42,13 @@ use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::types::ArchiveId;
 use futures::Stream;
 use search_result_listener::ArrowResultBatch;
+use search_result_listener::MESSAGE_COLUMN;
 use search_result_listener::RESULT_SCHEMA;
 use search_result_listener::ResultEncoder;
 use search_result_listener::ResultEncoding;
 use search_result_listener::SessionOutcome;
+use search_result_listener::TIMESTAMP_COLUMN;
+use utoipa::ToSchema;
 
 /// The media type of an Arrow IPC stream.
 pub const ARROW_STREAM_CONTENT_TYPE: &str = "application/vnd.apache.arrow.stream";
@@ -56,14 +59,15 @@ pub const QUERY_JOB_ID_HEADER: &str = "x-clp-query-job-id";
 /// The end-of-stream marker of an IPC stream.
 pub const END_OF_STREAM: &[u8] = &[0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
 
+/// The body of an Arrow IPC stream response.
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+pub struct ArrowIpcStream(pub Vec<u8>);
+
 /// The [`ResultEncoding`] of the Arrow IPC stream responses of `POST /query/stream`.
 ///
 /// Each batch holds, for every record batch of results, the IPC messages of the connection's
 /// archive ID dictionary and of the record batch, to be streamed after [`schema_message`].
-///
-/// Record batches that protocol-v3 connections streamed are forwarded byte for byte, unless
-/// another attempt of their task already emitted some of their results, in which case only the
-/// remaining suffix is encoded again.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ArrowIpcEncoding;
 
@@ -158,7 +162,18 @@ impl ResultEncoder for ArrowIpcEncoder {
             .slice(num_duplicates, batch.num_rows() - num_duplicates);
         let record_batch = self
             .writer
-            .write(Arc::clone(suffix.column(1)), Arc::clone(suffix.column(2)))
+            .write(
+                Arc::clone(
+                    suffix
+                        .column_by_name(TIMESTAMP_COLUMN)
+                        .expect("a validated batch should have a timestamp column"),
+                ),
+                Arc::clone(
+                    suffix
+                        .column_by_name(MESSAGE_COLUMN)
+                        .expect("a validated batch should have a message column"),
+                ),
+            )
             .expect("encoding the suffix of a validated batch shouldn't fail");
         self.batch.push(self.writer.dictionary_message.clone());
         self.batch.push(record_batch);
@@ -181,6 +196,11 @@ pub struct ArrowStreamResponse<BodyStreamType> {
 }
 
 impl<BodyStreamType> ArrowStreamResponse<BodyStreamType> {
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// A response that carries `query_job_id` in its headers and streams `body`.
     #[must_use]
     pub const fn new(query_job_id: QueryJobId, body: BodyStreamType) -> Self {
         Self { query_job_id, body }
@@ -318,7 +338,6 @@ impl ResultIpcWriter {
             zero_keys: Buffer::from_vec(Vec::<i32>::new()),
             dictionary_message: Bytes::new(),
         };
-        // Registers the dictionary of the archive ID column, as a stream writer does.
         let _ = writer.generator.schema_to_bytes_with_dictionary_tracker(
             &RESULT_SCHEMA,
             &mut writer.tracker,
