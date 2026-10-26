@@ -31,6 +31,7 @@ use crate::Error;
 use crate::query_job_submitter::ArchiveMetadata;
 use crate::query_job_submitter::QueryJobOutcome;
 use crate::query_job_submitter::QueryJobSubmitter;
+use crate::query_job_submitter::QueryTask;
 
 /// Options for a query job running in Spider.
 pub struct SpiderOption {
@@ -184,12 +185,12 @@ impl<SubmitterType: QueryJobSubmitter> QueryJobHandle<SubmitterType> {
         tracing::info!(query_job_id = % self.query_job_id, "Starting query job.");
 
         let result = async {
-            let archives_to_search = self.plan().await?;
-            if archives_to_search.is_empty() {
+            let query_tasks = self.plan().await?;
+            if query_tasks.is_empty() {
                 return self.terminate(QueryJobOutcome::Succeeded).await;
             }
 
-            let spider_job_id = self.submit(archives_to_search).await?;
+            let spider_job_id = self.submit(query_tasks).await?;
             self.to_completion(spider_job_id).await
         }
         .await;
@@ -240,11 +241,8 @@ impl<SubmitterType: QueryJobSubmitter> QueryJobHandle<SubmitterType> {
     /// * [`Error::TooManyQueryTasks`] if the number of query tasks exceeds `i32`'s range.
     /// * Forwards [`QueryJobSubmitter::submit_query_job`]'s return values on failure.
     /// * Forwards [`Self::start`]'s return values on failure.
-    async fn submit(
-        &self,
-        archives_to_search: Vec<(ArchiveMetadata, ExecutionPolicy)>,
-    ) -> Result<SpiderJobId, Error> {
-        let num_tasks = archives_to_search.len();
+    async fn submit(&self, query_tasks: Vec<QueryTask>) -> Result<SpiderJobId, Error> {
+        let num_tasks = query_tasks.len();
         let persisted_num_tasks =
             i32::try_from(num_tasks).map_err(|_| Error::TooManyQueryTasks(num_tasks))?;
         let spider_job_id = self
@@ -254,7 +252,7 @@ impl<SubmitterType: QueryJobSubmitter> QueryJobHandle<SubmitterType> {
                 self.resource_group_id,
                 self.clp_s_query_option.clone(),
                 self.output_handle.clone(),
-                archives_to_search,
+                query_tasks,
             )
             .await?;
 
@@ -269,21 +267,18 @@ impl<SubmitterType: QueryJobSubmitter> QueryJobHandle<SubmitterType> {
         Ok(spider_job_id)
     }
 
-    /// Prepares the task inputs for the query job.
+    /// Prepares the query tasks of the query job.
     ///
     /// # Returns
     ///
-    /// A vector of tuples on success, where each tuple contains:
-    ///
-    /// * The [`ArchiveMetadata`] identifying the archive searched by a single query task.
-    /// * The [`ExecutionPolicy`] for that task.
+    /// The query tasks on success.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     ///
     /// * Forwards [`ArchiveSelector::select`]'s return values on failure.
-    async fn plan(&self) -> Result<Vec<(ArchiveMetadata, ExecutionPolicy)>, Error> {
+    async fn plan(&self) -> Result<Vec<QueryTask>, Error> {
         ArchiveSelector {
             context: &self.context,
             search_job_config: &self.search_job_config,
@@ -538,20 +533,17 @@ struct ArchiveSelector<'job_handle_lifetime> {
 }
 
 impl ArchiveSelector<'_> {
-    /// Prepares the task inputs for the query job.
+    /// Prepares the query tasks of the query job.
     ///
     /// This method validates and deduplicates the job's requested datasets, then retrieves from the
     /// CLP database the metadata of the archives matching the query, ordered by descending archive
     /// end timestamp, and attaches an execution policy derived from each archive's uncompressed
-    /// size to its task. Archives that end before the job's archive retention lower bound, if any,
-    /// are excluded.
+    /// size to the task that searches it. Archives that end before the job's archive retention
+    /// lower bound, if any, are excluded.
     ///
     /// # Returns
     ///
-    /// A vector of tuples on success, where each tuple contains:
-    ///
-    /// * The [`ArchiveMetadata`] identifying the archive searched by a single query task.
-    /// * The [`ExecutionPolicy`] for that task.
+    /// The query tasks on success, each of which searches one archive.
     ///
     /// # Errors
     ///
@@ -560,7 +552,7 @@ impl ArchiveSelector<'_> {
     /// * Forwards [`Self::deduplicate_and_validate_requested_datasets`]'s return values on failure.
     /// * Forwards [`Self::ensure_all_required_datasets_exist`]'s return values on failure.
     /// * Forwards [`Self::fetch_archives`]'s return values on failure.
-    async fn select(&self) -> Result<Vec<(ArchiveMetadata, ExecutionPolicy)>, Error> {
+    async fn select(&self) -> Result<Vec<QueryTask>, Error> {
         let datasets = self.deduplicate_and_validate_requested_datasets()?;
         self.ensure_all_required_datasets_exist(&datasets).await?;
 
@@ -573,12 +565,12 @@ impl ArchiveSelector<'_> {
         let query_task_max_retry = self.context.spider_option.query_task_max_retry;
         Ok(selected_archives
             .into_iter()
-            .map(|archive| {
-                let execution_policy = compute_query_task_execution_policy(
+            .map(|archive| QueryTask {
+                execution_policy: compute_query_task_execution_policy(
                     archive.uncompressed_size,
                     query_task_max_retry,
-                );
-                (archive, execution_policy)
+                ),
+                archives: vec![archive],
             })
             .collect())
     }
@@ -816,7 +808,6 @@ mod tests {
     use clp_rust_utils::task_io::query::OutputHandle;
     use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
     use non_empty_string::NonEmptyString;
-    use spider_core::task::ExecutionPolicy;
     use spider_core::types::id::JobId as SpiderJobId;
     use spider_core::types::id::ResourceGroupId;
 
@@ -826,9 +817,9 @@ mod tests {
     use super::SpiderOption;
     use super::compute_query_task_execution_policy;
     use crate::Error;
-    use crate::query_job_submitter::ArchiveMetadata;
     use crate::query_job_submitter::QueryJobOutcome;
     use crate::query_job_submitter::QueryJobSubmitter;
+    use crate::query_job_submitter::QueryTask;
 
     const BYTES_PER_MIB: u64 = 1024 * 1024;
     const MAX_NUM_RETRY: u32 = 1;
@@ -853,7 +844,7 @@ mod tests {
             _resource_group_id: ResourceGroupId,
             _clp_s_query_option: ClpSQueryOption,
             _output_handle: OutputHandle,
-            _archives_to_search: Vec<(ArchiveMetadata, ExecutionPolicy)>,
+            _query_tasks: Vec<QueryTask>,
         ) -> Result<SpiderJobId, Error> {
             unreachable!("the test never submits a query job")
         }

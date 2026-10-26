@@ -17,6 +17,7 @@ use clp_rust_utils::dataset::resolve_dataset_name;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::s3::generate_s3_url;
+use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
@@ -27,17 +28,6 @@ use crate::common::clp_home;
 use crate::common::runtime;
 use crate::task::utils::clp_binary_path;
 use crate::task::utils::s3_credential_env;
-
-/// The archive that a query task searches.
-pub(super) struct ArchiveToSearch {
-    pub(super) id: ArchiveId,
-
-    /// The archive's dataset, or `None` for the default dataset.
-    pub(super) dataset: Option<NonEmptyString>,
-
-    /// The archive's position among the archives that the query job searches.
-    pub(super) task_index: QueryTaskIndex,
-}
 
 /// Searches one archive with clp-s, handles the search results according to the given
 /// `output_handle`.
@@ -375,6 +365,7 @@ mod tests {
     use clp_rust_utils::clp_config::package::config::Package;
     use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
     use clp_rust_utils::clp_config::package::config::StorageEngine;
+    use clp_rust_utils::task_io::query::ArchiveToSearch;
     use clp_rust_utils::task_io::query::ClpSQueryOption;
     use clp_rust_utils::task_io::query::OutputHandle;
     use clp_rust_utils::types::ArchiveId;
@@ -386,7 +377,6 @@ mod tests {
     use spider_tdl::TaskContext;
 
     use super::ArchiveSelector;
-    use super::ArchiveToSearch;
     use super::build_clp_s_search_args_for_network;
     use super::build_clp_s_search_args_for_result_cache;
     use super::resolve_archive_input;

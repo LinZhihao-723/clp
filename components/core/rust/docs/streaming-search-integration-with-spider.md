@@ -61,10 +61,10 @@ to a listener that the client hosts:
    `POST /query/stream` opens a session on a `ResultListener`, then inserts a query job whose
    config carries a network output: the listener's host and port, and the session token (a
    UUID). Streaming jobs always have `max_num_results = 0`.
-2. **Coordinator.** The `query-coordinator` submits one Spider job with one `query::clp_s_search`
-   task per archive. Each task gets a task index: the archive's position after sorting the
-   archives by end timestamp, newest first. Spider persists the task graph, so a retry reuses
-   the same index.
+2. **Coordinator.** The `query-coordinator` submits one Spider job of `query::clp_s_search` tasks,
+   each of which searches a list of archives one after another. Each archive gets a task index:
+   its position after sorting the archives by end timestamp, newest first. Spider persists the
+   task graph, so a retry reuses the same indices.
 3. **Search task (V2).** The TDL task spawns
    `clp-s s <dir> --archive-id <id> <query> [--tge] [--tle] [--ignore-case] network --host H
    --port P --session-token T --task-index I`.
@@ -151,8 +151,9 @@ Files changed:
   - With `rust`, `package_init` also installs the adapter's process-wide resources: the package's
     multi-thread Tokio runtime, a `ReaderContext` with the default (unlimited) memory budget, the
     CLP home, and a 60 s base admission timeout. These stay alive across tasks.
-- **Dispatch.** `query::clp_s_search` matches on the engine: `ClpS` calls the package's own
-  `search::search`, and `Rust` calls `clp_s_spider_adapter::search` with the same inputs. Errors
+- **Dispatch.** `query::clp_s_search` matches on the engine for each of its archives: `ClpS` calls
+  the package's own `search::search`, and `Rust` calls `clp_s_spider_adapter::search` with the
+  same inputs. Errors
   still become `TdlError::ExecutionError`, so Spider retries a failed task as before.
 - **One image.** Both engines are in the same `libclp_tdl_package.so`. The `spider-worker`
   service in `compose.clp-spider.yaml` gains

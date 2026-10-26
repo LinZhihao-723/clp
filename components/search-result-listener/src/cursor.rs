@@ -1,28 +1,30 @@
-//! The per-task cursor that lets exactly one attempt of a task emit each of its results.
+//! The per-archive cursor that lets exactly one attempt of a query task emit each result of an
+//! archive that the task searches.
 
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use clp_rust_utils::types::ArchiveId;
 
-/// The outcome of claiming a result index on a [`TaskCursor`].
+/// The outcome of claiming a result index on a [`ArchiveCursor`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Claim {
     /// The caller is the first to deliver the result, so it must emit it.
     Claimed,
 
-    /// An attempt of the task already emitted the result, so the caller must drop it.
+    /// An attempt of the archive's task already emitted the result, so the caller must drop it.
     Duplicate,
 }
 
-/// Tracks which results of one query task have been emitted across every attempt of the task.
+/// Tracks which results of one archive have been emitted across every attempt of the query task
+/// that searches it.
 #[derive(Debug)]
-pub struct TaskCursor {
+pub struct ArchiveCursor {
     next_result_index: AtomicU64,
     archive_id: ArchiveId,
 }
 
-impl TaskCursor {
+impl ArchiveCursor {
     #[must_use]
     pub const fn new(archive_id: ArchiveId) -> Self {
         Self {
@@ -80,7 +82,7 @@ impl TaskCursor {
     /// # Panics
     ///
     /// Panics if `first_result_index` is above the next unclaimed result index, for the same
-    /// reason as [`TaskCursor::claim`].
+    /// reason as [`ArchiveCursor::claim`].
     pub fn claim_range(&self, first_result_index: u64, num_results: u64) -> u64 {
         let end = first_result_index + num_results;
         let mut current = self.next_result_index.load(Ordering::Relaxed);
@@ -112,16 +114,16 @@ mod tests {
 
     use clp_rust_utils::types::ArchiveId;
 
+    use super::ArchiveCursor;
     use super::Claim;
-    use super::TaskCursor;
 
     const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
 
     /// # Returns
     ///
     /// A fresh cursor for the archive [`ARCHIVE_ID`].
-    fn new_cursor() -> TaskCursor {
-        TaskCursor::new(ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"))
+    fn new_cursor() -> ArchiveCursor {
+        ArchiveCursor::new(ARCHIVE_ID.parse::<ArchiveId>().expect("valid archive UUID"))
     }
 
     #[test]

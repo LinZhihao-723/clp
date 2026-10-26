@@ -20,8 +20,8 @@ use crate::SessionStats;
 use crate::arrow_stream::ArrowRead;
 use crate::arrow_stream::ArrowResultBatch;
 use crate::arrow_stream::ArrowStreamReader;
+use crate::cursor::ArchiveCursor;
 use crate::cursor::Claim;
-use crate::cursor::TaskCursor;
 use crate::error::ConnectionError;
 use crate::error::ProtocolError;
 use crate::listener::PendingHandshake;
@@ -125,14 +125,15 @@ pub async fn serve<EncodingType: ResultEncoding>(
 /// the results in one batch, unless the IPC message being read needs more.
 const READ_BUFFER_CAPACITY: usize = 64 * 1024;
 
-/// A connection that joined a session, streaming the results of one attempt of a task.
+/// A connection that joined a session, streaming the results that one attempt of a task found in
+/// one archive.
 ///
 /// # Type Parameters
 ///
 /// * `EncodingType` - The encoding of the results the session delivers.
 struct Connection<EncodingType: ResultEncoding> {
     session: Arc<session::State<EncodingType>>,
-    cursor: Arc<TaskCursor>,
+    cursor: Arc<ArchiveCursor>,
     encoder: EncodingType::Encoder,
 
     /// The Arrow IPC stream of a protocol-v3 connection, or `None` for a protocol-v2 connection.
@@ -155,8 +156,8 @@ struct Connection<EncodingType: ResultEncoding> {
 }
 
 impl<EncodingType: ResultEncoding> Connection<EncodingType> {
-    /// Joins the connection to the session and the task cursor that `handshake` names, creating
-    /// the cursor if this is the task's first connection.
+    /// Joins the connection to the session and the archive cursor that `handshake` names, creating
+    /// the cursor if this is the archive's first connection.
     ///
     /// # Returns
     ///
@@ -181,7 +182,7 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
             session
                 .cursors
                 .entry(handshake.task_index)
-                .or_insert_with(|| Arc::new(TaskCursor::new(handshake.archive_id)))
+                .or_insert_with(|| Arc::new(ArchiveCursor::new(handshake.archive_id)))
                 .value(),
         );
         Ok(Self {
@@ -215,8 +216,8 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
     ///
     /// Returns an error if:
     ///
-    /// * [`ProtocolError::ArchiveIdMismatch`] if the cursor of the handshake's task is bound to
-    ///   another archive.
+    /// * [`ProtocolError::ArchiveIdMismatch`] if the cursor of the handshake's task index is bound
+    ///   to another archive.
     /// * [`ConnectionError::DrainTimedOut`] if the connection waits on its socket for the grace
     ///   period after the session's job has terminated.
     /// * [`ConnectionError::MissingTrailer`] if the connection closes between two frames before
@@ -363,8 +364,8 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
         }
     }
 
-    /// Claims `result` on the task's cursor, encoding it into the pending batch unless an attempt
-    /// of the task already emitted it.
+    /// Claims `result` on the archive's cursor, encoding it into the pending batch unless an
+    /// attempt of the archive's task already emitted it.
     ///
     /// # Errors
     ///
@@ -398,9 +399,9 @@ impl<EncodingType: ResultEncoding> Connection<EncodingType> {
         Ok(())
     }
 
-    /// Claims the results of `batch`, the connection's next results, on the task's cursor as one
-    /// range, encoding the suffix that no attempt of the task has emitted yet into the pending
-    /// batch.
+    /// Claims the results of `batch`, the connection's next results, on the archive's cursor as one
+    /// range, encoding the suffix that no attempt of the archive's task has emitted yet into the
+    /// pending batch.
     fn claim_arrow_batch(&mut self, handshake: &Handshake, batch: &ArrowResultBatch) {
         let num_rows = batch.num_rows() as u64;
         if 0 == num_rows {

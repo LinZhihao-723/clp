@@ -9,9 +9,23 @@ use serde::Serialize;
 
 use crate::job_config::NetworkOutput;
 use crate::job_config::SessionToken;
+use crate::types::ArchiveId;
 
-/// The index of a query task within its query job.
+/// The position of an archive among the archives that its query job searches, which keys the
+/// archive's results within the job.
 pub type QueryTaskIndex = u64;
+
+/// An archive that a query task searches.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveToSearch {
+    pub id: ArchiveId,
+
+    /// The archive's dataset, or `None` for the default dataset.
+    pub dataset: Option<NonEmptyString>,
+
+    pub task_index: QueryTaskIndex,
+}
 
 /// `clp-s` options for a query job.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

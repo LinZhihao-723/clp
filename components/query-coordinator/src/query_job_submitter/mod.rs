@@ -34,6 +34,13 @@ pub struct ArchiveMetadata {
     pub end_timestamp: i64,
 }
 
+/// A query task, which searches its archives one after another.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueryTask {
+    pub archives: Vec<ArchiveMetadata>,
+    pub execution_policy: ExecutionPolicy,
+}
+
 /// The terminal outcome of a query job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueryJobOutcome {
@@ -50,8 +57,7 @@ pub enum QueryJobOutcome {
 /// Drives CLP query jobs on a Spider (Huntsman) cluster.
 #[async_trait]
 pub trait QueryJobSubmitter: Clone + Send + Sync {
-    /// Builds the query task graph for `archives_to_search` and registers it with Spider, without
-    /// starting it.
+    /// Builds the task graph of `query_tasks` and registers it with Spider, without starting it.
     ///
     /// # Parameters
     ///
@@ -59,8 +65,8 @@ pub trait QueryJobSubmitter: Clone + Send + Sync {
     /// * `resource_group_id` - The Spider resource group to register the job under.
     /// * `clp_s_query_option` - `clp-s` query options shared by every task in the job.
     /// * `output_handle` - The output handle selecting how the query outputs are returned.
-    /// * `archives_to_search` - The archives to search, each represents a query task paired with
-    ///   its execution policy.
+    /// * `query_tasks` - The query tasks, whose archives, taken in order, are the archives the job
+    ///   searches.
     ///
     /// # Returns
     ///
@@ -75,7 +81,7 @@ pub trait QueryJobSubmitter: Clone + Send + Sync {
         resource_group_id: ResourceGroupId,
         clp_s_query_option: ClpSQueryOption,
         output_handle: OutputHandle,
-        archives_to_search: Vec<(ArchiveMetadata, ExecutionPolicy)>,
+        query_tasks: Vec<QueryTask>,
     ) -> Result<JobId, Error>;
 
     /// Idempotently starts the job identified by `spider_job_id` (only if it hasn't already been

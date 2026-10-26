@@ -601,6 +601,70 @@ async fn overlapping_attempts_emit_each_result_once_and_are_both_acknowledged() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn overlapping_attempts_of_a_multi_archive_task_emit_each_result_of_each_archive_once() {
+    const FIRST_TASK_INDEX: u64 = 4;
+    const SECOND_TASK_INDEX: u64 = 5;
+
+    let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
+    let mut first_attempt = harness.connect().await;
+    first_attempt
+        .send_handshake(&harness.network_output, FIRST_TASK_INDEX, ARCHIVE_ID)
+        .await;
+    first_attempt.send_results(FIRST_TASK_INDEX, 0..3).await;
+    let first_attempt_first_acknowledgement = first_attempt.finish(3).await;
+    let mut first_attempt = harness.connect().await;
+    first_attempt
+        .send_handshake(&harness.network_output, SECOND_TASK_INDEX, OTHER_ARCHIVE_ID)
+        .await;
+    first_attempt.send_results(SECOND_TASK_INDEX, 0..2).await;
+    let mut results = Vec::new();
+    for _ in 0..5 {
+        results.push(harness.next_result().await);
+    }
+
+    // The second attempt reruns both archives while the first is still streaming the second.
+    let mut second_attempt = harness.connect().await;
+    second_attempt
+        .send_handshake(&harness.network_output, FIRST_TASK_INDEX, ARCHIVE_ID)
+        .await;
+    second_attempt.send_results(FIRST_TASK_INDEX, 0..3).await;
+    let second_attempt_first_acknowledgement = second_attempt.finish(3).await;
+    let mut second_attempt = harness.connect().await;
+    second_attempt
+        .send_handshake(&harness.network_output, SECOND_TASK_INDEX, OTHER_ARCHIVE_ID)
+        .await;
+    second_attempt.send_results(SECOND_TASK_INDEX, 0..1).await;
+    first_attempt.send_results(SECOND_TASK_INDEX, 2..3).await;
+    results.push(harness.next_result().await);
+    drop(first_attempt);
+    second_attempt.send_results(SECOND_TASK_INDEX, 1..4).await;
+    let second_attempt_second_acknowledgement = second_attempt.finish(4).await;
+    let (remaining_results, outcome) = harness.finish(QueryJobStatus::Succeeded).await;
+    results.extend(remaining_results);
+
+    assert_eq!(first_attempt_first_acknowledgement, ack(3));
+    assert_eq!(second_attempt_first_acknowledgement, ack(3));
+    assert_eq!(second_attempt_second_acknowledgement, ack(4));
+    assert_eq!(
+        results,
+        [
+            expected_results(FIRST_TASK_INDEX, ARCHIVE_ID, 0..3),
+            expected_results(SECOND_TASK_INDEX, OTHER_ARCHIVE_ID, 0..4),
+        ]
+        .concat()
+    );
+    assert_eq!(
+        outcome.stats,
+        SessionStats {
+            num_results_emitted: 7,
+            num_duplicates_dropped: 6,
+            num_incomplete_connections: 1,
+            ..SessionStats::default()
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn out_of_order_index_closes_the_connection_without_moving_the_cursor() {
     for out_of_order_indices in [[0, 2], [0, 0]] {
         let mut harness = Harness::start(BASE_LISTENER_CONFIG, BASE_SESSION_CONFIG).await;
