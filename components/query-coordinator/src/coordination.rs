@@ -139,6 +139,8 @@ impl Coordinator {
                     coordinator_config.result_polling_interval_millisecs.get(),
                 ),
                 query_task_max_retry: coordinator_config.query_task_max_retry,
+                max_num_archives_per_query_task: coordinator_config.max_num_archives_per_query_task,
+                query_task_parallelism: coordinator_config.query_task_parallelism,
             },
             results_cache_uri: results_cache_config.uri(),
         });
