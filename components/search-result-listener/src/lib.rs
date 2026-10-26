@@ -32,6 +32,7 @@ pub use job_status::JobStatusSource;
 pub use job_status::JobStatusTable;
 pub use job_status::MariaDbJobStatusSource;
 pub use job_status::MariaDbJobStatusTable;
+pub use job_status::POLL_FAILURE_TOLERANCE;
 pub use job_status::PolledJobStatusSource;
 pub use listener::ListenerConfig;
 pub use listener::ResultListener;

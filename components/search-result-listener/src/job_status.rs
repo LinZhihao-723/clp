@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::time::Duration;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
@@ -14,6 +16,9 @@ use const_format::formatcp;
 use tokio::sync::oneshot;
 
 use crate::Error;
+
+/// How long polls of a [`PolledJobStatusSource`] may keep failing before the waits fail.
+pub const POLL_FAILURE_TOLERANCE: Duration = Duration::from_secs(1);
 
 /// A source of query job statuses.
 #[async_trait]
@@ -154,12 +159,13 @@ impl<JobStatusTableType: JobStatusTable> JobStatusSource
     /// Returns an error if:
     ///
     /// * [`Error::QueryJobNotFound`] if the query job's row doesn't exist.
-    /// * [`Error::JobStatusPoll`] if a poll fails before the query job's status is terminal.
+    /// * [`Error::JobStatusPoll`] if polls keep failing for [`POLL_FAILURE_TOLERANCE`] before the
+    ///   query job's status is terminal. A poll that succeeds within the tolerance hides the
+    ///   failures before it.
     ///
     /// # Panics
     ///
-    /// Panics if the background task stops without resolving the wait, which only a panic in the
-    /// task does.
+    /// Panics if the background task panics before the query job's status is terminal.
     async fn wait_for_terminal_status(
         &self,
         query_job_id: QueryJobId,
@@ -201,8 +207,15 @@ impl<JobStatusTableType: JobStatusTable> Poller<JobStatusTableType> {
     }
 
     /// Polls the table until no query job is waited on. Each poll resolves the waits on every query
-    /// job whose status is terminal or whose row doesn't exist, or every wait if the poll fails.
+    /// job whose status is terminal or whose row doesn't exist. Once polls have kept failing for
+    /// [`POLL_FAILURE_TOLERANCE`], the failing poll resolves every wait. If the task stops for any
+    /// other reason, such as a panic, it drops every wait's sender.
     async fn run(self: Arc<Self>) {
+        let mut guard = RunGuard {
+            poller: &self,
+            is_stopped: false,
+        };
+        let mut first_failure_time: Option<Instant> = None;
         loop {
             let query_job_ids: Vec<QueryJobId> = {
                 let mut state = self.lock_state();
@@ -212,6 +225,7 @@ impl<JobStatusTableType: JobStatusTable> Poller<JobStatusTableType> {
                 });
                 if state.waiters.is_empty() {
                     state.is_polling = false;
+                    guard.is_stopped = true;
                     return;
                 }
                 state.waiters.keys().copied().collect()
@@ -219,6 +233,7 @@ impl<JobStatusTableType: JobStatusTable> Poller<JobStatusTableType> {
 
             match self.table.get_statuses(&query_job_ids).await {
                 Ok(statuses) => {
+                    first_failure_time = None;
                     let mut resolved = Vec::new();
                     let mut state = self.lock_state();
                     for query_job_id in query_job_ids {
@@ -241,14 +256,25 @@ impl<JobStatusTableType: JobStatusTable> Poller<JobStatusTableType> {
                     }
                 }
                 Err(error) => {
-                    tracing::warn!(
-                        error = % error,
-                        "Failed to poll the statuses of the query jobs being waited on."
-                    );
-                    let error = Arc::new(error);
-                    let waiters = std::mem::take(&mut self.lock_state().waiters);
-                    for sender in waiters.into_values().flatten() {
-                        let _ = sender.send(Err(Error::JobStatusPoll(Arc::clone(&error))));
+                    let failing_since = *first_failure_time.get_or_insert_with(Instant::now);
+                    if failing_since.elapsed() < POLL_FAILURE_TOLERANCE {
+                        tracing::warn!(
+                            error = % error,
+                            "Failed to poll the statuses of the query jobs being waited on; \
+                             retrying."
+                        );
+                    } else {
+                        tracing::error!(
+                            error = % error,
+                            "Failed to poll the statuses of the query jobs being waited on; \
+                             failing every wait."
+                        );
+                        first_failure_time = None;
+                        let error = Arc::new(error);
+                        let waiters = std::mem::take(&mut self.lock_state().waiters);
+                        for sender in waiters.into_values().flatten() {
+                            let _ = sender.send(Err(Error::JobStatusPoll(Arc::clone(&error))));
+                        }
                     }
                 }
             }
@@ -282,6 +308,34 @@ struct PollerState {
     is_polling: bool,
 }
 
+/// Clears the state of a [`Poller`] whose background task stops without having stopped polling,
+/// which drops the senders of every wait and lets the next wait start a new task.
+///
+/// # Type Parameters
+///
+/// * `JobStatusTableType` - The table that holds the query jobs' statuses.
+struct RunGuard<'poller, JobStatusTableType: JobStatusTable> {
+    poller: &'poller Poller<JobStatusTableType>,
+    is_stopped: bool,
+}
+
+impl<JobStatusTableType: JobStatusTable> Drop for RunGuard<'_, JobStatusTableType> {
+    fn drop(&mut self) {
+        if self.is_stopped {
+            return;
+        }
+        let mut state = self
+            .poller
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let waiters = std::mem::take(&mut state.waiters);
+        state.is_polling = false;
+        drop(state);
+        drop(waiters);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -289,6 +343,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::MutexGuard;
     use std::time::Duration;
+    use std::time::Instant;
 
     use async_trait::async_trait;
     use clp_rust_utils::job_config::QueryJobId;
@@ -299,6 +354,7 @@ mod tests {
 
     use super::JobStatusSource;
     use super::JobStatusTable;
+    use super::POLL_FAILURE_TOLERANCE;
     use super::PolledJobStatusSource;
     use crate::Error;
 
@@ -355,6 +411,10 @@ mod tests {
             sorted_ids.sort_unstable();
             let mut state = self.lock();
             state.fetches.push(sorted_ids);
+            if state.should_panic {
+                drop(state);
+                panic!("the fake table panics when asked to");
+            }
             if state.should_fail {
                 return Err(sqlx::Error::PoolTimedOut);
             }
@@ -371,6 +431,7 @@ mod tests {
     struct FakeTableState {
         statuses: HashMap<QueryJobId, QueryJobStatus>,
         should_fail: bool,
+        should_panic: bool,
         fetches: Vec<Vec<QueryJobId>>,
     }
 
@@ -451,16 +512,65 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_poll_fails_every_wait() {
+    async fn polls_failing_within_the_tolerance_are_retried() -> anyhow::Result<()> {
+        let table = FakeTable::new(&[(1, QueryJobStatus::Running)]);
+        let source = PolledJobStatusSource::new(table.clone(), POLL_INTERVAL);
+        let wait = spawn_wait(&source, 1);
+        sleep(POLL_INTERVAL * 4).await;
+
+        table.lock().should_fail = true;
+        sleep(POLL_FAILURE_TOLERANCE / 2).await;
+        assert!(!wait.is_finished());
+        table.lock().should_fail = false;
+        sleep(POLL_INTERVAL * 4).await;
+        table.lock().should_fail = true;
+        sleep(POLL_FAILURE_TOLERANCE / 2 + POLL_INTERVAL * 4).await;
+        assert!(!wait.is_finished());
+
+        table.lock().should_fail = false;
+        table.set(1, QueryJobStatus::Succeeded);
+        assert_eq!(join(wait).await?, QueryJobStatus::Succeeded);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn polls_failing_beyond_the_tolerance_fail_every_wait() {
         let table = FakeTable::new(&[(1, QueryJobStatus::Running), (2, QueryJobStatus::Running)]);
         let source = PolledJobStatusSource::new(table.clone(), POLL_INTERVAL);
         let waits = [spawn_wait(&source, 1), spawn_wait(&source, 2)];
         sleep(POLL_INTERVAL * 4).await;
 
         table.lock().should_fail = true;
+        let failure_time = Instant::now();
         for wait in waits {
             assert!(matches!(join(wait).await, Err(Error::JobStatusPoll(_))));
         }
+        assert!(failure_time.elapsed() >= POLL_FAILURE_TOLERANCE);
+    }
+
+    #[tokio::test]
+    async fn panicking_poll_ends_every_wait_and_polling_restarts() -> anyhow::Result<()> {
+        let table = FakeTable::new(&[(1, QueryJobStatus::Running), (2, QueryJobStatus::Running)]);
+        let source = PolledJobStatusSource::new(table.clone(), POLL_INTERVAL);
+        let waits = [spawn_wait(&source, 1), spawn_wait(&source, 2)];
+        sleep(POLL_INTERVAL * 4).await;
+
+        table.lock().should_panic = true;
+        for wait in waits {
+            let join_error = timeout(Duration::from_secs(5), wait)
+                .await
+                .expect("the wait should end")
+                .expect_err("the wait should panic");
+            assert!(join_error.is_panic());
+        }
+
+        table.lock().should_panic = false;
+        table.set(1, QueryJobStatus::Succeeded);
+        assert_eq!(
+            join(spawn_wait(&source, 1)).await?,
+            QueryJobStatus::Succeeded
+        );
+        Ok(())
     }
 
     #[tokio::test]
