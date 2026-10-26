@@ -339,6 +339,48 @@ fn filtered_scans_reproduce_the_cpp_query_oracles() -> anyhow::Result<()> {
 }
 
 #[test]
+fn tables_kept_past_their_batches_leave_the_results_unchanged() -> anyhow::Result<()> {
+    let context = context(7, 256 * 1024);
+    for name in [
+        "timestamps-int.default",
+        "timestamps-int.ts",
+        "timestamps-int.ts-nolog",
+    ] {
+        let archive = open(&context, name)?;
+        let scan_records = |is_keeping_tables: bool| -> anyhow::Result<Vec<String>> {
+            let request = ScanRequest::builder()
+                .query(Query::from_kql("ts > 0", &QueryOptions::default())?)
+                .outputs(OutputRequirements::json().with_timestamps())
+                .build()?;
+            let mut scan = archive.scan(Arc::new(request), CancellationToken::new())?;
+            let mut kept_tables = Vec::new();
+            let mut records = Vec::new();
+            while let Some(batch) = scan.next_batch()? {
+                let json = batch.json().expect("JSON was requested");
+                let timestamps = batch.timestamps_ns().expect("timestamps were requested");
+                for (index, timestamp) in timestamps.iter().enumerate() {
+                    let record = json.record(index).expect("every record is rendered");
+                    records.push(format!("{} {timestamp:?}", String::from_utf8_lossy(record)));
+                }
+                if let BatchRows::Table {
+                    batch: table_batch, ..
+                } = batch.rows()
+                    && is_keeping_tables
+                {
+                    kept_tables.push(Arc::clone(table_batch.table()));
+                }
+            }
+            assert_eq!(kept_tables.is_empty(), !is_keeping_tables);
+            Ok(records)
+        };
+        let expected = scan_records(false)?;
+        assert!(!expected.is_empty(), "{name}");
+        assert_eq!(scan_records(true)?, expected, "{name}");
+    }
+    Ok(())
+}
+
+#[test]
 fn sessions_over_split_archives_reproduce_the_cpp_query_oracles() -> anyhow::Result<()> {
     let context = context(4096, 256 * 1024);
     for case in [

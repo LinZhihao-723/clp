@@ -139,6 +139,14 @@ impl PooledBuffer {
 
     /// # Returns
     ///
+    /// The bytes written so far.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// # Returns
+    ///
     /// The reservation this buffer holds.
     #[must_use]
     pub const fn reservation(&self) -> &MemoryReservation {
@@ -190,6 +198,20 @@ impl StreamBuffer {
     #[must_use]
     pub fn into_shared_bytes(self) -> SharedBytes {
         SharedBytes::from_owner(self)
+    }
+
+    /// Takes back exclusive ownership of the buffer, keeping its bytes.
+    ///
+    /// # Returns
+    ///
+    /// The writable buffer on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `self` unchanged if another clone of the buffer, or [`SharedBytes`] made from one,
+    /// is alive.
+    pub fn try_into_pooled(self) -> Result<PooledBuffer, Self> {
+        Arc::try_unwrap(self.buffer).map_err(|buffer| Self { buffer })
     }
 }
 
@@ -367,6 +389,33 @@ mod tests {
         drop(slice);
         assert_eq!(pool.num_retained_buffers(), 1);
         assert_eq!(budget.reserved_size(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn frozen_buffers_are_reclaimed_only_by_their_last_clone() -> anyhow::Result<()> {
+        let budget = MemoryBudget::new(None);
+        let pool = BufferPool::new(BASE_CONFIG);
+        let mut buffer = pool.acquire(64, reservation(&budget, 64))?;
+        buffer.as_mut_vec().extend_from_slice(b"stream");
+        let allocation = buffer.as_mut_vec().as_ptr();
+
+        let frozen = buffer.freeze();
+        let slice = frozen.clone().into_shared_bytes().slice(1..3);
+        let Err(frozen) = frozen.try_into_pooled() else {
+            panic!("a slice of the buffer is alive");
+        };
+        assert_eq!(&slice[..], b"tr");
+        drop(slice);
+
+        let mut reclaimed = frozen
+            .try_into_pooled()
+            .expect("the last clone reclaims the buffer");
+        assert_eq!(reclaimed.as_mut_vec().as_ptr(), allocation);
+        reclaimed.as_mut_vec().extend_from_slice(b" bytes");
+        assert_eq!(reclaimed.freeze().as_bytes(), b"stream bytes");
+        assert_eq!(budget.reserved_size(), 0);
+        assert_eq!(pool.num_retained_buffers(), 1);
         Ok(())
     }
 

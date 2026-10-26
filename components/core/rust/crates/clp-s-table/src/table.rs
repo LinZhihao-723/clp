@@ -19,6 +19,7 @@ use crate::ColumnEncoding;
 use crate::ColumnIndex;
 use crate::EncodedTextBatch;
 use crate::LeI64;
+use crate::LeadingColumnsSize;
 use crate::TableError;
 use crate::TableLayout;
 
@@ -29,8 +30,9 @@ pub struct Table {
     layout: Arc<TableLayout>,
     bytes: TableBytes,
 
-    /// One entry per layout column, in buffer order.
-    columns: Box<[ColumnData]>,
+    /// The leading columns the bytes hold: every layout column unless the table was loaded from
+    /// a prefix of its bytes.
+    loaded: LoadedColumns,
 }
 
 impl Table {
@@ -39,7 +41,8 @@ impl Table {
     /// Checks that the layout's columns exactly tile `bytes` (in O(columns)), and that every
     /// per-row variable offset of the `ClpString` and unstructured-array columns lies inside its
     /// column (in O(rows) per such column; the variable counts live in the dictionaries, so the
-    /// full range of a row is checked when its variables are read).
+    /// full range of a row is checked when its variables are read). If `bytes` holds only a prefix
+    /// of the table, the leading columns that lie wholly inside it are loaded and checked.
     ///
     /// # Returns
     ///
@@ -49,22 +52,50 @@ impl Table {
     ///
     /// Returns an error if:
     ///
+    /// * Forwards [`Self::load_after`]'s return values on failure.
+    pub fn load(archive: Arc<ArchiveTables>, bytes: TableBytes) -> Result<Self, TableError> {
+        Self::load_after(archive, bytes, LoadedColumns::default())
+    }
+
+    /// Factory function.
+    ///
+    /// Loads a table like [`Self::load`] from more of its bytes, after `loaded`, the leading
+    /// columns of an earlier load of a prefix of the same bytes, which are not checked again.
+    ///
+    /// # Returns
+    ///
+    /// The loaded table on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`TableError::ColumnTiling`] if `loaded` holds more columns or bytes than the table.
     /// * Forwards [`ArchiveTables::layout`]'s return values on failure.
     /// * Forwards [`ColumnData::tile`]'s return values on failure.
-    pub fn load(archive: Arc<ArchiveTables>, bytes: TableBytes) -> Result<Self, TableError> {
+    pub fn load_after(
+        archive: Arc<ArchiveTables>,
+        bytes: TableBytes,
+        loaded: LoadedColumns,
+    ) -> Result<Self, TableError> {
         let info = *bytes.info();
         let layout = archive.layout(info.ordinal)?;
-        let columns = ColumnData::tile(
+        if loaded.columns.len() > layout.columns().len() || loaded.size > bytes.as_bytes().len() {
+            return Err(TableError::ColumnTiling(info.ordinal));
+        }
+        let loaded = ColumnData::tile(
             layout.columns().iter().map(|spec| spec.encoding),
             bytes.as_bytes(),
+            bytes.is_complete(),
             info.num_rows,
             info.ordinal,
+            loaded,
         )?;
         Ok(Self {
             archive,
             layout,
             bytes,
-            columns,
+            loaded,
         })
     }
 
@@ -109,9 +140,25 @@ impl Table {
 
     /// # Returns
     ///
-    /// The validated byte ranges of `column`, or `None` if it is outside the layout.
+    /// Whether the bytes of `column` are loaded.
+    #[must_use]
+    pub const fn is_column_loaded(&self, column: ColumnIndex) -> bool {
+        (column.get() as usize) < self.loaded.columns.len()
+    }
+
+    /// # Returns
+    ///
+    /// The checked leading columns, for [`Self::load_after`].
+    #[must_use]
+    pub fn loaded_columns(&self) -> LoadedColumns {
+        self.loaded.clone()
+    }
+
+    /// # Returns
+    ///
+    /// The validated byte ranges of `column`, or `None` if it is outside the layout or not loaded.
     pub(crate) fn column_data(&self, column: ColumnIndex) -> Option<&ColumnData> {
-        self.columns.get(column.get() as usize)
+        self.loaded.columns.get(column.get() as usize)
     }
 
     /// Restricts one column to the table rows `rows`.
@@ -264,6 +311,15 @@ impl Table {
     }
 }
 
+/// The checked leading columns of a table loaded from a prefix of its bytes.
+#[derive(Clone, Debug, Default)]
+pub struct LoadedColumns {
+    columns: Vec<ColumnData>,
+
+    /// The end of the last column.
+    size: usize,
+}
+
 /// The validated byte ranges of one column inside its ERT.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnData {
@@ -301,13 +357,17 @@ impl ColumnData {
     /// load them (`ColumnReader.cpp`): every column holds `num_rows` values back to back, and an
     /// encoded-text column's variable region is prefixed with its `u64` length.
     ///
+    /// Tiling continues after the columns of `loaded`. If `bytes` holds the whole table
+    /// (`is_complete`), the columns must tile it exactly; otherwise the leading columns that lie
+    /// wholly inside it are tiled.
+    ///
     /// # Type Parameters
     ///
     /// * `EncodingsType` - Iterates over the encodings of the columns, in buffer order.
     ///
     /// # Returns
     ///
-    /// The byte ranges of each column on success.
+    /// The tiled columns on success.
     ///
     /// # Errors
     ///
@@ -319,53 +379,157 @@ impl ColumnData {
     pub(crate) fn tile<EncodingsType: Iterator<Item = ColumnEncoding>>(
         encodings: EncodingsType,
         bytes: &[u8],
+        is_complete: bool,
         num_rows: u32,
         table: TableOrdinal,
-    ) -> Result<Box<[Self]>, TableError> {
+        loaded: LoadedColumns,
+    ) -> Result<LoadedColumns, TableError> {
+        let LoadedColumns { mut columns, size } = loaded;
         let mut cursor = Cursor {
             bytes,
-            position: 0,
+            position: size,
             table,
+            num_variables: 0,
         };
         let num_rows_u64 = u64::from(num_rows);
-        let mut columns = Vec::new();
         let mut variable_offsets = Vec::new();
-        for encoding in encodings {
-            let column = match encoding {
-                ColumnEncoding::Int64
-                | ColumnEncoding::DeltaInt64
-                | ColumnEncoding::Float64
-                | ColumnEncoding::DictionaryFloat
-                | ColumnEncoding::VariableString => Self::Values(cursor.take(num_rows_u64, 8)?),
-                ColumnEncoding::Boolean => Self::Values(cursor.take(num_rows_u64, 1)?),
-                ColumnEncoding::FormattedFloat64 => Self::FormattedFloat {
-                    values: cursor.take(num_rows_u64, 8)?,
-                    formats: cursor.take(num_rows_u64, 2)?,
-                },
-                ColumnEncoding::ClpString | ColumnEncoding::UnstructuredArray => {
-                    let logtypes = cursor.take(num_rows_u64, 8)?;
-                    let num_variables = cursor.read_u64()?;
-                    let variables = cursor.take(num_variables, 8)?;
-                    variable_offsets.push((logtypes.clone(), num_variables));
-                    Self::EncodedText {
-                        logtypes,
-                        variables,
-                    }
+        let mut is_truncated = false;
+        for encoding in encodings.skip(columns.len()) {
+            let begin = cursor.position;
+            let column = match Self::tile_column(&mut cursor, encoding, num_rows_u64) {
+                Ok(column) => column,
+                Err(_) if !is_complete => {
+                    cursor.position = begin;
+                    is_truncated = true;
+                    break;
                 }
-                ColumnEncoding::Timestamp => Self::Timestamp {
-                    epoch_ns: cursor.take(num_rows_u64, 8)?,
-                    pattern_ids: cursor.take(num_rows_u64, 8)?,
-                },
+                Err(error) => return Err(error),
             };
+            if let Self::EncodedText { logtypes, .. } = &column {
+                variable_offsets.push((logtypes.clone(), cursor.num_variables));
+            }
             columns.push(column);
         }
-        if cursor.position != bytes.len() {
+        let is_tiled = is_truncated || (is_complete && cursor.position == bytes.len());
+        if !is_tiled {
             return Err(TableError::ColumnTiling(table));
         }
         for (logtypes, num_variables) in variable_offsets {
             check_variable_offsets(&bytes[logtypes], num_variables, table)?;
         }
-        Ok(columns.into_boxed_slice())
+        Ok(LoadedColumns {
+            columns,
+            size: cursor.position,
+        })
+    }
+
+    /// Measures the leading `num_columns` columns of an ERT from `prefix`, its decoded leading
+    /// bytes, which must reach the variable count of every encoded-text column measured.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `EncodingsType` - Iterates over the encodings of the columns, in buffer order.
+    ///
+    /// # Returns
+    ///
+    /// The size of the columns on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`TableError::ColumnTiling`] if the columns overrun `table_size` bytes.
+    pub(crate) fn measure<EncodingsType: Iterator<Item = ColumnEncoding>>(
+        encodings: EncodingsType,
+        prefix: &[u8],
+        num_rows: u32,
+        table_size: u64,
+        table: TableOrdinal,
+    ) -> Result<LeadingColumnsSize, TableError> {
+        let num_rows = u64::from(num_rows);
+        let overrun = || TableError::ColumnTiling(table);
+        let mut position: u64 = 0;
+        for encoding in encodings {
+            let size = match encoding {
+                ColumnEncoding::Int64
+                | ColumnEncoding::DeltaInt64
+                | ColumnEncoding::Float64
+                | ColumnEncoding::DictionaryFloat
+                | ColumnEncoding::VariableString => num_rows.checked_mul(8),
+                ColumnEncoding::Boolean => Some(num_rows),
+                ColumnEncoding::FormattedFloat64 => num_rows.checked_mul(8 + 2),
+                ColumnEncoding::Timestamp => num_rows.checked_mul(8 + 8),
+                ColumnEncoding::ClpString | ColumnEncoding::UnstructuredArray => {
+                    let count_end = num_rows
+                        .checked_mul(8)
+                        .and_then(|size| position.checked_add(size))
+                        .and_then(|logtypes_end| logtypes_end.checked_add(8))
+                        .filter(|count_end| *count_end <= table_size)
+                        .ok_or_else(overrun)?;
+                    let count = usize::try_from(count_end)
+                        .ok()
+                        .and_then(|end| prefix.get(end - 8..end));
+                    let Some(count) = count else {
+                        return Ok(LeadingColumnsSize::AtLeast(count_end));
+                    };
+                    let mut value = [0; 8];
+                    value.copy_from_slice(count);
+                    u64::from_le_bytes(value)
+                        .checked_mul(8)
+                        .and_then(|size| size.checked_add(count_end - position))
+                }
+            };
+            position = size
+                .and_then(|size| position.checked_add(size))
+                .filter(|end| *end <= table_size)
+                .ok_or_else(overrun)?;
+        }
+        Ok(LeadingColumnsSize::Known(position))
+    }
+
+    /// Tiles the column of `encoding` at the cursor, leaving an encoded-text column's variable
+    /// count in [`Cursor::num_variables`].
+    ///
+    /// # Returns
+    ///
+    /// The column on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`Cursor::take`]'s return values on failure.
+    /// * Forwards [`Cursor::read_u64`]'s return values on failure.
+    fn tile_column(
+        cursor: &mut Cursor<'_>,
+        encoding: ColumnEncoding,
+        num_rows: u64,
+    ) -> Result<Self, TableError> {
+        Ok(match encoding {
+            ColumnEncoding::Int64
+            | ColumnEncoding::DeltaInt64
+            | ColumnEncoding::Float64
+            | ColumnEncoding::DictionaryFloat
+            | ColumnEncoding::VariableString => Self::Values(cursor.take(num_rows, 8)?),
+            ColumnEncoding::Boolean => Self::Values(cursor.take(num_rows, 1)?),
+            ColumnEncoding::FormattedFloat64 => Self::FormattedFloat {
+                values: cursor.take(num_rows, 8)?,
+                formats: cursor.take(num_rows, 2)?,
+            },
+            ColumnEncoding::ClpString | ColumnEncoding::UnstructuredArray => {
+                let logtypes = cursor.take(num_rows, 8)?;
+                cursor.num_variables = cursor.read_u64()?;
+                let variables = cursor.take(cursor.num_variables, 8)?;
+                Self::EncodedText {
+                    logtypes,
+                    variables,
+                }
+            }
+            ColumnEncoding::Timestamp => Self::Timestamp {
+                epoch_ns: cursor.take(num_rows, 8)?,
+                pattern_ids: cursor.take(num_rows, 8)?,
+            },
+        })
     }
 }
 
@@ -374,6 +538,9 @@ struct Cursor<'bytes> {
     bytes: &'bytes [u8],
     position: usize,
     table: TableOrdinal,
+
+    /// The variable count of the last encoded-text column read.
+    num_variables: u64,
 }
 
 impl Cursor<'_> {
@@ -516,7 +683,15 @@ mod tests {
         bytes: &[u8],
         num_rows: u32,
     ) -> Result<Box<[ColumnData]>, TableError> {
-        ColumnData::tile(encodings.iter().copied(), bytes, num_rows, TABLE)
+        let loaded = ColumnData::tile(
+            encodings.iter().copied(),
+            bytes,
+            true,
+            num_rows,
+            TABLE,
+            LoadedColumns::default(),
+        )?;
+        Ok(loaded.columns.into_boxed_slice())
     }
 
     /// # Returns
@@ -660,6 +835,100 @@ mod tests {
                     variables: 8..8,
                 },
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn prefixes_tile_their_leading_columns_and_continue_after_them() -> anyhow::Result<()> {
+        let encodings = [
+            ColumnEncoding::Int64,
+            ColumnEncoding::ClpString,
+            ColumnEncoding::Boolean,
+        ];
+        let mut bytes = le_bytes(&[7, 8, logtype_word(5, 0), logtype_word(6, 1), 2, 10, 20]);
+        bytes.extend([1, 0]);
+        let tile_prefix = |size: usize, loaded: LoadedColumns| {
+            ColumnData::tile(
+                encodings.iter().copied(),
+                &bytes[..size],
+                false,
+                2,
+                TABLE,
+                loaded,
+            )
+        };
+        for (size, num_columns) in [(0, 0), (15, 0), (16, 1), (47, 1), (56, 2), (57, 2)] {
+            let loaded = tile_prefix(size, LoadedColumns::default())?;
+            assert_eq!(loaded.columns.len(), num_columns, "{size} bytes");
+            let complete =
+                ColumnData::tile(encodings.iter().copied(), &bytes, true, 2, TABLE, loaded)?;
+            assert_eq!(
+                complete.columns,
+                tile(&encodings, &bytes, 2)?.into_vec(),
+                "{size} bytes"
+            );
+        }
+
+        let result = tile_prefix(58, LoadedColumns::default());
+        assert!(
+            matches!(result, Err(TableError::ColumnTiling(TABLE))),
+            "every column fits a prefix shorter than the table: {result:?}"
+        );
+        let mut bad_offsets = bytes.clone();
+        bad_offsets[16..24].copy_from_slice(&logtype_word(6, 3).to_le_bytes());
+        let result = ColumnData::tile(
+            encodings.iter().copied(),
+            &bad_offsets[..56],
+            false,
+            2,
+            TABLE,
+            LoadedColumns::default(),
+        );
+        assert!(
+            matches!(result, Err(TableError::VariableOutOfRange { .. })),
+            "{result:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn leading_columns_are_measured_from_their_variable_counts() -> anyhow::Result<()> {
+        let encodings = [
+            ColumnEncoding::Int64,
+            ColumnEncoding::ClpString,
+            ColumnEncoding::Boolean,
+        ];
+        let mut bytes = le_bytes(&[7, 8, logtype_word(5, 0), logtype_word(6, 1), 2, 10, 20]);
+        bytes.extend([1, 0]);
+        let table_size = bytes.len() as u64;
+        let measure = |prefix: &[u8], num_columns: usize| {
+            ColumnData::measure(
+                encodings.iter().copied().take(num_columns),
+                prefix,
+                2,
+                table_size,
+                TABLE,
+            )
+        };
+        assert_eq!(measure(&[], 0)?, LeadingColumnsSize::Known(0));
+        assert_eq!(measure(&[], 1)?, LeadingColumnsSize::Known(16));
+        assert_eq!(measure(&bytes[..39], 2)?, LeadingColumnsSize::AtLeast(40));
+        assert_eq!(measure(&bytes[..40], 2)?, LeadingColumnsSize::Known(56));
+        assert_eq!(measure(&bytes, 3)?, LeadingColumnsSize::Known(table_size));
+
+        let result =
+            ColumnData::measure(encodings.iter().copied(), &bytes, 2, table_size - 1, TABLE);
+        assert!(
+            matches!(result, Err(TableError::ColumnTiling(TABLE))),
+            "{result:?}"
+        );
+        let mut huge_count = bytes;
+        huge_count[32..40].copy_from_slice(&u64::MAX.to_le_bytes());
+        let result = measure(&huge_count, 2);
+        assert!(
+            matches!(result, Err(TableError::ColumnTiling(TABLE))),
+            "{result:?}"
         );
         Ok(())
     }

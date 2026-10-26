@@ -279,7 +279,7 @@ fn prefix_plans_decode_only_up_to_the_last_needed_table() -> anyhow::Result<()> 
             )?,
         )?;
         for chunk in frame.chunks(64) {
-            if session.push_chunk(chunk)? {
+            if session.push_chunk(&mut decoder, chunk)? {
                 break;
             }
         }

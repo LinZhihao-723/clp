@@ -188,7 +188,7 @@ pub fn read_everything(
 
         let mut session = decoder.begin(read, acquire(0xff)?)?;
         for chunk in frame.chunks(chunk_size.max(1)) {
-            if session.push_chunk(chunk)? {
+            if session.push_chunk(&mut decoder, chunk)? {
                 break;
             }
         }

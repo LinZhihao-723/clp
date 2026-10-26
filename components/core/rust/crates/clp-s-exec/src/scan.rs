@@ -8,13 +8,17 @@ use clp_s_format::SharedBytes;
 use clp_s_format::StreamDecoder;
 use clp_s_format::StreamRead;
 use clp_s_format::TableBytes;
+use clp_s_format::TableInfo;
 use clp_s_format::TableOrdinal;
 use clp_s_format::TableSet;
+use clp_s_io::ArchiveStorage;
 use clp_s_io::StreamReadOptions;
+use clp_s_io::StreamReader;
 use clp_s_json::JsonRecordBuffer;
 use clp_s_json::JsonTemplate;
 use clp_s_query::NormalExpr;
 use clp_s_resources::CancellationToken;
+use clp_s_resources::PooledBuffer;
 use clp_s_search::ArchiveSearchPlan;
 use clp_s_search::CompiledTableFilter;
 use clp_s_search::EvaluationScratch;
@@ -26,10 +30,12 @@ use clp_s_search::TableFilterPlan;
 use clp_s_search::TerminationStage;
 use clp_s_table::ColumnDemand;
 use clp_s_table::ColumnSet;
+use clp_s_table::LeadingColumnsSize;
 use clp_s_table::RecordId;
 use clp_s_table::ResolvedProjection;
 use clp_s_table::Table;
 use clp_s_table::TableError;
+use clp_s_table::TableLayout;
 use clp_s_table::TableScanState;
 use clp_s_table::TableScanner;
 
@@ -636,11 +642,11 @@ impl Scan {
     /// * Forwards [`CompiledTableFilter::evaluate`]'s return values on failure.
     /// * Forwards [`TableScanner::finish_window`]'s return values on failure.
     fn open_window(&mut self) -> Result<bool, ReadError> {
-        let Some(table) = &mut self.table else {
-            return Ok(false);
-        };
-        let candidate = &self.candidates[table.candidate];
         loop {
+            let Some(table) = &mut self.table else {
+                return Ok(false);
+            };
+            let candidate = &self.candidates[table.candidate];
             self.cancellation_token.check()?;
             let Some(window) = self.scanner.next_window(&mut table.state)? else {
                 self.table = None;
@@ -651,6 +657,16 @@ impl Scan {
                 None => window.selected.select_all(),
                 Some(filter) => filter.evaluate(window, &mut self.scratch)?,
             }
+            if table.state.is_output_deferred()
+                && 0 != self.scanner.batch(&table.state).selection().count()
+            {
+                self.load_table_tail()?;
+            }
+            let Some(table) = &self.table else {
+                return Err(ReadError::Internal(
+                    "the table being scanned is missing".into(),
+                ));
+            };
             let num_selected = self.scanner.finish_window(&table.state)?;
             if 0 == num_selected {
                 continue;
@@ -679,8 +695,10 @@ impl Scan {
     /// Returns an error if:
     ///
     /// * [`ReadError::Resource`] if the scan's token is cancelled.
-    /// * [`ReadError::Internal`] if the read plan names a table that is not a candidate.
+    /// * [`ReadError::Internal`] if the table is missing from the directory.
     /// * Forwards [`TableBytes::new`]'s return values on failure.
+    /// * Forwards [`TableBytes::new_prefix`]'s return values on failure.
+    /// * Forwards [`Self::candidate_index`]'s return values on failure.
     /// * Forwards [`Table::load`]'s return values on failure.
     /// * Forwards [`clp_s_json::RenderContext::template`]'s return values on failure.
     fn open_table(&mut self) -> Result<bool, ReadError> {
@@ -692,21 +710,18 @@ impl Scan {
             return Ok(false);
         };
         self.cancellation_token.check()?;
-        let candidate = self
-            .candidates
-            .binary_search_by_key(&ordinal, |candidate| candidate.ordinal)
-            .map_err(|_| {
-                ReadError::Internal(
-                    format!("the read plan names table {ordinal:?}, which is not a candidate")
-                        .into(),
-                )
-            })?;
         let tables = self.archive.archive_tables();
         let info =
             *tables.index().tables().table(ordinal).ok_or_else(|| {
                 ReadError::Internal(format!("table {ordinal:?} is missing").into())
             })?;
-        let bytes = TableBytes::new(&stream.bytes, info).map_err(TableError::from)?;
+        let bytes = if stream.reader.is_some() {
+            TableBytes::new_prefix(&stream.bytes, info)
+        } else {
+            TableBytes::new(&stream.bytes, info)
+        }
+        .map_err(TableError::from)?;
+        let candidate = self.candidate_index(ordinal)?;
         let table = Arc::new(Table::load(Arc::clone(tables), bytes)?);
         let template = if self.request.outputs().is_json_needed {
             Some(self.archive.render_context().template(
@@ -729,7 +744,9 @@ impl Scan {
         Ok(true)
     }
 
-    /// Releases the current stream and decodes the next planned one.
+    /// Releases the current stream and decodes the next planned one: up to the end of its last
+    /// table, or, if the scan reads only the leading columns of that table, up to the end of the
+    /// columns needed before any of its rows is selected.
     ///
     /// # Returns
     ///
@@ -739,42 +756,209 @@ impl Scan {
     ///
     /// Returns an error if:
     ///
-    /// * [`ReadError::Resource`] if the scan's token is cancelled or the memory budget cannot admit
-    ///   the stream.
-    /// * Forwards [`clp_s_resources::MemoryBudget::try_reserve`]'s return values on failure.
-    /// * Forwards [`clp_s_resources::BufferPool::acquire`]'s return values on failure.
+    /// * [`ReadError::Resource`] if the scan's token is cancelled.
+    /// * Forwards [`Self::leading_columns_to_decode`]'s return values on failure.
+    /// * Forwards [`Self::acquire_stream_buffer`]'s return values on failure.
     /// * Forwards [`clp_s_io::ArchiveStorage::read_stream`]'s return values on failure.
+    /// * Forwards [`clp_s_io::ArchiveStorage::begin_stream`]'s return values on failure.
+    /// * Forwards [`LeadingColumns::begin_decode`]'s return values on failure.
     fn open_stream(&mut self) -> Result<bool, ReadError> {
         self.stream = None;
         let Some(read) = self.reads.next() else {
             return Ok(false);
         };
         self.cancellation_token.check()?;
-        let context = self.archive.context();
-        let reservation = context
-            .memory_budget()
-            .try_reserve(read.decoded_prefix_size)?;
-        let buffer = context
-            .buffer_pool()
-            .acquire(read.decoded_prefix_size, reservation)?;
-        let options = StreamReadOptions {
-            chunk_size: context.config().stream_chunk_size,
-            cancellation_token: self.cancellation_token.clone(),
-        };
+        let leading_columns = self.leading_columns_to_decode(&read)?;
+        let buffer = self.acquire_stream_buffer(read.decoded_prefix_size)?;
+        let options = self.stream_read_options();
         let storage = self.archive.storage();
         let num_bytes_read_before = storage.num_bytes_read();
-        let result = storage.read_stream(&read, &mut self.decoder, buffer, &options);
+        let result = match &leading_columns {
+            None => storage
+                .read_stream(&read, &mut self.decoder, buffer, &options)
+                .map(|bytes| (bytes, None))
+                .map_err(ReadError::from),
+            Some(leading_columns) => leading_columns
+                .begin_decode(storage, &mut self.decoder, &read, buffer, &options)
+                .map(|mut reader| (reader.share(), Some(reader))),
+        };
         self.stats.num_bytes_read += storage
             .num_bytes_read()
             .saturating_sub(num_bytes_read_before);
-        let bytes = result?;
+        let (bytes, reader) = result?;
         self.stats.num_streams_decoded += 1;
-        self.stats.num_decoded_bytes += bytes.len() as u64;
+        self.stats.num_decoded_bytes += reader
+            .as_ref()
+            .map_or(bytes.len() as u64, StreamReader::num_decoded_bytes);
         self.stream = Some(StreamCursor {
             bytes,
             tables: read.tables.into_iter(),
+            decoded_prefix_size: read.decoded_prefix_size,
+            reader,
         });
         Ok(true)
+    }
+
+    /// Decodes the rest of the current table, which was loaded from a prefix of its bytes without
+    /// some output columns, and resumes its scan at the current window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ReadError::Internal`] if no table, stream or stream decode is in progress.
+    /// * Forwards [`clp_s_table::ArchiveTables::layout`]'s return values on failure.
+    /// * Forwards [`Self::acquire_stream_buffer`]'s return values on failure.
+    /// * Forwards [`StreamReader::restart`]'s return values on failure.
+    /// * Forwards [`LeadingColumns::decode`]'s return values on failure.
+    /// * Forwards [`TableBytes::new_prefix`]'s return values on failure.
+    /// * Forwards [`Table::load_after`]'s return values on failure.
+    /// * Forwards [`TableScanner::resume`]'s return values on failure.
+    fn load_table_tail(&mut self) -> Result<(), ReadError> {
+        let missing = || ReadError::Internal("a deferred table has no stream decode".into());
+        let TableCursor {
+            state,
+            candidate,
+            template,
+        } = self.table.take().ok_or_else(missing)?;
+        let info = *state.table().info();
+        let loaded_columns = state.table().loaded_columns();
+        let suspended = state.suspend();
+        let (mut reader, decoded_prefix_size) = {
+            let stream = self.stream.as_mut().ok_or_else(missing)?;
+            stream.bytes = SharedBytes::new();
+            (
+                stream.reader.take().ok_or_else(missing)?,
+                stream.decoded_prefix_size,
+            )
+        };
+        let tables = Arc::clone(self.archive.archive_tables());
+        let layout = tables.layout(info.ordinal)?;
+        let num_decoded_bytes_before = reader.num_decoded_bytes();
+        if !reader.try_reclaim() {
+            let buffer = self.acquire_stream_buffer(decoded_prefix_size)?;
+            reader.restart(&mut self.decoder, buffer)?;
+        }
+        let options = self.stream_read_options();
+        let storage = self.archive.storage();
+        let num_bytes_read_before = storage.num_bytes_read();
+        let leading_columns = LeadingColumns {
+            info,
+            layout,
+            num_columns: self.candidates[candidate].num_demanded_columns,
+        };
+        let result = leading_columns.decode(storage, &mut self.decoder, &mut reader, &options);
+        self.stats.num_bytes_read += storage
+            .num_bytes_read()
+            .saturating_sub(num_bytes_read_before);
+        result?;
+        self.stats.num_decoded_bytes += reader
+            .num_decoded_bytes()
+            .saturating_sub(num_decoded_bytes_before);
+        let bytes = reader.share();
+        let table_bytes = TableBytes::new_prefix(&bytes, info).map_err(TableError::from)?;
+        self.stream.as_mut().ok_or_else(missing)?.bytes = bytes;
+        let table = Arc::new(Table::load_after(tables, table_bytes, loaded_columns)?);
+        let state = self.scanner.resume(suspended, table)?;
+        self.table = Some(TableCursor {
+            state,
+            candidate,
+            template,
+        });
+        Ok(())
+    }
+
+    /// Decides how much of the last table of `read` to decode before scanning it.
+    ///
+    /// # Returns
+    ///
+    /// On success, the leading columns of the last table to decode first, or `None` if the scan
+    /// reads all of its columns: its filter columns if rows may be rejected and other demanded
+    /// columns follow them, else every demanded column.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ReadError::Internal`] if the table is missing from the directory.
+    /// * Forwards [`Self::candidate_index`]'s return values on failure.
+    /// * Forwards [`clp_s_table::ArchiveTables::layout`]'s return values on failure.
+    fn leading_columns_to_decode(
+        &self,
+        read: &StreamRead,
+    ) -> Result<Option<LeadingColumns>, ReadError> {
+        let Some(&ordinal) = read.tables.last() else {
+            return Ok(None);
+        };
+        let candidate = &self.candidates[self.candidate_index(ordinal)?];
+        let num_columns = if candidate.filter.is_some()
+            && candidate.num_evaluation_columns < candidate.num_demanded_columns
+        {
+            candidate.num_evaluation_columns
+        } else {
+            candidate.num_demanded_columns
+        };
+        if num_columns == candidate.num_columns {
+            return Ok(None);
+        }
+        let tables = self.archive.archive_tables();
+        let info =
+            *tables.index().tables().table(ordinal).ok_or_else(|| {
+                ReadError::Internal(format!("table {ordinal:?} is missing").into())
+            })?;
+        Ok(Some(LeadingColumns {
+            info,
+            layout: tables.layout(ordinal)?,
+            num_columns,
+        }))
+    }
+
+    /// # Returns
+    ///
+    /// The index in the scan's candidates of table `ordinal` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`ReadError::Internal`] if the read plan names a table that is not a candidate.
+    fn candidate_index(&self, ordinal: TableOrdinal) -> Result<usize, ReadError> {
+        self.candidates
+            .binary_search_by_key(&ordinal, |candidate| candidate.ordinal)
+            .map_err(|_| {
+                ReadError::Internal(
+                    format!("the read plan names table {ordinal:?}, which is not a candidate")
+                        .into(),
+                )
+            })
+    }
+
+    /// Reserves `size` bytes of the memory budget and acquires a pooled buffer for them.
+    ///
+    /// # Returns
+    ///
+    /// The buffer on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`clp_s_resources::MemoryBudget::try_reserve`]'s return values on failure.
+    /// * Forwards [`clp_s_resources::BufferPool::acquire`]'s return values on failure.
+    fn acquire_stream_buffer(&self, size: u64) -> Result<PooledBuffer, ReadError> {
+        let context = self.archive.context();
+        let reservation = context.memory_budget().try_reserve(size)?;
+        Ok(context.buffer_pool().acquire(size, reservation)?)
+    }
+
+    /// # Returns
+    ///
+    /// The options of the scan's stream reads.
+    fn stream_read_options(&self) -> StreamReadOptions {
+        StreamReadOptions {
+            chunk_size: self.archive.context().config().stream_chunk_size,
+            cancellation_token: self.cancellation_token.clone(),
+        }
     }
 
     /// Drops every cursor so the scan delivers nothing more.
@@ -809,6 +993,14 @@ struct Candidate {
 
     demand: Arc<ColumnDemand>,
     dictionary_needs: DictionaryNeeds,
+
+    /// The number of leading columns that hold every column the filter reads.
+    num_evaluation_columns: usize,
+
+    /// The number of leading columns that hold every column the scan reads.
+    num_demanded_columns: usize,
+
+    num_columns: usize,
 }
 
 impl Candidate {
@@ -856,6 +1048,18 @@ impl Candidate {
         {
             output.insert(column);
         }
+        let num_leading_columns = |columns: &ColumnSet| {
+            columns
+                .iter()
+                .last()
+                .map_or(0, |column| column.get() as usize + 1)
+        };
+        let num_evaluation_columns = num_leading_columns(&evaluation);
+        let mut demanded = output.clone();
+        demanded.union_with(&evaluation);
+        if let Some(column) = layout.log_event_idx_column() {
+            demanded.insert(column);
+        }
         let demand = ColumnDemand::new(evaluation, output);
         let dictionary_needs = demand.dictionary_needs(&layout);
         Ok(Self {
@@ -863,6 +1067,9 @@ impl Candidate {
             filter,
             demand: Arc::new(demand),
             dictionary_needs,
+            num_evaluation_columns,
+            num_demanded_columns: num_leading_columns(&demanded),
+            num_columns: layout.columns().len(),
         })
     }
 }
@@ -880,10 +1087,87 @@ enum Planned {
 /// The decoded stream whose tables are being scanned.
 #[derive(Debug)]
 struct StreamCursor {
+    /// The decoded prefix of the stream.
     bytes: SharedBytes,
 
     /// The needed tables of the stream not started yet.
     tables: std::vec::IntoIter<TableOrdinal>,
+
+    /// The planned prefix of the stream: the end of its last needed table.
+    decoded_prefix_size: u64,
+
+    /// The decode of the stream, kept while its last table is decoded only up to some leading
+    /// columns.
+    reader: Option<StreamReader>,
+}
+
+/// The leading columns of one table to decode.
+#[derive(Debug)]
+struct LeadingColumns {
+    info: TableInfo,
+    layout: Arc<TableLayout>,
+    num_columns: usize,
+}
+
+impl LeadingColumns {
+    /// Begins the decode of `read`, whose last table these columns belong to, and decodes it
+    /// through them.
+    ///
+    /// # Returns
+    ///
+    /// The stream decode on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`ArchiveStorage::begin_stream`]'s return values on failure.
+    /// * Forwards [`Self::decode`]'s return values on failure.
+    fn begin_decode(
+        &self,
+        storage: &ArchiveStorage,
+        decoder: &mut StreamDecoder,
+        read: &StreamRead,
+        buffer: PooledBuffer,
+        options: &StreamReadOptions,
+    ) -> Result<StreamReader, ReadError> {
+        let mut reader = storage.begin_stream(read, decoder, buffer, options)?;
+        self.decode(storage, decoder, &mut reader, options)?;
+        Ok(reader)
+    }
+
+    /// Decodes `reader` until it holds these columns, measuring them from the bytes as they are
+    /// decoded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`TableLayout::leading_columns_size`]'s return values on failure.
+    /// * Forwards [`ArchiveStorage::decode_stream_to`]'s return values on failure.
+    fn decode(
+        &self,
+        storage: &ArchiveStorage,
+        decoder: &mut StreamDecoder,
+        reader: &mut StreamReader,
+        options: &StreamReadOptions,
+    ) -> Result<(), ReadError> {
+        let table_begin = usize::try_from(self.info.stream_offset).unwrap_or(usize::MAX);
+        loop {
+            let prefix = reader.decoded().get(table_begin..).unwrap_or_default();
+            let size = self
+                .layout
+                .leading_columns_size(&self.info, prefix, self.num_columns)?;
+            let (size, is_known) = match size {
+                LeadingColumnsSize::Known(size) => (size, true),
+                LeadingColumnsSize::AtLeast(size) => (size, false),
+            };
+            storage.decode_stream_to(reader, decoder, self.info.stream_offset + size, options)?;
+            if is_known {
+                return Ok(());
+            }
+        }
+    }
 }
 
 /// The table being scanned.

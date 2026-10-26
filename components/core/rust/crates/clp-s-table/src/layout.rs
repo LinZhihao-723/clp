@@ -7,11 +7,14 @@ use clp_s_format::NodeId;
 use clp_s_format::NodeType;
 use clp_s_format::SchemaId;
 use clp_s_format::SchemaTree;
+use clp_s_format::TableInfo;
 
 use crate::ColumnEncoding;
 use crate::ColumnIndex;
 use crate::LayoutError;
 use crate::ResolvedProjection;
+use crate::TableError;
+use crate::table::ColumnData;
 
 /// One column of a table layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +22,17 @@ pub struct ColumnSpec {
     pub node_id: NodeId,
     pub node_type: NodeType,
     pub encoding: ColumnEncoding,
+}
+
+/// How many leading bytes of an ERT its first columns take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeadingColumnsSize {
+    /// The columns end at this offset.
+    Known(u64),
+
+    /// The size depends on bytes past the given prefix: decode at least this many leading bytes
+    /// and measure again.
+    AtLeast(u64),
 }
 
 /// The compiled, validated layout shared by every ERT of one schema in one archive.
@@ -97,6 +111,36 @@ impl TableLayout {
     #[must_use]
     pub const fn shape(&self) -> &RecordShape {
         &self.shape
+    }
+
+    /// Measures the leading `num_columns` columns of the ERT `info` of this layout from `prefix`,
+    /// its decoded leading bytes.
+    ///
+    /// # Returns
+    ///
+    /// The size of the columns on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`ColumnData::measure`]'s return values on failure.
+    pub fn leading_columns_size(
+        &self,
+        info: &TableInfo,
+        prefix: &[u8],
+        num_columns: usize,
+    ) -> Result<LeadingColumnsSize, TableError> {
+        ColumnData::measure(
+            self.columns
+                .iter()
+                .take(num_columns)
+                .map(|spec| spec.encoding),
+            prefix,
+            info.num_rows,
+            info.uncompressed_size,
+            info.ordinal,
+        )
     }
 
     /// Builds the shape of the records of this layout rendered under `projection`: like

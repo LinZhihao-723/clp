@@ -19,6 +19,7 @@ use clp_s_format::OpenStep;
 use clp_s_format::ReaderLimits;
 use clp_s_format::SectionId;
 use clp_s_format::SharedBytes;
+use clp_s_format::StreamDecodeSession;
 use clp_s_format::StreamDecoder;
 use clp_s_format::StreamRead;
 use clp_s_format::VariableDictionary;
@@ -195,14 +196,13 @@ impl ArchiveStorage {
     ///
     /// Returns an error if:
     ///
-    /// * [`StorageError::Io`] if a read fails.
     /// * [`StorageError::Cancelled`] if `options.cancellation_token` is cancelled.
     /// * [`StorageError::Format`] if the stream exceeds [`ReaderLimits::max_packed_stream_size`].
-    /// * [`StorageError::Resource`] if a read buffer cannot be allocated.
+    /// * Forwards [`fetch`]'s return values on failure.
     /// * Forwards [`StreamDecoder::decode_resident`]'s return values on failure.
-    /// * Forwards [`StreamDecoder::begin`]'s return values on failure.
-    /// * Forwards [`clp_s_format::StreamDecodeSession::push_chunk`]'s return values on failure.
-    /// * Forwards [`clp_s_format::StreamDecodeSession::finish`]'s return values on failure.
+    /// * Forwards [`Self::begin_stream`]'s return values on failure.
+    /// * Forwards [`Self::decode_stream_to`]'s return values on failure.
+    /// * Forwards [`StreamReader::finish`]'s return values on failure.
     pub fn read_stream(
         &self,
         read: &StreamRead,
@@ -210,48 +210,165 @@ impl ArchiveStorage {
         buffer: PooledBuffer,
         options: &StreamReadOptions,
     ) -> Result<SharedBytes, StorageError> {
+        let capabilities = self.source.capabilities();
+        if capabilities.is_resident || capabilities.is_remote {
+            self.check_stream_read(read, options)?;
+            let frame = fetch(
+                &self.source,
+                read.stream.compressed_range,
+                &options.cancellation_token,
+                &self.num_bytes_read,
+            )?;
+            return Ok(decoder.decode_resident(&frame, read, buffer)?);
+        }
+        let mut reader = self.begin_stream(read, decoder, buffer, options)?;
+        self.decode_stream_to(&mut reader, decoder, read.decoded_prefix_size, options)?;
+        reader.finish()
+    }
+
+    /// Starts a stepwise decode of one planned stream into `buffer`, which
+    /// [`Self::decode_stream_to`] advances. A resident or remote source is fetched whole up front;
+    /// a local file is read in `options.chunk_size` chunks as decoding proceeds.
+    ///
+    /// # Returns
+    ///
+    /// The reader on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`StorageError::Cancelled`] if `options.cancellation_token` is cancelled.
+    /// * [`StorageError::Format`] if the stream exceeds [`ReaderLimits::max_packed_stream_size`].
+    /// * Forwards [`fetch`]'s return values on failure.
+    /// * Forwards [`allocate`]'s return values on failure.
+    /// * Forwards [`StreamDecoder::begin`]'s return values on failure.
+    pub fn begin_stream(
+        &self,
+        read: &StreamRead,
+        decoder: &mut StreamDecoder,
+        buffer: PooledBuffer,
+        options: &StreamReadOptions,
+    ) -> Result<StreamReader, StorageError> {
+        self.check_stream_read(read, options)?;
+        let range = read.stream.compressed_range;
+        let capabilities = self.source.capabilities();
+        let input = if capabilities.is_resident || capabilities.is_remote {
+            StreamInput::Frame {
+                frame: fetch(
+                    &self.source,
+                    range,
+                    &options.cancellation_token,
+                    &self.num_bytes_read,
+                )?,
+                position: 0,
+            }
+        } else {
+            StreamInput::Chunks {
+                chunk: allocate(options.chunk_size.clamp(1, range.len().max(1)))?,
+                pending: 0..0,
+                next_offset: range.begin,
+            }
+        };
+        Ok(StreamReader {
+            read: StreamRead {
+                stream: read.stream,
+                decoded_prefix_size: read.decoded_prefix_size,
+                tables: Vec::new(),
+            },
+            input,
+            session: decoder.begin(read, buffer)?,
+            num_decoded_bytes: 0,
+        })
+    }
+
+    /// Advances `reader` until the first `target_size` bytes of its stream are decoded (for the
+    /// planned prefix of a whole stream, until the frame ends).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`StorageError::Cancelled`] if `options.cancellation_token` is cancelled.
+    /// * [`StorageError::Format`] if the frame ends, or stops making progress, before the target.
+    /// * Forwards [`read_into`]'s return values on failure.
+    /// * Forwards [`clp_s_format::StreamDecodeSession::decode_until`]'s return values on failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `decoder` did not begin the reader's current session, if the reader's decoded
+    /// bytes are shared (see [`StreamReader::try_reclaim`]), or if `target_size` exceeds the
+    /// planned prefix.
+    pub fn decode_stream_to(
+        &self,
+        reader: &mut StreamReader,
+        decoder: &mut StreamDecoder,
+        target_size: u64,
+        options: &StreamReadOptions,
+    ) -> Result<(), StorageError> {
         let token = &options.cancellation_token;
-        if read.stream.uncompressed_size > self.limits.max_packed_stream_size {
-            return Err(FormatError::LimitExceeded {
-                what: "packed stream size",
-                actual_size: read.stream.uncompressed_size,
-                limit_size: self.limits.max_packed_stream_size,
+        let range = reader.read.stream.compressed_range;
+        let decoded_size_before = reader.session.decoded().len();
+        let StreamReader { input, session, .. } = reader;
+        while !session.has_decoded(target_size) {
+            token.check().map_err(|_| StorageError::Cancelled)?;
+            let consumed = match input {
+                StreamInput::Frame { frame, position } => {
+                    if *position == frame.len() {
+                        break;
+                    }
+                    let consumed =
+                        session.decode_until(decoder, &frame[*position..], target_size)?;
+                    *position += consumed;
+                    consumed
+                }
+                StreamInput::Chunks {
+                    chunk,
+                    pending,
+                    next_offset,
+                } => {
+                    if pending.start == pending.end {
+                        if *next_offset == range.end {
+                            break;
+                        }
+                        let chunk_range = ByteRange {
+                            begin: *next_offset,
+                            end: range.end.min(*next_offset + chunk.len() as u64),
+                        };
+                        let chunk_size = usize::try_from(chunk_range.len()).unwrap_or(usize::MAX);
+                        read_into(
+                            &self.source,
+                            chunk_range,
+                            &mut chunk[..chunk_size],
+                            token,
+                            &self.num_bytes_read,
+                        )?;
+                        *pending = 0..chunk_size;
+                        *next_offset = chunk_range.end;
+                    }
+                    let consumed =
+                        session.decode_until(decoder, &chunk[pending.clone()], target_size)?;
+                    pending.start += consumed;
+                    consumed
+                }
+            };
+            if 0 == consumed && !session.has_decoded(target_size) {
+                break;
+            }
+        }
+        let decoded_size = session.decoded().len();
+        reader.num_decoded_bytes += decoded_size.saturating_sub(decoded_size_before) as u64;
+        if !reader.session.has_decoded(target_size) {
+            return Err(FormatError::Corrupt {
+                location: FormatLocation::PackedStream(reader.read.stream.id),
+                reason: Box::new(CorruptionReason::DecodedSizeMismatch {
+                    expected_size: target_size,
+                    actual_size: decoded_size as u64,
+                }),
             }
             .into());
         }
-        token.check().map_err(|_| StorageError::Cancelled)?;
-
-        let range = read.stream.compressed_range;
-        let capabilities = self.source.capabilities();
-        if capabilities.is_resident || capabilities.is_remote {
-            let frame = fetch(&self.source, range, token, &self.num_bytes_read)?;
-            return Ok(decoder.decode_resident(&frame, read, buffer)?);
-        }
-
-        let mut session = decoder.begin(read, buffer)?;
-        let chunk_size = options.chunk_size.clamp(1, range.len().max(1));
-        let mut chunk = allocate(chunk_size)?;
-        let mut offset = range.begin;
-        while offset < range.end {
-            token.check().map_err(|_| StorageError::Cancelled)?;
-            let chunk_range = ByteRange {
-                begin: offset,
-                end: range.end.min(offset + chunk_size),
-            };
-            let chunk = &mut chunk[..usize::try_from(chunk_range.len()).unwrap_or(usize::MAX)];
-            read_into(
-                &self.source,
-                chunk_range,
-                chunk,
-                token,
-                &self.num_bytes_read,
-            )?;
-            if session.push_chunk(chunk)? {
-                break;
-            }
-            offset = chunk_range.end;
-        }
-        Ok(session.finish()?)
+        Ok(())
     }
 
     /// # Returns
@@ -260,6 +377,33 @@ impl ArchiveStorage {
     #[must_use]
     pub fn num_bytes_read(&self) -> u64 {
         self.num_bytes_read.load(Ordering::Relaxed)
+    }
+
+    /// Checks that `read` may be decoded under the reader limits and the cancellation token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`StorageError::Format`] if the stream exceeds [`ReaderLimits::max_packed_stream_size`].
+    /// * [`StorageError::Cancelled`] if `options.cancellation_token` is cancelled.
+    fn check_stream_read(
+        &self,
+        read: &StreamRead,
+        options: &StreamReadOptions,
+    ) -> Result<(), StorageError> {
+        if read.stream.uncompressed_size > self.limits.max_packed_stream_size {
+            return Err(FormatError::LimitExceeded {
+                what: "packed stream size",
+                actual_size: read.stream.uncompressed_size,
+                limit_size: self.limits.max_packed_stream_size,
+            }
+            .into());
+        }
+        options
+            .cancellation_token
+            .check()
+            .map_err(|_| StorageError::Cancelled)
     }
 
     /// Loads one dictionary into `cell` unless it is loaded already.
@@ -313,6 +457,117 @@ impl ArchiveStorage {
         cell.get_or_init(|| dictionary);
         Ok(())
     }
+}
+
+/// One planned stream being decoded in steps by [`ArchiveStorage::decode_stream_to`].
+#[derive(Debug)]
+pub struct StreamReader {
+    /// The planned stream, without its tables.
+    read: StreamRead,
+
+    input: StreamInput,
+    session: StreamDecodeSession,
+
+    /// The number of bytes decoded so far, including any decoded again after a restart.
+    num_decoded_bytes: u64,
+}
+
+impl StreamReader {
+    /// # Returns
+    ///
+    /// The bytes of the stream decoded so far.
+    #[must_use]
+    pub fn decoded(&self) -> &[u8] {
+        self.session.decoded()
+    }
+
+    /// # Returns
+    ///
+    /// The number of bytes decoded so far, including any decoded again after a restart.
+    #[must_use]
+    pub const fn num_decoded_bytes(&self) -> u64 {
+        self.num_decoded_bytes
+    }
+
+    /// Shares the bytes decoded so far without copying.
+    ///
+    /// # Returns
+    ///
+    /// The decoded bytes.
+    pub fn share(&mut self) -> SharedBytes {
+        self.session.share()
+    }
+
+    /// Takes the decode buffer back once every byte shared from it is dropped, so decoding can
+    /// continue in place.
+    ///
+    /// # Returns
+    ///
+    /// Whether decoding can continue: `false` while shared bytes are still alive.
+    pub fn try_reclaim(&mut self) -> bool {
+        self.session.try_reclaim()
+    }
+
+    /// Restarts the decode from the beginning of the frame into `buffer`, leaving the current
+    /// buffer to whoever still shares it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`StreamDecoder::begin`]'s return values on failure.
+    pub fn restart(
+        &mut self,
+        decoder: &mut StreamDecoder,
+        buffer: PooledBuffer,
+    ) -> Result<(), StorageError> {
+        self.session = decoder.begin(&self.read, buffer)?;
+        match &mut self.input {
+            StreamInput::Frame { position, .. } => *position = 0,
+            StreamInput::Chunks {
+                pending,
+                next_offset,
+                ..
+            } => {
+                *pending = 0..0;
+                *next_offset = self.read.stream.compressed_range.begin;
+            }
+        }
+        Ok(())
+    }
+
+    /// Finishes the decode.
+    ///
+    /// # Returns
+    ///
+    /// The decoded prefix on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`StreamDecodeSession::finish`]'s return values on failure.
+    pub fn finish(self) -> Result<SharedBytes, StorageError> {
+        Ok(self.session.finish()?)
+    }
+}
+
+/// Where a [`StreamReader`] gets the compressed frame from.
+#[derive(Debug)]
+enum StreamInput {
+    /// The whole frame, fetched from a resident or remote source.
+    Frame { frame: SharedBytes, position: usize },
+
+    /// A local file, read one chunk at a time.
+    Chunks {
+        chunk: Vec<u8>,
+
+        /// The bytes of `chunk` not consumed yet.
+        pending: std::ops::Range<usize>,
+
+        /// The file offset of the next chunk.
+        next_offset: u64,
+    },
 }
 
 /// Fetches `range` from `source`: a zero-copy slice if the source is resident, else a read into a

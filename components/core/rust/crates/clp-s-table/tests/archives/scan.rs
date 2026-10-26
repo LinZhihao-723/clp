@@ -9,6 +9,8 @@ use anyhow::Context;
 use clp_s_format::DictionaryKind;
 use clp_s_format::DictionaryNeeds;
 use clp_s_format::NodeType;
+use clp_s_format::TableBytes;
+use clp_s_format::TableInfo;
 use clp_s_format::TableOrdinal;
 use clp_s_io::ResolvedSource;
 use clp_s_resources::ErrorKind;
@@ -20,6 +22,7 @@ use clp_s_table::ColumnEncoding;
 use clp_s_table::ColumnIndex;
 use clp_s_table::ColumnSet;
 use clp_s_table::LayoutError;
+use clp_s_table::LeadingColumnsSize;
 use clp_s_table::ResolvedProjection;
 use clp_s_table::ShapeEvent;
 use clp_s_table::Table;
@@ -147,6 +150,93 @@ fn output_columns_are_decoded_only_for_windows_with_a_selected_row() -> anyhow::
     }
     assert!(state.is_finished());
     assert!(num_records_checked > 10, "{num_records_checked} records");
+    Ok(())
+}
+
+#[test]
+fn scans_of_table_prefixes_resume_over_the_whole_table() -> anyhow::Result<()> {
+    let archive = OpenedArchive::open(&fixture("logs.ts"))?;
+    let bytes = archive
+        .table_bytes()?
+        .into_iter()
+        .max_by_key(|bytes| bytes.info().num_rows)
+        .context("the archive has tables")?;
+    let table = Arc::new(Table::load(Arc::clone(&archive.tables), bytes.clone())?);
+    let expected = render_table(&archive, &table)?;
+    let timestamps = archive.storage.index().metadata().timestamp_index();
+    let layout = Arc::clone(table.layout());
+    let num_columns = layout.num_columns();
+    let evaluation_column = ColumnIndex::new(0);
+    let last_column = ColumnIndex::new(num_columns - 1);
+    let mut evaluation = ColumnSet::empty(num_columns);
+    evaluation.insert(evaluation_column);
+    let demand = Arc::new(ColumnDemand::new(evaluation, ColumnSet::full(num_columns)));
+    let info = TableInfo {
+        stream_offset: 0,
+        ..*bytes.info()
+    };
+    let LeadingColumnsSize::Known(prefix_size) =
+        layout.leading_columns_size(&info, bytes.as_bytes(), 1)?
+    else {
+        anyhow::bail!("the whole table measures every column");
+    };
+    let prefix = TableBytes::new_prefix(
+        &bytes.shared_bytes().slice(..usize::try_from(prefix_size)?),
+        info,
+    )?;
+
+    let window_size = 5;
+    for selected_window in [0, 1, 4] {
+        let partial = Arc::new(Table::load(Arc::clone(&archive.tables), prefix.clone())?);
+        assert!(partial.is_column_loaded(evaluation_column));
+        assert!(!partial.is_column_loaded(last_column));
+        let mut scanner = TableScanner::new(NonZeroU32::new(window_size).context("non-zero")?);
+        let mut state = scanner.start(partial, Arc::clone(&demand));
+        assert!(state.is_output_deferred());
+        for _ in 0..selected_window {
+            scanner
+                .next_window(&mut state)?
+                .context("the table has more windows")?;
+            assert_eq!(scanner.finish_window(&state)?, 0);
+        }
+        let window = scanner
+            .next_window(&mut state)?
+            .context("the table has more windows")?;
+        window.selected.select(window.columns.num_rows() - 1);
+        let result = scanner.finish_window(&state);
+        assert!(
+            matches!(result, Err(TableError::ColumnNotDecoded(_))),
+            "{result:?}"
+        );
+
+        let loaded_columns = state.table().loaded_columns();
+        let suspended = state.suspend();
+        let whole = Table::load_after(
+            Arc::clone(&archive.tables),
+            TableBytes::new_prefix(bytes.shared_bytes(), info)?,
+            loaded_columns,
+        )?;
+        let mut state = scanner.resume(suspended, Arc::new(whole))?;
+        assert!(!state.is_output_deferred());
+        let mut num_records_checked = 0;
+        loop {
+            assert_eq!(scanner.finish_window(&state)?, 1);
+            let batch = scanner.batch(&state);
+            let row = batch.num_rows() - 1;
+            let ordinal = (batch.first_row() + row) as usize;
+            assert_eq!(
+                Renderer::render(&batch, row, timestamps)?,
+                expected[ordinal],
+                "row {ordinal} after resuming at window {selected_window}"
+            );
+            num_records_checked += 1;
+            let Some(window) = scanner.next_window(&mut state)? else {
+                break;
+            };
+            window.selected.select(window.columns.num_rows() - 1);
+        }
+        assert!(num_records_checked > 10, "{num_records_checked} records");
+    }
     Ok(())
 }
 

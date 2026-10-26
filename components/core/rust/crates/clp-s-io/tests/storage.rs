@@ -332,6 +332,67 @@ fn every_fixture_reads_identically_through_every_source() -> anyhow::Result<()> 
 }
 
 #[test]
+fn stepwise_reads_decode_like_whole_reads_and_restart_while_shared() -> anyhow::Result<()> {
+    let token = CancellationToken::new();
+    let pool = BufferPool::new(BufferPoolConfig::default());
+    let budget = MemoryBudget::new(None);
+    let acquire = |size: u64| {
+        pool.acquire(
+            size,
+            budget.try_reserve(size).expect("the budget is unlimited"),
+        )
+        .expect("the buffer can be allocated")
+    };
+    let mut num_restarts = 0;
+    for path in readable_archives() {
+        let bytes = read_bytes(&path);
+        let sources = [
+            (ResolvedSource::from_path(&path)?, 7),
+            (ResolvedSource::from_path(&path)?, 1 << 20),
+            (
+                ResolvedSource::Memory(MemorySource::new(bytes.clone())),
+                1 << 20,
+            ),
+            (
+                ResolvedSource::Dyn(Arc::new(HostSource::new(bytes.clone(), true))),
+                1 << 20,
+            ),
+        ];
+        for (source, chunk_size) in sources {
+            let storage = ArchiveStorage::open(source, &OpenOptions::default(), &token)?;
+            let options = StreamReadOptions {
+                chunk_size,
+                cancellation_token: token.clone(),
+            };
+            let mut decoder = StreamDecoder::new()?;
+            for read in full_plan(&storage) {
+                let whole = read_stream(&storage, &read, &options)?;
+                let prefix_size = read.decoded_prefix_size;
+                let mut reader =
+                    storage.begin_stream(&read, &mut decoder, acquire(prefix_size), &options)?;
+                let mut kept = None;
+                for target in [prefix_size / 3, prefix_size / 2, prefix_size] {
+                    if !reader.try_reclaim() {
+                        reader.restart(&mut decoder, acquire(prefix_size))?;
+                        num_restarts += 1;
+                    }
+                    storage.decode_stream_to(&mut reader, &mut decoder, target, &options)?;
+                    let shared = reader.share();
+                    assert!(shared.len() as u64 >= target, "{}", path.display());
+                    assert_eq!(shared, whole.slice(..shared.len()), "{}", path.display());
+                    kept = (target == prefix_size / 3 && target < prefix_size).then_some(shared);
+                }
+                drop(kept);
+                assert!(reader.num_decoded_bytes() >= prefix_size);
+                assert_eq!(reader.finish()?, whole, "{}", path.display());
+            }
+        }
+    }
+    assert!(num_restarts > 0);
+    Ok(())
+}
+
+#[test]
 fn remote_sources_read_each_stream_once() -> anyhow::Result<()> {
     let bytes = read_bytes(&fixtures_dir().join("archives/many-schemas.tables256.clps"));
     let source = Arc::new(HostSource::new(bytes.clone(), true));

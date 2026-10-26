@@ -15,6 +15,7 @@ pub use source::ResolvedSource;
 pub use source::SourceCapabilities;
 pub use storage::ArchiveStorage;
 pub use storage::StreamReadOptions;
+pub use storage::StreamReader;
 
 const _: () = {
     const fn assert_send_sync<SendSyncType: Send + Sync + 'static>() {}

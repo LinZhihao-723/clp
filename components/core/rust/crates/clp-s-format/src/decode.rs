@@ -1,7 +1,11 @@
 //! Decoding of packed streams and sections into pooled buffers.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+
 use clp_s_resources::PooledBuffer;
 use clp_s_resources::ResourceError;
+use clp_s_resources::StreamBuffer;
 use zstd_safe::DCtx;
 use zstd_safe::DParameter;
 use zstd_safe::InBuffer;
@@ -23,6 +27,9 @@ use crate::TableInfo;
 /// content size, are sized by `ZSTD_decompressBound` under [`ReaderLimits`].
 pub struct StreamDecoder {
     context: DCtx<'static>,
+
+    /// The session whose frame the context is decoding; 0 when none is.
+    session_id: u64,
 }
 
 impl StreamDecoder {
@@ -39,7 +46,10 @@ impl StreamDecoder {
     /// * [`FormatError::ZstdContextAllocationFailed`] if zstd cannot allocate its context.
     pub fn new() -> Result<Self, FormatError> {
         let context = DCtx::try_create().ok_or(FormatError::ZstdContextAllocationFailed)?;
-        Ok(Self { context })
+        Ok(Self {
+            context,
+            session_id: 0,
+        })
     }
 
     /// Decodes a memory-resident frame single-shot into `buffer`, up to
@@ -74,6 +84,7 @@ impl StreamDecoder {
             return Err(corrupt(CorruptionReason::FrameSizeMismatch));
         }
 
+        self.session_id = 0;
         let mut output = PrefixBuffer::new(buffer.as_mut_vec(), plan.prefix_size);
         let decoded_size = if plan.is_full_stream {
             self.context
@@ -108,6 +119,9 @@ impl StreamDecoder {
 
     /// Starts a stable-output decode of `read` fed with chunks of the compressed frame.
     ///
+    /// The session does not borrow the decoder: every call that feeds it takes this decoder,
+    /// whose context holds the frame's state until the next session begins.
+    ///
     /// # Returns
     ///
     /// The decode session on success.
@@ -122,17 +136,22 @@ impl StreamDecoder {
         &mut self,
         read: &StreamRead,
         mut buffer: PooledBuffer,
-    ) -> Result<StreamDecodeSession<'_>, FormatError> {
+    ) -> Result<StreamDecodeSession, FormatError> {
+        static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
         let plan = DecodePlan::new(read, &mut buffer)?;
         // Stable output requires the buffer to hold the whole frame, so only full decodes use it.
         self.reset(plan.is_full_stream)
             .map_err(|code| FormatError::corrupt(plan.location, zstd_reason(code)))?;
+        self.session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         Ok(StreamDecodeSession {
-            decoder: self,
-            buffer,
+            session_id: self.session_id,
+            owned: Some(buffer),
+            shared: None,
             plan,
             output_position: 0,
             consumed_size: 0,
+            next_input_size: 0,
             is_frame_finished: false,
         })
     }
@@ -177,6 +196,7 @@ impl StreamDecoder {
         decoded
             .try_reserve_exact(capacity)
             .map_err(|_| allocation_error())?;
+        self.session_id = 0;
         self.context
             .decompress(&mut PrefixBuffer::new(&mut decoded, capacity), frame)
             .map_err(|code| corrupt(zstd_reason(code)))?;
@@ -207,18 +227,33 @@ impl std::fmt::Debug for StreamDecoder {
     }
 }
 
-/// An in-progress stable-output decode into one pooled buffer.
+/// An in-progress decode of one planned stream into one pooled buffer.
+///
+/// The session can stop at intermediate targets, lend out its decoded prefix through
+/// [`Self::share`], and continue once [`Self::try_reclaim`] takes the buffer back.
 #[derive(Debug)]
-pub struct StreamDecodeSession<'decoder> {
-    decoder: &'decoder mut StreamDecoder,
-    buffer: PooledBuffer,
+pub struct StreamDecodeSession {
+    session_id: u64,
+
+    /// The buffer while it is writable; `None` while `shared` holds it.
+    owned: Option<PooledBuffer>,
+
+    /// The frozen buffer, from [`Self::share`] until [`Self::try_reclaim`] succeeds.
+    shared: Option<StreamBuffer>,
+
     plan: DecodePlan,
     output_position: usize,
+
+    /// The number of compressed bytes zstd consumed.
     consumed_size: u64,
+
+    /// zstd's hint for the size of the next input, which completes the next block.
+    next_input_size: usize,
+
     is_frame_finished: bool,
 }
 
-impl StreamDecodeSession<'_> {
+impl StreamDecodeSession {
     /// Feeds the next chunk of the compressed frame.
     ///
     /// # Returns
@@ -229,52 +264,186 @@ impl StreamDecodeSession<'_> {
     ///
     /// Returns an error if:
     ///
-    /// * [`FormatError::Corrupt`] if the frame is malformed or decodes past the stream size.
-    pub fn push_chunk(&mut self, chunk: &[u8]) -> Result<bool, FormatError> {
+    /// * [`FormatError::Corrupt`] if a chunk follows the end of the frame.
+    /// * Forwards [`Self::decode_until`]'s return values on failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `decoder` is not decoding this session, or if the buffer is shared.
+    pub fn push_chunk(
+        &mut self,
+        decoder: &mut StreamDecoder,
+        chunk: &[u8],
+    ) -> Result<bool, FormatError> {
         if self.is_done() {
             return Ok(true);
         }
-        let location = self.plan.location;
-        let corrupt = |reason| FormatError::corrupt(location, reason);
-        self.consumed_size += chunk.len() as u64;
-        if self.consumed_size > self.plan.compressed_size || self.is_frame_finished {
-            return Err(corrupt(CorruptionReason::FrameSizeMismatch));
+        if self.is_frame_finished {
+            return Err(FormatError::corrupt(
+                self.plan.location,
+                CorruptionReason::FrameSizeMismatch,
+            ));
         }
+        self.decode_until(decoder, chunk, self.plan.prefix_size as u64)?;
+        Ok(self.is_done())
+    }
 
-        let mut output = PrefixBuffer::new(self.buffer.as_mut_vec(), self.plan.prefix_size);
+    /// Feeds `chunk`, the continuation of the compressed frame, until the first `target_size`
+    /// decoded bytes are available; a target equal to the planned prefix of a whole stream also
+    /// waits for the end of the frame.
+    ///
+    /// The decoder may run past an intermediate target by up to one block.
+    ///
+    /// # Returns
+    ///
+    /// The number of leading bytes of `chunk` consumed on success; the rest must be fed again to
+    /// decode further.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`FormatError::Corrupt`] if the frame is malformed, is followed by more bytes, decodes
+    ///   past the stream size, or ends before the planned prefix.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `decoder` is not decoding this session, if the buffer is shared, or if
+    /// `target_size` exceeds the planned prefix.
+    pub fn decode_until(
+        &mut self,
+        decoder: &mut StreamDecoder,
+        chunk: &[u8],
+        target_size: u64,
+    ) -> Result<usize, FormatError> {
+        assert_eq!(
+            decoder.session_id, self.session_id,
+            "the decoder is not decoding this session"
+        );
+        let plan = self.plan;
+        let target = usize::try_from(target_size)
+            .ok()
+            .filter(|target| *target <= plan.prefix_size)
+            .expect("the target must not exceed the planned prefix");
+        if self.has_decoded(target_size) {
+            return Ok(0);
+        }
+        let corrupt = |reason| FormatError::corrupt(plan.location, reason);
+        let is_intermediate = target < plan.prefix_size;
+        // zstd rejects a stable output buffer whose size changes between calls.
+        let limit = if plan.is_full_stream {
+            plan.prefix_size
+        } else {
+            target
+        };
+        let buffer = self
+            .owned
+            .as_mut()
+            .expect("the session's buffer must not be shared while decoding");
+        let mut output = PrefixBuffer::new(buffer.as_mut_vec(), limit);
         let mut out_buffer = OutBuffer::around_pos(&mut output, self.output_position);
-        let mut in_buffer = InBuffer::around(chunk);
-        while in_buffer.pos() < chunk.len() {
-            let is_output_full = out_buffer.pos() == self.plan.prefix_size;
-            if is_output_full && !self.plan.is_full_stream {
+        let mut consumed = 0;
+        while consumed < chunk.len() {
+            if out_buffer.pos() >= target && (is_intermediate || !plan.is_full_stream) {
                 break;
             }
-            let positions = (in_buffer.pos(), out_buffer.pos());
-            let hint = self
-                .decoder
+            let feed_end = if plan.is_full_stream && is_intermediate {
+                chunk.len().min(consumed + self.next_input_size.max(1))
+            } else {
+                chunk.len()
+            };
+            let mut in_buffer = InBuffer::around(&chunk[consumed..feed_end]);
+            let output_position = out_buffer.pos();
+            let hint = decoder
                 .context
                 .decompress_stream(&mut out_buffer, &mut in_buffer)
                 .map_err(|code| corrupt(zstd_reason(code)))?;
-            if positions == (in_buffer.pos(), out_buffer.pos()) && 0 != hint {
-                break;
-            }
+            consumed += in_buffer.pos();
+            self.next_input_size = hint;
             if 0 == hint {
                 self.is_frame_finished = true;
-                if in_buffer.pos() < chunk.len() {
+                if consumed < chunk.len() {
                     return Err(corrupt(CorruptionReason::FrameSizeMismatch));
                 }
                 break;
             }
+            if 0 == in_buffer.pos() && output_position == out_buffer.pos() {
+                break;
+            }
         }
         self.output_position = out_buffer.pos();
-
-        if self.is_frame_finished && self.output_position < self.plan.prefix_size {
+        self.consumed_size += consumed as u64;
+        if self.consumed_size > plan.compressed_size {
+            return Err(corrupt(CorruptionReason::FrameSizeMismatch));
+        }
+        if self.is_frame_finished && self.output_position < plan.prefix_size {
             return Err(corrupt(CorruptionReason::DecodedSizeMismatch {
-                expected_size: self.plan.prefix_size as u64,
+                expected_size: plan.prefix_size as u64,
                 actual_size: self.output_position as u64,
             }));
         }
-        Ok(self.is_done())
+        Ok(consumed)
+    }
+
+    /// # Returns
+    ///
+    /// Whether the first `target_size` decoded bytes are available; for the planned prefix of a
+    /// whole stream, also whether the frame has ended.
+    #[must_use]
+    pub const fn has_decoded(&self, target_size: u64) -> bool {
+        if target_size < self.plan.prefix_size as u64 {
+            self.output_position as u64 >= target_size
+        } else {
+            self.is_done()
+        }
+    }
+
+    /// # Returns
+    ///
+    /// The bytes decoded so far.
+    #[must_use]
+    pub fn decoded(&self) -> &[u8] {
+        match (&self.owned, &self.shared) {
+            (Some(buffer), _) => buffer.as_bytes(),
+            (None, Some(shared)) => shared.as_bytes(),
+            (None, None) => &[],
+        }
+    }
+
+    /// Freezes the buffer, if it is writable, and shares the bytes decoded so far.
+    ///
+    /// # Returns
+    ///
+    /// The decoded bytes.
+    pub fn share(&mut self) -> SharedBytes {
+        if let Some(buffer) = self.owned.take() {
+            self.shared = Some(buffer.freeze());
+        }
+        self.shared
+            .clone()
+            .map(StreamBuffer::into_shared_bytes)
+            .unwrap_or_default()
+    }
+
+    /// Takes the buffer back from [`Self::share`] so decoding can continue in place.
+    ///
+    /// # Returns
+    ///
+    /// Whether the buffer is writable: `false` while bytes shared from it are still alive.
+    pub fn try_reclaim(&mut self) -> bool {
+        let Some(shared) = self.shared.take() else {
+            return true;
+        };
+        match shared.try_into_pooled() {
+            Ok(buffer) => {
+                self.owned = Some(buffer);
+                true
+            }
+            Err(shared) => {
+                self.shared = Some(shared);
+                false
+            }
+        }
     }
 
     /// Finishes the session.
@@ -288,7 +457,7 @@ impl StreamDecodeSession<'_> {
     /// Returns an error if:
     ///
     /// * [`FormatError::Corrupt`] if the planned prefix was not fully decoded.
-    pub fn finish(self) -> Result<SharedBytes, FormatError> {
+    pub fn finish(mut self) -> Result<SharedBytes, FormatError> {
         if !self.is_done() {
             return Err(FormatError::corrupt(
                 self.plan.location,
@@ -298,7 +467,7 @@ impl StreamDecodeSession<'_> {
                 },
             ));
         }
-        Ok(self.buffer.freeze().into_shared_bytes())
+        Ok(self.share())
     }
 
     /// # Returns
@@ -348,12 +517,53 @@ impl TableBytes {
         })
     }
 
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// The leading bytes of table `info` inside `decoded_stream`, a decoded prefix of its stream
+    /// that may end inside the table, on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`FormatError::Corrupt`] if the table starts past the end of `decoded_stream`.
+    pub fn new_prefix(decoded_stream: &SharedBytes, info: TableInfo) -> Result<Self, FormatError> {
+        let range = usize::try_from(info.stream_offset)
+            .ok()
+            .filter(|begin| *begin <= decoded_stream.len())
+            .map(|begin| {
+                let available_size = (decoded_stream.len() - begin) as u64;
+                let size = info.uncompressed_size.min(available_size);
+                begin..begin + usize::try_from(size).unwrap_or(usize::MAX)
+            })
+            .ok_or_else(|| {
+                FormatError::corrupt(
+                    FormatLocation::Table(info.ordinal),
+                    CorruptionReason::TableOutsideStream,
+                )
+            })?;
+        Ok(Self {
+            bytes: decoded_stream.slice(range),
+            info,
+        })
+    }
+
     /// # Returns
     ///
     /// The ERT bytes: unaligned columns back to back, in schema order.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// # Returns
+    ///
+    /// Whether the bytes hold the whole table.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.bytes.len() as u64 == self.info.uncompressed_size
     }
 
     /// # Returns
@@ -607,7 +817,7 @@ mod tests {
     ) -> Result<SharedBytes, FormatError> {
         let mut session = decoder.begin(read, buffer(read.decoded_prefix_size))?;
         for chunk in frame.chunks(chunk_size) {
-            if session.push_chunk(chunk)? {
+            if session.push_chunk(decoder, chunk)? {
                 break;
             }
         }
@@ -744,15 +954,15 @@ mod tests {
         let read = stream_read(&frame, STREAM_SIZE as u64, STREAM_SIZE as u64);
         let mut decoder = StreamDecoder::new()?;
         let mut session = decoder.begin(&read, buffer(STREAM_SIZE as u64))?;
-        assert!(session.push_chunk(&frame)?);
+        assert!(session.push_chunk(&mut decoder, &frame)?);
         assert!(
-            session.push_chunk(b"more")?,
+            session.push_chunk(&mut decoder, b"more")?,
             "a finished session ignores further chunks"
         );
         assert_eq!(&session.finish()?[..], content.as_slice());
 
         let mut session = decoder.begin(&read, buffer(STREAM_SIZE as u64))?;
-        assert!(!session.push_chunk(&frame[..100])?);
+        assert!(!session.push_chunk(&mut decoder, &frame[..100])?);
         let error = session.finish().expect_err("the frame is incomplete");
         assert!(
             matches!(
@@ -762,6 +972,73 @@ mod tests {
             "finishing early is an error"
         );
         Ok(())
+    }
+
+    #[test]
+    fn sessions_stop_at_targets_and_continue_in_place() -> anyhow::Result<()> {
+        let content = content();
+        let frame = compress(&content);
+        let mut decoder = StreamDecoder::new()?;
+        for prefix_size in [STREAM_SIZE, 200_001] {
+            let read = stream_read(&frame, STREAM_SIZE as u64, prefix_size as u64);
+            for chunk_size in [4096, frame.len()] {
+                let mut session = decoder.begin(&read, buffer(prefix_size as u64))?;
+                let allocation = session.decoded().as_ptr();
+                let mut chunks = frame.chunks(chunk_size);
+                let mut pending: &[u8] = &[];
+                for target in [1, 70_000, 70_001, 150_000, prefix_size] {
+                    while !session.has_decoded(target as u64) {
+                        if pending.is_empty() {
+                            pending = chunks.next().expect("the frame holds the target");
+                        }
+                        let consumed =
+                            session.decode_until(&mut decoder, pending, target as u64)?;
+                        pending = &pending[consumed..];
+                    }
+                    let shared = session.share();
+                    assert!(shared.len() >= target, "target {target}: {}", shared.len());
+                    assert_eq!(&shared[..], &content[..shared.len()], "target {target}");
+                    assert_eq!(shared.as_ptr(), allocation);
+                    assert!(!session.try_reclaim(), "the shared bytes are alive");
+                    drop(shared);
+                    assert!(session.try_reclaim());
+                }
+                assert_eq!(session.decoded(), &content[..prefix_size]);
+                assert_eq!(&session.finish()?[..], &content[..prefix_size]);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unstable_sessions_stop_exactly_at_intermediate_targets() -> anyhow::Result<()> {
+        let content = content();
+        let frame = compress(&content);
+        let read = stream_read(&frame, STREAM_SIZE as u64, 200_000);
+        let mut decoder = StreamDecoder::new()?;
+        let mut session = decoder.begin(&read, buffer(200_000))?;
+        let consumed = session.decode_until(&mut decoder, &frame, 12_345)?;
+        assert!(consumed <= frame.len());
+        assert_eq!(session.decoded(), &content[..12_345]);
+        session.decode_until(&mut decoder, &frame[consumed..], 200_000)?;
+        assert!(session.has_decoded(200_000));
+        assert_eq!(&session.finish()?[..], &content[..200_000]);
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "not decoding this session")]
+    fn sessions_reject_a_decoder_that_moved_on() {
+        let frame = compress(&content());
+        let read = stream_read(&frame, STREAM_SIZE as u64, STREAM_SIZE as u64);
+        let mut decoder = StreamDecoder::new().expect("zstd allocates a context");
+        let mut session = decoder
+            .begin(&read, buffer(STREAM_SIZE as u64))
+            .expect("the plan fits the buffer");
+        let _next = decoder
+            .begin(&read, buffer(STREAM_SIZE as u64))
+            .expect("the plan fits the buffer");
+        let _ = session.decode_until(&mut decoder, &frame, 1);
     }
 
     #[test]

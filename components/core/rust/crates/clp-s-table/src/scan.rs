@@ -4,6 +4,8 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use clp_s_format::TableOrdinal;
+
 use crate::ColumnBatch;
 use crate::ColumnDemand;
 use crate::ColumnIndex;
@@ -32,6 +34,9 @@ pub struct TableScanState {
     scan_id: u64,
 
     next_row: u32,
+
+    /// Whether some output-only columns are not loaded; their anchors are then not advanced.
+    is_output_deferred: bool,
 }
 
 impl TableScanState {
@@ -50,6 +55,43 @@ impl TableScanState {
     pub fn is_finished(&self) -> bool {
         self.next_row >= self.table.num_rows()
     }
+
+    /// # Returns
+    ///
+    /// Whether the table lacks output columns of the scan, so a window with a selected row can be
+    /// finished only after [`TableScanner::resume`] supplies them.
+    #[must_use]
+    pub const fn is_output_deferred(&self) -> bool {
+        self.is_output_deferred
+    }
+
+    /// Suspends the scan at its current window and releases the table.
+    ///
+    /// # Returns
+    ///
+    /// The position of the scan, for [`TableScanner::resume`].
+    #[must_use]
+    pub fn suspend(self) -> SuspendedTableScan {
+        SuspendedTableScan {
+            ordinal: self.table.info().ordinal,
+            demand: self.demand,
+            output_only: self.output_only,
+            anchors: self.anchors,
+            scan_id: self.scan_id,
+            next_row: self.next_row,
+        }
+    }
+}
+
+/// A scan suspended by [`TableScanState::suspend`], holding no table.
+#[derive(Debug)]
+pub struct SuspendedTableScan {
+    ordinal: TableOrdinal,
+    demand: Arc<ColumnDemand>,
+    output_only: ColumnSet,
+    anchors: Box<[DeltaAnchor]>,
+    scan_id: u64,
+    next_row: u32,
 }
 
 /// Reusable per-worker scan buffers: decoded delta windows and the selection.
@@ -127,6 +169,9 @@ impl TableScanner {
             .collect();
         let scan_id = self.next_scan_id.get();
         self.next_scan_id.set(scan_id.wrapping_add(1));
+        let is_output_deferred = output_only
+            .iter()
+            .any(|column| !table.is_column_loaded(column));
         TableScanState {
             table,
             demand,
@@ -134,7 +179,78 @@ impl TableScanner {
             anchors,
             scan_id,
             next_row: 0,
+            is_output_deferred,
         }
+    }
+
+    /// Resumes a suspended scan at its current window over `table`, the same table loaded with
+    /// every output column.
+    ///
+    /// # Returns
+    ///
+    /// The state of the scan on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * [`TableError::ColumnNotDecoded`] if `table` lacks an output column of the scan.
+    /// * Forwards [`Table::delta_window`]'s return values on failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scanner's current window is not a window of the suspended scan, or if
+    /// `table` is another table.
+    pub fn resume(
+        &self,
+        suspended: SuspendedTableScan,
+        table: Arc<Table>,
+    ) -> Result<TableScanState, TableError> {
+        let window = self.window_of_scan(suspended.scan_id);
+        assert_eq!(
+            table.info().ordinal,
+            suspended.ordinal,
+            "a scan resumes over the table it was suspended on"
+        );
+        if let Some(column) = suspended
+            .output_only
+            .iter()
+            .find(|column| !table.is_column_loaded(*column))
+        {
+            return Err(TableError::ColumnNotDecoded(column));
+        }
+        let SuspendedTableScan {
+            demand,
+            output_only,
+            mut anchors,
+            scan_id,
+            next_row,
+            ..
+        } = suspended;
+        let fold = |deltas: &[LeI64], base: i64| {
+            deltas
+                .iter()
+                .fold(base, |sum, delta| sum.wrapping_add(delta.get()))
+        };
+        for anchor in anchors.iter_mut().filter(|anchor| !anchor.is_evaluation) {
+            anchor.window_base = fold(table.delta_window(anchor.column, 0..window.first_row)?, 0);
+            anchor.sum = fold(
+                table.delta_window(
+                    anchor.column,
+                    window.first_row..window.first_row + window.num_rows,
+                )?,
+                anchor.window_base,
+            );
+        }
+        Ok(TableScanState {
+            table,
+            demand,
+            output_only,
+            anchors,
+            scan_id,
+            next_row,
+            is_output_deferred: false,
+        })
     }
 
     /// Decodes the evaluation columns of the next window of `state`; at most `batch_num_rows` rows
@@ -167,7 +283,12 @@ impl TableScanner {
         if self.decoded.len() < num_columns {
             self.decoded.resize_with(num_columns, Vec::new);
         }
-        for anchor in &mut state.anchors {
+        let is_output_deferred = state.is_output_deferred;
+        for anchor in state
+            .anchors
+            .iter_mut()
+            .filter(|anchor| anchor.is_evaluation || !is_output_deferred)
+        {
             let deltas = state.table.delta_window(anchor.column, rows.clone())?;
             anchor.window_base = anchor.sum;
             anchor.sum = if anchor.is_evaluation {
@@ -213,6 +334,8 @@ impl TableScanner {
     ///
     /// Returns an error if:
     ///
+    /// * [`TableError::ColumnNotDecoded`] if a row is selected but the output columns are deferred
+    ///   (see [`TableScanState::is_output_deferred`]).
     /// * Forwards [`Table::delta_window`]'s return values on failure.
     ///
     /// # Panics
@@ -223,6 +346,14 @@ impl TableScanner {
         let num_selected = self.selection.count();
         if 0 == num_selected || window.is_output_decoded {
             return Ok(num_selected);
+        }
+        if state.is_output_deferred
+            && let Some(column) = state
+                .output_only
+                .iter()
+                .find(|column| !state.table.is_column_loaded(*column))
+        {
+            return Err(TableError::ColumnNotDecoded(column));
         }
         let rows = window.first_row..window.first_row + window.num_rows;
         for anchor in state.anchors.iter().filter(|anchor| !anchor.is_evaluation) {
@@ -268,8 +399,19 @@ impl TableScanner {
     ///
     /// Panics if the scanner has no current window of `state`.
     fn window_of(&self, state: &TableScanState) -> Window {
+        self.window_of_scan(state.scan_id)
+    }
+
+    /// # Returns
+    ///
+    /// The current window, which must belong to the scan `scan_id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scanner has no current window of the scan `scan_id`.
+    fn window_of_scan(&self, scan_id: u64) -> Window {
         match self.window {
-            Some(window) if window.scan_id == state.scan_id => window,
+            Some(window) if window.scan_id == scan_id => window,
             _ => panic!("the scanner's current window does not belong to this scan"),
         }
     }
