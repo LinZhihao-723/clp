@@ -423,8 +423,7 @@ impl ColumnData {
         })
     }
 
-    /// Measures the leading `num_columns` columns of an ERT from `prefix`, its decoded leading
-    /// bytes, which must reach the variable count of every encoded-text column measured.
+    /// Measures the leading columns of an ERT from `prefix`, its decoded leading bytes.
     ///
     /// # Type Parameters
     ///
@@ -432,7 +431,12 @@ impl ColumnData {
     ///
     /// # Returns
     ///
-    /// The size of the columns on success.
+    /// On success:
+    ///
+    /// * [`LeadingColumnsSize::Known`] with the size of the columns, if `prefix` reaches the
+    ///   variable count of every encoded-text column measured.
+    /// * [`LeadingColumnsSize::AtLeast`] with the end of the first variable count that `prefix`
+    ///   doesn't reach, otherwise.
     ///
     /// # Errors
     ///

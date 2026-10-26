@@ -1622,6 +1622,7 @@ stateDiagram-v2
     Reserved --> Writable: BufferPool.acquire (recycled or new, huge pages at 32 MiB and up)
     Writable --> Shared: decoder fills spare capacity, then freeze
     Shared --> Shared: TableBytes, Table and PinnedRecordBatch clone the Arc
+    Shared --> Writable: last slice dropped, then reclaimed to decode a table's tail
     Shared --> Compacted: data escapes to a host (OwnedBatch gather)
     Shared --> Returned: last Arc dropped
     Returned --> [*]: within retention, back to the free list
@@ -3541,7 +3542,8 @@ flowchart TB
   `usize::try_from`; never zero-filled). `PooledBuffer::as_mut_vec()` exposes spare capacity for
   zstd; `freeze() -> StreamBuffer`; `StreamBuffer::into_shared_bytes()` wraps it in
   `bytes::Bytes::from_owner` so the allocation (and its reservation) returns to the pool when the
-  last slice drops. Locks never poison (`parking_lot`).
+  last slice drops; `StreamBuffer::try_into_pooled()` takes the buffer back, bytes intact, once no
+  clone or slice of it is alive. Locks never poison (`parking_lot`).
 
 #### 3.2 Format (sans-IO)
 
@@ -3578,9 +3580,18 @@ Format facts to port exactly (C++ references in brackets):
   records (`DictionaryReader.hpp`). Stored as one values buffer plus offsets. Logtype placeholders
   are indexed at load. `get(id)` is checked (ids from columns are untrusted). `find_exact` folds
   ASCII case when asked and returns every matching id.
-- **Streams:** `StreamDecoder::decode_resident` / `begin`+`push_chunk`+`finish` decode exactly
-  `read.decoded_prefix_size` bytes; the frame must fill its range exactly
-  (`ZSTD_findFrameCompressedSize`). `decode_section` sizes by `ZSTD_decompressBound` under
+- **Streams:** `StreamDecoder::decode_resident` decodes a fetched frame in one call.
+  `StreamDecoder::begin` starts a `StreamDecodeSession` that decodes into one pooled buffer in
+  steps: `decode_until(decoder, chunk, target_size)` feeds the next compressed bytes until the
+  first `target_size` decoded bytes are available (it may run past an intermediate target by up to
+  one zstd block; the planned prefix of a whole stream also waits for the end of the frame), and
+  `push_chunk` feeds a chunk towards the whole planned prefix. `share()` freezes the buffer and
+  lends the bytes decoded so far out as `SharedBytes`; `try_reclaim()` takes the buffer back once
+  every slice is dropped, so the same zstd session continues in place; `finish()` checks that
+  exactly `read.decoded_prefix_size` bytes were decoded. The frame must fill its range exactly
+  (`ZSTD_findFrameCompressedSize`). `TableBytes::new` slices a whole table out of a decoded
+  stream; `TableBytes::new_prefix` slices the leading bytes of a table out of a decoded prefix
+  that may end inside it. `decode_section` sizes by `ZSTD_decompressBound` under
   `ReaderLimits::max_section_decoded_size`. The static zstd APIs come from the `experimental`
   feature of `zstd-safe` (already enabled in the workspace).
 - `ArchiveIndex::plan_reads(&TableSet, DictionaryNeeds) -> ReadPlan`: dictionary ranges plus one
@@ -3601,7 +3612,13 @@ Format facts to port exactly (C++ references in brackets):
   `dictionaries()` (an `Arc<ArchiveDictionaries>` of three `OnceLock`s that the table and search
   layers read), `load_dictionaries(needs, &token)` (a failed load leaves its cell empty),
   `read_stream(read, &mut decoder, buffer, &options) -> SharedBytes` (policy D4),
-  `num_bytes_read()`.
+  `num_bytes_read()`. A stepwise decode is `begin_stream(read, &mut decoder, buffer, &options) ->
+  StreamReader` followed by `decode_stream_to(&mut reader, &mut decoder, target_size, &options)`
+  calls: a resident or remote source is fetched whole up front, a local file is read in
+  `stream_chunk_size` chunks as decoding proceeds. `StreamReader` exposes `decoded()`,
+  `num_decoded_bytes()` (bytes decoded again after a restart included), `share()`,
+  `try_reclaim()`, `restart(&mut decoder, buffer)` (decode again from the start of the frame into
+  a new buffer, leaving the old one to whoever still shares it) and `finish()`.
 - `S3Source::new(client, runtime_handle, S3Location { bucket, key }, S3SourceConfig)`: rejects a
   current-thread runtime, issues `HeadObject` for the size; each read is one or more bounded
   `Range: bytes=a-b` GETs, blocking on the runtime (never call it from inside an async task). The
@@ -3629,13 +3646,24 @@ Format facts to port exactly (C++ references in brackets):
   insertion order). Keys come from the schema tree by node id. `@` keys and metadata are not part
   of the shape (C++ omits them from JSON too).
 - `Table::load(Arc<ArchiveTables>, TableBytes)`: O(columns) tiling check plus per-row variable
-  range checks; then `info()`, `layout()`, `archive()`, `num_rows()`.
+  range checks; then `info()`, `layout()`, `archive()`, `num_rows()`. From the bytes of a prefix of
+  the table it loads and checks the leading columns that lie wholly inside the prefix;
+  `loaded_columns()` returns them, and `Table::load_after(tables, bytes, loaded)` loads the same
+  table from more of its bytes without checking those columns again.
+  `TableLayout::leading_columns_size(info, prefix, num_columns)` measures the leading columns from
+  decoded leading bytes: `LeadingColumnsSize::Known(end)`, or `AtLeast(end)` when the prefix ends
+  before the variable count of an encoded-text column it must read.
 - Scanning with owned state: `TableScanner::new(batch_num_rows)`; `start(Arc<Table>,
   Arc<ColumnDemand>) -> TableScanState`; `next_window(&mut state) -> Option<WindowParts>` decodes
   the evaluation columns of at most `batch_num_rows` rows and returns an **empty** selection;
   `finish_window(&state) -> u32` decodes output-only columns if any row is selected and returns the
   count; `batch(&state) -> TableBatch`. The table layer never checks a token; the driver checks
-  between windows.
+  between windows. A table loaded without some of the demanded output columns starts with its
+  output deferred (`TableScanState::is_output_deferred`): windows skip the output delta anchors,
+  and such a window can be finished only after `TableScanState::suspend() -> SuspendedTableScan`
+  (which releases the table) and `TableScanner::resume(suspended, table)` over the same table
+  loaded with every output column, which folds the output anchors over the rows before the
+  window.
 - `Selection`: `u64` words, bit `i % 64` of word `i / 64`, tail bits clear; `select_all`,
   `select`, `is_selected`, `count`, `words`/`words_mut` (+ `mask_tail`), `extend_indices`.
 - `ColumnBatch<'batch>` is the kernel and writer vocabulary (one variant per encoding; delta
@@ -3763,12 +3791,25 @@ and with feature `s3` the module `clp_s_reader::s3` (`S3Source`, `S3Location`, `
    plan's filter needs ∪ every candidate demand's `dictionary_needs`; load them before decoding.
 5. **Read plan:** `index.plan_reads(candidates, needs)`; for each `StreamRead` in order: check the
    token, `budget.try_reserve(decoded_prefix_size)` (failure → `ResourceExhausted`),
-   `pool.acquire`, `storage.read_stream` (D4). Release a stream (drop its `SharedBytes`) before
-   reading the next.
+   `pool.acquire`. If the scan reads only leading columns of the stream's last planned table
+   (its filter columns when it has a filter and other demanded columns follow them, else all of
+   its demanded columns), `storage.begin_stream` and `decode_stream_to` decode the stream only
+   through the end of those columns, measured with `leading_columns_size` as the bytes are
+   decoded, and the driver keeps the `StreamReader` and shares its decoded prefix. Otherwise
+   `storage.read_stream` (D4) decodes the whole planned prefix. Release a stream (drop its bytes
+   and reader) before reading the next.
 6. **Tables:** per needed table of the stream, in directory order: check the token,
-   `TableBytes::new` + `Table::load`, `scanner.start`.
+   `TableBytes::new` (`TableBytes::new_prefix` for a stream decoded through leading columns) +
+   `Table::load`, `scanner.start`. The last table of such a stream starts with its output
+   deferred.
 7. **Windows:** loop `next_window`: check the token; `MatchAll` → `select_all`, else
-   `filter.evaluate`; `finish_window`; skip windows with no selected row; otherwise
+   `filter.evaluate`. If the table's output is deferred and the window selects a row, decode the
+   tail of the table: suspend the scan, drop the stream's shared bytes, and `try_reclaim` the
+   decode buffer to continue the same zstd session in place through the end of the demanded
+   columns; if a table of the stream is still held elsewhere, so the bytes are still shared,
+   `restart` the decode from the start of the frame into a newly reserved buffer instead. Then
+   `Table::load_after` and `TableScanner::resume` at the same window. Then `finish_window`; skip
+   windows with no selected row; otherwise
    `extend_indices`, gather record ids / timestamps / indices for the selected rows, render JSON
    with the bound template if needed (splitting a window into several batches once the buffer
    exceeds `max_rendered_batch_size`), and deliver the `RecordBatch` (pull: `current()`; push:
@@ -3781,7 +3822,9 @@ and with feature `s3` the module `clp_s_reader::s3` (`S3Source`, `S3Location`, `
 
 Ownership: tables hold `Arc`s of their stream bytes, so a batch never outlives its storage; the
 driver keeps one `TableScanner`, one `StreamDecoder`, one `EvaluationScratch` and one
-`JsonRecordBuffer`, reused across tables and archives. `tracing` spans `clp_s.open`, `clp_s.plan`,
+`JsonRecordBuffer`, reused across tables and archives, plus the `StreamReader` of a stream decoded
+through leading columns until the stream is released. A restart holds two reservations of the
+stream until the old buffer's last slice drops. `tracing` spans `clp_s.open`, `clp_s.plan`,
 `clp_s.scan` per archive, never per batch.
 
 #### 7.3 Built-in sinks

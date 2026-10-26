@@ -638,8 +638,10 @@ impl Scan {
     /// Returns an error if:
     ///
     /// * [`ReadError::Resource`] if the scan's token is cancelled.
+    /// * [`ReadError::Internal`] if the table being scanned is missing after its tail is loaded.
     /// * Forwards [`TableScanner::next_window`]'s return values on failure.
     /// * Forwards [`CompiledTableFilter::evaluate`]'s return values on failure.
+    /// * Forwards [`Self::load_table_tail`]'s return values on failure.
     /// * Forwards [`TableScanner::finish_window`]'s return values on failure.
     fn open_window(&mut self) -> Result<bool, ReadError> {
         loop {
