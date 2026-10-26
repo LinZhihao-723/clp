@@ -99,25 +99,58 @@ impl VariableDictionary {
         probes: &[&'probe [u8]],
         is_case_sensitive: bool,
     ) -> HashMap<&'probe [u8], Box<[VariableId]>> {
+        const MAX_NUM_LINEARLY_MATCHED_PROBES: usize = 8;
+
+        let compare_same_length = |lhs: &[u8], rhs: &[u8]| {
+            if is_case_sensitive {
+                lhs.cmp(rhs)
+            } else {
+                lhs.iter()
+                    .map(u8::to_ascii_lowercase)
+                    .cmp(rhs.iter().map(u8::to_ascii_lowercase))
+            }
+        };
         let mut distinct_probes = probes.to_vec();
-        distinct_probes.sort_unstable_by(|lhs, rhs| lhs.len().cmp(&rhs.len()).then(lhs.cmp(rhs)));
+        distinct_probes.sort_unstable_by(|lhs, rhs| {
+            lhs.len()
+                .cmp(&rhs.len())
+                .then_with(|| compare_same_length(lhs, rhs))
+                .then_with(|| lhs.cmp(rhs))
+        });
         distinct_probes.dedup();
         let mut matches: Vec<Vec<VariableId>> = vec![Vec::new(); distinct_probes.len()];
         for (id, entry) in self.entries.iter() {
             let begin = distinct_probes.partition_point(|probe| probe.len() < entry.len());
-            for (probe, probe_matches) in distinct_probes[begin..]
+            let same_length = &distinct_probes[begin..];
+            let num_same_length = same_length
                 .iter()
-                .zip(&mut matches[begin..])
-                .take_while(|(probe, _)| probe.len() == entry.len())
-            {
-                let is_match = if is_case_sensitive {
-                    *probe == entry
-                } else {
-                    probe.eq_ignore_ascii_case(entry)
-                };
-                if is_match {
-                    probe_matches.push(VariableId::new(id));
+                .take(MAX_NUM_LINEARLY_MATCHED_PROBES + 1)
+                .take_while(|probe| probe.len() == entry.len())
+                .count();
+            if num_same_length <= MAX_NUM_LINEARLY_MATCHED_PROBES {
+                for (probe, probe_matches) in same_length[..num_same_length]
+                    .iter()
+                    .zip(&mut matches[begin..])
+                {
+                    let is_match = if is_case_sensitive {
+                        *probe == entry
+                    } else {
+                        probe.eq_ignore_ascii_case(entry)
+                    };
+                    if is_match {
+                        probe_matches.push(VariableId::new(id));
+                    }
                 }
+                continue;
+            }
+            let lower = same_length.partition_point(|probe| {
+                probe.len() == entry.len() && compare_same_length(probe, entry).is_lt()
+            });
+            let upper = same_length.partition_point(|probe| {
+                probe.len() == entry.len() && compare_same_length(probe, entry).is_le()
+            });
+            for probe_matches in &mut matches[begin + lower..begin + upper] {
+                probe_matches.push(VariableId::new(id));
             }
         }
         distinct_probes
@@ -553,6 +586,47 @@ mod tests {
         );
         assert_eq!(insensitive.get(&b"missing"[..]), None);
         assert_eq!(insensitive.get("\u{c9}RROR".as_bytes()), None);
+        Ok(())
+    }
+
+    #[test]
+    fn exact_lookup_matches_many_probes_of_one_length() -> anyhow::Result<()> {
+        let entries: [&[u8]; 5] = [b"id007", b"xx000", b"ID007", b"id150", b"id1500"];
+        let dictionary = VariableDictionary::load(
+            &encode_section(entries.len() as u64, &entries),
+            &ReaderLimits::default(),
+        )?;
+        let numbered_probes: Vec<String> = (0..200).rev().map(|i| format!("id{i:03}")).collect();
+        let mut probes: Vec<&[u8]> = numbered_probes.iter().map(String::as_bytes).collect();
+        probes.extend([&b"Id007"[..], b"ID007", b"id150"]);
+
+        let sensitive = dictionary.find_exact(&probes, true);
+        assert_eq!(sensitive.len(), 3);
+        assert_eq!(
+            sensitive.get(&b"id007"[..]).map(|ids| &**ids),
+            Some(&[VariableId::new(0)][..])
+        );
+        assert_eq!(
+            sensitive.get(&b"ID007"[..]).map(|ids| &**ids),
+            Some(&[VariableId::new(2)][..])
+        );
+        assert_eq!(
+            sensitive.get(&b"id150"[..]).map(|ids| &**ids),
+            Some(&[VariableId::new(3)][..])
+        );
+
+        let insensitive = dictionary.find_exact(&probes, false);
+        assert_eq!(insensitive.len(), 4);
+        for probe in [&b"id007"[..], b"Id007", b"ID007"] {
+            assert_eq!(
+                insensitive.get(probe).map(|ids| &**ids),
+                Some([0, 2].map(VariableId::new).as_slice())
+            );
+        }
+        assert_eq!(
+            insensitive.get(&b"id150"[..]).map(|ids| &**ids),
+            Some(&[VariableId::new(3)][..])
+        );
         Ok(())
     }
 
