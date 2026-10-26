@@ -127,6 +127,20 @@ impl TextPattern {
     /// Whether `text` matches the whole pattern; ASCII case is folded unless `is_case_sensitive`.
     #[must_use]
     pub fn matches(&self, text: &[u8], is_case_sensitive: bool) -> bool {
+        match &*self.pieces {
+            [PatternPiece::Literal(prefix), PatternPiece::AnyRun] => {
+                return text
+                    .get(..prefix.len())
+                    .is_some_and(|head| bytes_equal(head, prefix, is_case_sensitive));
+            }
+            [PatternPiece::AnyRun, PatternPiece::Literal(suffix)] => {
+                return text
+                    .len()
+                    .checked_sub(suffix.len())
+                    .is_some_and(|start| bytes_equal(&text[start..], suffix, is_case_sensitive));
+            }
+            _ => {}
+        }
         let mut segments = self.pieces.split(|piece| PatternPiece::AnyRun == *piece);
         let first = segments.next().unwrap_or_default();
         let Some((head, mut remaining)) = text.split_at_checked(segment_length(first)) else {
@@ -241,6 +255,17 @@ impl SearchTypeSet {
 
 /// # Returns
 ///
+/// Whether `lhs` equals `rhs`; ASCII case is folded unless `is_case_sensitive`.
+fn bytes_equal(lhs: &[u8], rhs: &[u8], is_case_sensitive: bool) -> bool {
+    if is_case_sensitive {
+        lhs == rhs
+    } else {
+        lhs.eq_ignore_ascii_case(rhs)
+    }
+}
+
+/// # Returns
+///
 /// The number of text bytes a star-free segment matches.
 fn segment_length(segment: &[PatternPiece]) -> usize {
     segment
@@ -263,12 +288,7 @@ fn segment_matches(segment: &[PatternPiece], text: &[u8], is_case_sensitive: boo
                 let Some(window) = text.get(offset..offset + bytes.len()) else {
                     return false;
                 };
-                let is_equal = if is_case_sensitive {
-                    window == &**bytes
-                } else {
-                    window.eq_ignore_ascii_case(bytes)
-                };
-                if !is_equal {
+                if !bytes_equal(window, bytes, is_case_sensitive) {
                     return false;
                 }
                 offset += bytes.len();
@@ -365,6 +385,10 @@ mod tests {
         assert!(pattern("ERROR").matches(b"error", false));
         assert!(!pattern("ERROR").matches(b"error", true));
         assert!(pattern("e*R").matches(b"ExxR", false));
+        assert!(pattern("ERR*").matches(b"error", false));
+        assert!(!pattern("ERR*").matches(b"error", true));
+        assert!(pattern("*OR").matches(b"error", false));
+        assert!(!pattern("*OR").matches(b"error", true));
         assert!(!pattern("É").matches("é".as_bytes(), false));
     }
 
