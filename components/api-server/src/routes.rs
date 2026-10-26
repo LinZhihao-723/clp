@@ -1030,6 +1030,7 @@ mod tests {
 #[cfg(test)]
 mod stream_query_tests {
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::convert::Infallible;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
@@ -1062,8 +1063,9 @@ mod stream_query_tests {
     use clp_rust_utils::types::ArchiveId;
     use futures::stream;
     use http_body_util::BodyExt;
-    use search_result_listener::JobStatusSource;
+    use search_result_listener::JobStatusTable;
     use search_result_listener::ListenerConfig;
+    use search_result_listener::PolledJobStatusSource;
     use search_result_listener::ResultEncoder;
     use search_result_listener::ResultEncoding;
     use search_result_listener::ResultListener;
@@ -1265,7 +1267,7 @@ mod stream_query_tests {
 
     #[async_trait]
     impl QueryJobTable for FakeQueryJobTable {
-        type StatusSource = Self;
+        type StatusSource = PolledJobStatusSource<Self>;
 
         async fn submit(
             &self,
@@ -1310,30 +1312,34 @@ mod stream_query_tests {
             Ok(is_marked)
         }
 
-        fn status_source(&self) -> Self {
-            self.clone()
+        fn status_source(&self) -> PolledJobStatusSource<Self> {
+            PolledJobStatusSource::new(self.clone(), Duration::from_millis(10))
         }
     }
 
     #[async_trait]
-    impl JobStatusSource for FakeQueryJobTable {
-        fn poll_interval(&self) -> Duration {
-            Duration::from_millis(10)
-        }
-
-        async fn get_status(
+    impl JobStatusTable for FakeQueryJobTable {
+        async fn get_statuses(
             &self,
-            query_job_id: QueryJobId,
-        ) -> Result<QueryJobStatus, search_result_listener::Error> {
+            query_job_ids: &[QueryJobId],
+        ) -> Result<HashMap<QueryJobId, QueryJobStatus>, sqlx::Error> {
             let state = self.lock();
             if state.should_fail_status_polls {
-                return Err(search_result_listener::Error::Io(std::io::Error::other(
+                return Err(sqlx::Error::Io(std::io::Error::other(
                     "the status poll failed",
                 )));
             }
-            state.jobs.get(&query_job_id).map(|job| job.status).ok_or(
-                search_result_listener::Error::QueryJobNotFound(query_job_id),
-            )
+            let statuses = query_job_ids
+                .iter()
+                .filter_map(|query_job_id| {
+                    state
+                        .jobs
+                        .get(query_job_id)
+                        .map(|job| (*query_job_id, job.status))
+                })
+                .collect();
+            drop(state);
+            Ok(statuses)
         }
     }
 

@@ -20,6 +20,7 @@ use futures::StreamExt;
 use non_empty_string::NonEmptyString;
 use search_result_listener::ListenerConfig;
 use search_result_listener::MariaDbJobStatusSource;
+use search_result_listener::MariaDbJobStatusTable;
 use search_result_listener::ResultEncoder;
 use search_result_listener::ResultEncoding;
 use search_result_listener::ResultListener;
@@ -224,7 +225,10 @@ async fn search(args: Cli) -> anyhow::Result<QueryJobStatus> {
 
     let (results, outcome) = session.run(
         query_job_id,
-        MariaDbJobStatusSource::new(db_pool, JOB_STATUS_POLL_INTERVAL),
+        MariaDbJobStatusSource::new(
+            MariaDbJobStatusTable::new(db_pool),
+            JOB_STATUS_POLL_INTERVAL,
+        ),
     );
     print_results(results).await.inspect_err(|e| {
         tracing::error!(error = % e, "Failed to print the search results.");

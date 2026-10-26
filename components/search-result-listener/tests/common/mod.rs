@@ -42,14 +42,20 @@ impl FakeJobStatusSource {
 
 #[async_trait]
 impl JobStatusSource for FakeJobStatusSource {
-    fn poll_interval(&self) -> Duration {
-        Duration::from_millis(10)
-    }
-
-    async fn get_status(&self, query_job_id: QueryJobId) -> Result<QueryJobStatus, Error> {
-        self.status
-            .lock()
-            .expect("status lock shouldn't be poisoned")
-            .ok_or(Error::QueryJobNotFound(query_job_id))
+    async fn wait_for_terminal_status(
+        &self,
+        query_job_id: QueryJobId,
+    ) -> Result<QueryJobStatus, Error> {
+        loop {
+            let status = self
+                .status
+                .lock()
+                .expect("status lock shouldn't be poisoned")
+                .ok_or(Error::QueryJobNotFound(query_job_id))?;
+            if status.is_terminal() {
+                return Ok(status);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 }

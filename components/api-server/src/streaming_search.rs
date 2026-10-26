@@ -17,6 +17,7 @@ use futures::Stream;
 use search_result_listener::EncodedBatch;
 use search_result_listener::JobStatusSource;
 use search_result_listener::MariaDbJobStatusSource;
+use search_result_listener::MariaDbJobStatusTable;
 use search_result_listener::OutcomeFuture;
 use search_result_listener::ResultEncoding;
 use search_result_listener::ResultListener;
@@ -30,7 +31,7 @@ use crate::client::QueryConfig;
 /// The operations a streaming search performs on the query jobs table.
 #[async_trait]
 pub trait QueryJobTable: Clone + Send + Sync + Unpin + 'static {
-    /// The source of the query jobs' statuses that a streaming search polls.
+    /// The source of the query jobs' statuses that a streaming search waits on.
     type StatusSource: JobStatusSource + 'static;
 
     /// Submits a search job.
@@ -74,12 +75,20 @@ pub trait QueryJobTable: Clone + Send + Sync + Unpin + 'static {
 #[derive(Clone)]
 pub struct MariaDbQueryJobTable {
     db_pool: sqlx::MySqlPool,
+    status_source: MariaDbJobStatusSource,
 }
 
 impl MariaDbQueryJobTable {
     #[must_use]
-    pub const fn new(db_pool: sqlx::MySqlPool) -> Self {
-        Self { db_pool }
+    pub fn new(db_pool: sqlx::MySqlPool) -> Self {
+        let status_source = MariaDbJobStatusSource::new(
+            MariaDbJobStatusTable::new(db_pool.clone()),
+            JOB_STATUS_POLL_INTERVAL,
+        );
+        Self {
+            db_pool,
+            status_source,
+        }
     }
 }
 
@@ -106,7 +115,7 @@ impl QueryJobTable for MariaDbQueryJobTable {
     }
 
     fn status_source(&self) -> MariaDbJobStatusSource {
-        MariaDbJobStatusSource::new(self.db_pool.clone(), JOB_STATUS_POLL_INTERVAL)
+        self.status_source.clone()
     }
 }
 
@@ -286,8 +295,8 @@ impl<QueryJobTableType: QueryJobTable, BatchType: EncodedBatch> Drop
     }
 }
 
-/// The delay between two consecutive polls of a streaming search's query job status.
-const JOB_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// The delay between two consecutive polls of the statuses of the streaming searches' query jobs.
+const JOB_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Requests the cancellation of a streaming search's query job, then waits for the search's
 /// `outcome`, if given, logging each step's result.

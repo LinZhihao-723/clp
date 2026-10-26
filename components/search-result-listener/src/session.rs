@@ -124,9 +124,9 @@ impl<EncodingType: ResultEncoding> Session<EncodingType> {
 
     /// Runs the session for the query job `query_job_id` in a background task.
     ///
-    /// The background task polls `status_source` until the job's status is terminal. It then stops
-    /// accepting connections for the session, lets the open connections drain, ends the result
-    /// stream, and resolves the outcome.
+    /// The background task waits on `status_source` until the job's status is terminal. It then
+    /// stops accepting connections for the session, lets the open connections drain, ends the
+    /// result stream, and resolves the outcome.
     ///
     /// # Type Parameters
     ///
@@ -376,8 +376,8 @@ impl<EncodingType: ResultEncoding> Drop for Registration<EncodingType> {
 ///
 /// Returns an error if:
 ///
-/// * Forwards [`wait_for_terminal_status`]'s return values on failure, after shutting the session
-///   down.
+/// * Forwards [`JobStatusSource::wait_for_terminal_status`]'s return values on failure, after
+///   shutting the session down.
 async fn drive<EncodingType: ResultEncoding, JobStatusSourceType: JobStatusSource>(
     registration: Registration<EncodingType>,
     accept_barrier: AcceptBarrier,
@@ -385,7 +385,7 @@ async fn drive<EncodingType: ResultEncoding, JobStatusSourceType: JobStatusSourc
     query_job_id: QueryJobId,
     status_source: JobStatusSourceType,
 ) -> Result<SessionOutcome, Error> {
-    let status = wait_for_terminal_status(&status_source, query_job_id).await;
+    let status = status_source.wait_for_terminal_status(query_job_id).await;
 
     // Tasks connect before they finish, so their connections have reached the socket by now.
     accept_barrier.wait().await;
@@ -406,28 +406,4 @@ async fn drive<EncodingType: ResultEncoding, JobStatusSourceType: JobStatusSourc
         status: status?,
         stats: session_stats,
     })
-}
-
-/// Polls `status_source` until the query job's status is terminal.
-///
-/// # Returns
-///
-/// The query job's terminal status on success.
-///
-/// # Errors
-///
-/// Returns an error if:
-///
-/// * Forwards [`JobStatusSource::get_status`]'s return values on failure.
-async fn wait_for_terminal_status(
-    status_source: &impl JobStatusSource,
-    query_job_id: QueryJobId,
-) -> Result<QueryJobStatus, Error> {
-    loop {
-        let status = status_source.get_status(query_job_id).await?;
-        if status.is_terminal() {
-            return Ok(status);
-        }
-        tokio::time::sleep(status_source.poll_interval()).await;
-    }
 }

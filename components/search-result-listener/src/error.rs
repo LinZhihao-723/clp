@@ -1,5 +1,6 @@
 //! Error types for the search result listener.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use clp_rust_utils::job_config::QueryJobId;
@@ -14,6 +15,9 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("failed to poll the query job statuses: {0}")]
+    JobStatusPoll(Arc<sqlx::Error>),
+
     #[error("no IPv4 address found to advertise to the search tasks")]
     NoIpv4Address,
 
@@ -22,9 +26,6 @@ pub enum Error {
 
     #[error("the session task failed: {0}")]
     SessionTask(#[from] tokio::task::JoinError),
-
-    #[error("sqlx error: {0}")]
-    Sqlx(#[from] sqlx::Error),
 }
 
 /// Violations of the wire protocol, each of which makes the listener close the connection.
