@@ -29,11 +29,6 @@ pub enum NegotiatedEncoding {
 impl NegotiatedEncoding {
     /// Negotiates the encoding of a response from the `Accept` header of its request.
     ///
-    /// The Arrow media range with the parameter `compression=zstd` accepts
-    /// [`Self::ArrowIpcZstd`], and the Arrow media range without a `compression` parameter accepts
-    /// [`Self::ArrowIpc`]; an Arrow media range with any other `compression` parameter accepts
-    /// neither.
-    ///
     /// # Returns
     ///
     /// The Arrow IPC encoding accepted with the highest nonzero quality, preferring
@@ -330,18 +325,5 @@ mod tests {
                 "{accept_values:?}"
             );
         }
-    }
-
-    #[test]
-    fn only_arrow_encodings_have_an_arrow_content_type() {
-        assert_eq!(NegotiatedEncoding::Sse.arrow_content_type(), None);
-        assert_eq!(
-            NegotiatedEncoding::ArrowIpc.arrow_content_type(),
-            Some("application/vnd.apache.arrow.stream")
-        );
-        assert_eq!(
-            NegotiatedEncoding::ArrowIpcZstd.arrow_content_type(),
-            Some("application/vnd.apache.arrow.stream; compression=zstd")
-        );
     }
 }

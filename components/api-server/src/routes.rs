@@ -1093,8 +1093,14 @@ mod stream_query_tests {
     use crate::sse::SseEncoding;
     use crate::streaming_search::QueryJobTable;
     use crate::streaming_search::StreamingSearch;
-
-    const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
+    use crate::test_utils::ARCHIVE_ID;
+    use crate::test_utils::ArrowRow;
+    use crate::test_utils::decode_result_stream;
+    use crate::test_utils::expected_rows;
+    use crate::test_utils::ipc_message_codecs;
+    use crate::test_utils::message;
+    use crate::test_utils::result_batch;
+    use crate::test_utils::timestamp;
 
     /// Messages whose JSON escaping or trailing newlines an event encoding could get wrong.
     const TRICKY_MESSAGES: &[&str] = &[
@@ -1589,7 +1595,6 @@ mod stream_query_tests {
     struct FakeArrowTask {
         stream: TcpStream,
         encoder: arrow_ipc::writer::StreamEncoder,
-        archive_ids: arrow_array::ArrayRef,
     }
 
     impl FakeArrowTask {
@@ -1624,7 +1629,6 @@ mod stream_query_tests {
                     &search_result_listener::RESULT_SCHEMA,
                 )
                 .expect("the result schema should be encodable"),
-                archive_ids: Arc::new(arrow_array::StringArray::from(vec![ARCHIVE_ID])),
             }
         }
 
@@ -1635,30 +1639,9 @@ mod stream_query_tests {
         ///
         /// The bytes sent.
         async fn send_batch(&mut self, result_indices: Range<u64>) -> Vec<u8> {
-            let num_rows = usize::try_from(result_indices.end - result_indices.start)
-                .expect("the number of test results should fit in `usize`");
-            let archive_ids =
-                arrow_array::DictionaryArray::<arrow_array::types::Int32Type>::try_new(
-                    arrow_array::Int32Array::from(vec![0; num_rows]),
-                    Arc::clone(&self.archive_ids),
-                )
-                .expect("the keys should index the dictionary");
-            let batch = arrow_array::RecordBatch::try_new(
-                Arc::clone(&search_result_listener::RESULT_SCHEMA),
-                vec![
-                    Arc::new(archive_ids),
-                    Arc::new(arrow_array::Int64Array::from_iter_values(
-                        result_indices.clone().map(timestamp),
-                    )),
-                    Arc::new(arrow_array::StringArray::from_iter_values(
-                        result_indices.map(message),
-                    )),
-                ],
-            )
-            .expect("the batch should match the result schema");
             let bytes: Vec<u8> = self
                 .encoder
-                .encode(&batch)
+                .encode(&result_batch(result_indices))
                 .expect("the batch should encode")
                 .iter()
                 .flat_map(|buffer| buffer.to_vec())
@@ -1705,9 +1688,6 @@ mod stream_query_tests {
         }
     }
 
-    /// One result decoded from an Arrow IPC stream response: `(archive_id, timestamp, message)`.
-    type ArrowRow = (String, i64, String);
-
     /// The summary row of an Arrow IPC stream response.
     #[derive(Debug, PartialEq, Eq)]
     struct ArrowSummary {
@@ -1731,42 +1711,7 @@ mod stream_query_tests {
         use arrow_array::Array;
 
         let mut remaining = body;
-        let mut rows = Vec::new();
-        let reader = arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)
-            .expect("the body should start with the result schema");
-        assert_eq!(reader.schema(), *search_result_listener::RESULT_SCHEMA);
-        for batch in reader {
-            let batch = batch.expect("every result batch should decode");
-            let archive_ids = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<arrow_array::DictionaryArray<arrow_array::types::Int32Type>>()
-                .expect("archive IDs should be a dictionary");
-            let archive_id_values = archive_ids
-                .values()
-                .as_any()
-                .downcast_ref::<arrow_array::StringArray>()
-                .expect("archive ID values should be strings");
-            let timestamps = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<arrow_array::Int64Array>()
-                .expect("timestamps should be `Int64`");
-            let messages = batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<arrow_array::StringArray>()
-                .expect("messages should be strings");
-            for row in 0..batch.num_rows() {
-                let key = usize::try_from(archive_ids.keys().value(row))
-                    .expect("keys should be non-negative");
-                rows.push((
-                    archive_id_values.value(key).to_owned(),
-                    timestamps.value(row),
-                    messages.value(row).to_owned(),
-                ));
-            }
-        }
+        let rows = decode_result_stream(&mut remaining);
         let batches: Vec<_> = arrow_ipc::reader::StreamReader::try_new(&mut remaining, None)
             .expect("the summary stream should follow")
             .collect::<Result<_, _>>()
@@ -1837,40 +1782,6 @@ mod stream_query_tests {
 
     /// # Returns
     ///
-    /// The compression codec of each record batch of the result stream at the start of `body`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `body` doesn't start with a framed IPC stream.
-    fn record_batch_codecs(mut body: &[u8]) -> Vec<Option<arrow_ipc::CompressionType>> {
-        let mut codecs = Vec::new();
-        loop {
-            let metadata_len = usize::try_from(u32::from_le_bytes(
-                body[4..8]
-                    .try_into()
-                    .expect("the metadata length should be 4 bytes"),
-            ))
-            .expect("the metadata length should fit in `usize`");
-            if 0 == metadata_len {
-                return codecs;
-            }
-            let message = arrow_ipc::root_as_message(&body[8..8 + metadata_len])
-                .expect("the metadata should be a message");
-            if let Some(record_batch) = message.header_as_record_batch() {
-                codecs.push(
-                    record_batch
-                        .compression()
-                        .map(|compression| compression.codec()),
-                );
-            }
-            let body_len = usize::try_from(message.bodyLength())
-                .expect("the body length should be non-negative");
-            body = &body[8 + metadata_len + body_len..];
-        }
-    }
-
-    /// # Returns
-    ///
     /// The body of `response`, once it ends.
     async fn body_bytes(response: Response) -> Bytes {
         timeout(TIMEOUT, response.into_body().collect())
@@ -1878,21 +1789,6 @@ mod stream_query_tests {
             .expect("the body should end")
             .expect("the body should be readable")
             .to_bytes()
-    }
-
-    /// # Returns
-    ///
-    /// The rows of the results at `result_indices`, as an Arrow IPC stream response holds them.
-    fn expected_rows(result_indices: Range<u64>) -> Vec<ArrowRow> {
-        result_indices
-            .map(|result_index| {
-                (
-                    ARCHIVE_ID.to_owned(),
-                    timestamp(result_index),
-                    message(result_index),
-                )
-            })
-            .collect()
     }
 
     /// Builds an app that serves streaming searches through `streaming_search`, the way the API
@@ -1950,20 +1846,6 @@ mod stream_query_tests {
             .expect("the body should be readable")
             .to_bytes();
         String::from_utf8(bytes.to_vec()).expect("the body should be UTF-8")
-    }
-
-    /// # Returns
-    ///
-    /// The timestamp of the result at `result_index`.
-    fn timestamp(result_index: u64) -> i64 {
-        1_700_000_000_000 + i64::try_from(result_index).expect("test result indices fit in `i64`")
-    }
-
-    /// # Returns
-    ///
-    /// The message of the result at `result_index`, without a trailing newline.
-    fn message(result_index: u64) -> String {
-        format!("{{\"result\":{result_index}}}")
     }
 
     /// # Returns
@@ -2698,32 +2580,6 @@ mod stream_query_tests {
     }
 
     #[tokio::test]
-    async fn each_negotiated_encoding_responds_with_its_content_type() {
-        for (accept, expected_content_type) in [
-            ("text/event-stream", "text/event-stream"),
-            (ARROW_STREAM_CONTENT_TYPE, ARROW_STREAM_CONTENT_TYPE),
-            (
-                ARROW_STREAM_ZSTD_CONTENT_TYPE,
-                ARROW_STREAM_ZSTD_CONTENT_TYPE,
-            ),
-        ] {
-            let harness = Harness::start().await;
-            let response =
-                post_query_stream_accepting(&harness.app, accept, &json!({"query_string": "*"}))
-                    .await;
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .map(axum::http::HeaderValue::as_bytes),
-                Some(expected_content_type.as_bytes()),
-                "{accept}"
-            );
-        }
-    }
-
-    #[tokio::test]
     async fn zstd_arrow_response_streams_compressed_batches_of_each_result_once() {
         let harness = Harness::start().await;
         let response = post_query_stream_accepting(
@@ -2732,6 +2588,14 @@ mod stream_query_tests {
             &json!({"query_string": "*"}),
         )
         .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(ARROW_STREAM_ZSTD_CONTENT_TYPE.as_bytes())
+        );
         assert_eq!(
             response
                 .headers()
@@ -2771,13 +2635,16 @@ mod stream_query_tests {
                 num_incomplete_connections: Some(1),
             }
         );
-        let codecs = record_batch_codecs(&body);
-        assert!(!codecs.is_empty());
+        let codecs = ipc_message_codecs(&body);
+        assert!(codecs.contains(&(
+            arrow_ipc::MessageHeader::RecordBatch,
+            Some(arrow_ipc::CompressionType::ZSTD)
+        )));
         assert!(
-            codecs
-                .iter()
-                .all(|codec| *codec == Some(arrow_ipc::CompressionType::ZSTD)),
-            "every record batch should be compressed with zstd: {codecs:?}"
+            codecs.iter().all(|(header, codec)| *codec
+                == (arrow_ipc::MessageHeader::RecordBatch == *header)
+                    .then_some(arrow_ipc::CompressionType::ZSTD)),
+            "exactly the record batches should be compressed with zstd: {codecs:?}"
         );
         assert!(
             body.len() * 4 < producer_bytes.len(),

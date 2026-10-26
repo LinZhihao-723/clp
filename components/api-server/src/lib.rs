@@ -5,3 +5,5 @@ pub mod negotiation;
 pub mod routes;
 pub mod sse;
 pub mod streaming_search;
+#[cfg(test)]
+mod test_utils;
