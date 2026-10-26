@@ -1,7 +1,6 @@
 //! The variable, logtype and array dictionaries.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -100,37 +99,31 @@ impl VariableDictionary {
         probes: &[&'probe [u8]],
         is_case_sensitive: bool,
     ) -> HashMap<&'probe [u8], Box<[VariableId]>> {
-        let mut matches: HashMap<&'probe [u8], Vec<VariableId>> = HashMap::new();
-        if is_case_sensitive {
-            let probe_set: HashSet<&[u8]> = probes.iter().copied().collect();
-            for (id, entry) in self.entries.iter() {
-                if let Some(probe) = probe_set.get(entry) {
-                    matches.entry(probe).or_default().push(VariableId::new(id));
-                }
-            }
-        } else {
-            let mut probes_by_folded: HashMap<Vec<u8>, Vec<&'probe [u8]>> = HashMap::new();
-            for probe in probes {
-                let folded = probe.to_ascii_lowercase();
-                let folded_probes = probes_by_folded.entry(folded).or_default();
-                if !folded_probes.contains(probe) {
-                    folded_probes.push(probe);
-                }
-            }
-            let mut folded_entry = Vec::new();
-            for (id, entry) in self.entries.iter() {
-                folded_entry.clear();
-                folded_entry.extend(entry.iter().map(u8::to_ascii_lowercase));
-                let Some(folded_probes) = probes_by_folded.get(folded_entry.as_slice()) else {
-                    continue;
+        let mut distinct_probes = probes.to_vec();
+        distinct_probes.sort_unstable_by(|lhs, rhs| lhs.len().cmp(&rhs.len()).then(lhs.cmp(rhs)));
+        distinct_probes.dedup();
+        let mut matches: Vec<Vec<VariableId>> = vec![Vec::new(); distinct_probes.len()];
+        for (id, entry) in self.entries.iter() {
+            let begin = distinct_probes.partition_point(|probe| probe.len() < entry.len());
+            for (probe, probe_matches) in distinct_probes[begin..]
+                .iter()
+                .zip(&mut matches[begin..])
+                .take_while(|(probe, _)| probe.len() == entry.len())
+            {
+                let is_match = if is_case_sensitive {
+                    *probe == entry
+                } else {
+                    probe.eq_ignore_ascii_case(entry)
                 };
-                for probe in folded_probes {
-                    matches.entry(probe).or_default().push(VariableId::new(id));
+                if is_match {
+                    probe_matches.push(VariableId::new(id));
                 }
             }
         }
-        matches
+        distinct_probes
             .into_iter()
+            .zip(matches)
+            .filter(|(_, ids)| !ids.is_empty())
             .map(|(probe, ids)| (probe, ids.into_boxed_slice()))
             .collect()
     }
