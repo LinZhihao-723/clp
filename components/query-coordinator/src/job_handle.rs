@@ -53,7 +53,8 @@ impl SpiderOption {
     /// [`Self::query_task_parallelism`], but at least one and at most
     /// [`Self::max_num_archives_per_query_task`]. The tasks thus shrink to one archive each
     /// toward the end of the job, so that the job's last tasks finish close together. Each task's
-    /// execution policy is derived from the total uncompressed size of its archives.
+    /// execution policy is derived from the number and the total uncompressed size of its
+    /// archives.
     ///
     /// # Returns
     ///
@@ -69,11 +70,12 @@ impl SpiderOption {
                 size.saturating_add(archive.uncompressed_size)
             });
             query_tasks.push(QueryTask {
-                archives,
                 execution_policy: compute_query_task_execution_policy(
+                    archives.len() as u64,
                     uncompressed_size,
                     self.query_task_max_retry,
                 ),
+                archives,
             });
         }
         query_tasks
@@ -773,11 +775,12 @@ struct ArchiveRowProjection {
     end_timestamp: i64,
 }
 
-/// Derives the execution policy of the query task that searches archives of `uncompressed_size`
-/// bytes in total, retried at most `max_num_retry` times.
+/// Derives the execution policy of the query task that searches `num_archives` archives of
+/// `uncompressed_size` bytes in total, retried at most `max_num_retry` times.
 ///
-/// Each timeout is the sum of a size-independent base, which covers the task executor's startup
-/// and the archives' opens, and a term proportional to the archives' uncompressed size. The soft
+/// Each timeout is the sum of a size-independent base per archive, which covers the task
+/// executor's startup and the archive's open, and a term proportional to the archives' uncompressed
+/// size. The soft
 /// timeout assumes the throughput `clp-s` is expected to sustain, whereas the hard timeout, after
 /// which Spider kills the task, assumes the worst-case throughput of a fully contended worker.
 ///
@@ -785,19 +788,20 @@ struct ArchiveRowProjection {
 ///
 /// The query task's execution policy.
 fn compute_query_task_execution_policy(
+    num_archives: u64,
     uncompressed_size: u64,
     max_num_retry: u32,
 ) -> ExecutionPolicy {
     const BYTES_PER_MIB: u64 = 1024 * 1024;
 
-    /// The size-independent base of the soft timeout, in milliseconds.
+    /// The size-independent base of the soft timeout per archive, in milliseconds.
     const SOFT_TIMEOUT_BASE_MILLISECS: u64 = 10 * 1000;
 
     /// The soft timeout's per-MiB term, derived from an expected search throughput of 50MiB of
     /// uncompressed data per second.
     const SOFT_TIMEOUT_MILLISECS_PER_UNCOMPRESSED_MIB: u64 = 20;
 
-    /// The size-independent base of the hard timeout, in milliseconds.
+    /// The size-independent base of the hard timeout per archive, in milliseconds.
     const HARD_TIMEOUT_BASE_MILLISECS: u64 = 60 * 1000;
 
     /// The hard timeout's per-MiB term, derived from a worst-case search throughput of 2MiB of
@@ -810,11 +814,11 @@ fn compute_query_task_execution_policy(
     let uncompressed_mib = uncompressed_size / BYTES_PER_MIB;
     let hard_timeout_ms = uncompressed_mib
         .saturating_mul(HARD_TIMEOUT_MILLISECS_PER_UNCOMPRESSED_MIB)
-        .saturating_add(HARD_TIMEOUT_BASE_MILLISECS)
+        .saturating_add(HARD_TIMEOUT_BASE_MILLISECS.saturating_mul(num_archives))
         .min(MAX_TIMEOUT_MILLISECS);
     let soft_timeout_ms = uncompressed_mib
         .saturating_mul(SOFT_TIMEOUT_MILLISECS_PER_UNCOMPRESSED_MIB)
-        .saturating_add(SOFT_TIMEOUT_BASE_MILLISECS)
+        .saturating_add(SOFT_TIMEOUT_BASE_MILLISECS.saturating_mul(num_archives))
         .min(hard_timeout_ms - 1);
 
     ExecutionPolicy {
@@ -1042,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn task_timeouts_cover_the_total_size_of_its_archives() {
+    fn task_timeouts_cover_the_timeouts_of_each_of_its_archives() {
         let spider_option = SpiderOption {
             max_num_archives_per_query_task: NonZeroUsize::new(2).expect("2 is nonzero"),
             ..BASE_SPIDER_OPTION
@@ -1056,15 +1060,35 @@ mod tests {
                 .map(|query_task| query_task.execution_policy.clone())
                 .collect::<Vec<_>>(),
             [compute_query_task_execution_policy(
+                2,
                 256 * BYTES_PER_MIB,
                 MAX_NUM_RETRY
             )]
+        );
+        let timeout_policy = &query_tasks[0].execution_policy.timeout_policy;
+        let archive_timeout_policies = [100, 156].map(|uncompressed_mib| {
+            compute_query_task_execution_policy(1, uncompressed_mib * BYTES_PER_MIB, MAX_NUM_RETRY)
+                .timeout_policy
+        });
+        assert_eq!(
+            timeout_policy.soft_timeout_ms,
+            archive_timeout_policies
+                .iter()
+                .map(|policy| policy.soft_timeout_ms)
+                .sum::<u64>()
+        );
+        assert_eq!(
+            timeout_policy.hard_timeout_ms,
+            archive_timeout_policies
+                .iter()
+                .map(|policy| policy.hard_timeout_ms)
+                .sum::<u64>()
         );
     }
 
     #[test]
     fn sub_mib_archive_gets_the_base_timeouts() {
-        let policy = compute_query_task_execution_policy(BYTES_PER_MIB - 1, MAX_NUM_RETRY);
+        let policy = compute_query_task_execution_policy(1, BYTES_PER_MIB - 1, MAX_NUM_RETRY);
 
         assert_eq!(policy.max_num_retry, MAX_NUM_RETRY);
         assert_eq!(policy.timeout_policy.soft_timeout_ms, 10_000);
@@ -1073,7 +1097,7 @@ mod tests {
 
     #[test]
     fn timeouts_grow_with_the_uncompressed_size() {
-        let policy = compute_query_task_execution_policy(256 * BYTES_PER_MIB, MAX_NUM_RETRY);
+        let policy = compute_query_task_execution_policy(1, 256 * BYTES_PER_MIB, MAX_NUM_RETRY);
 
         assert_eq!(policy.timeout_policy.soft_timeout_ms, 10_000 + 256 * 20);
         assert_eq!(policy.timeout_policy.hard_timeout_ms, 60_000 + 256 * 500);
@@ -1081,7 +1105,7 @@ mod tests {
 
     #[test]
     fn oversized_archive_clamps_the_timeouts_to_spiders_maximum() {
-        let policy = compute_query_task_execution_policy(u64::MAX, MAX_NUM_RETRY);
+        let policy = compute_query_task_execution_policy(1, u64::MAX, MAX_NUM_RETRY);
 
         assert_eq!(
             policy.timeout_policy.soft_timeout_ms,
@@ -1101,7 +1125,7 @@ mod tests {
             u64::MAX,
         ] {
             let timeout_policy =
-                compute_query_task_execution_policy(uncompressed_size, MAX_NUM_RETRY)
+                compute_query_task_execution_policy(1, uncompressed_size, MAX_NUM_RETRY)
                     .timeout_policy;
 
             assert!(
