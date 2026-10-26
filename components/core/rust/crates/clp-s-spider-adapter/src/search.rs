@@ -14,6 +14,7 @@ use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::dataset::resolve_dataset_name;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::SessionToken;
+use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
@@ -84,7 +85,7 @@ impl<'task> SearchTask<'task> {
         config: &'task SpiderTaskExecutorConfig,
         query_job_id: QueryJobId,
         clp_s_query_option: &'task ClpSQueryOption,
-        archive: ArchiveToSearch<'task>,
+        archive: &'task ArchiveToSearch,
         output_handle: &'task OutputHandle,
     ) -> anyhow::Result<Self> {
         if StorageEngine::ClpS != config.package.storage_engine {
@@ -109,7 +110,7 @@ impl<'task> SearchTask<'task> {
             query_job_id,
             clp_s_query_option,
             archive_id: archive.id,
-            dataset: resolve_dataset_name(archive.dataset),
+            dataset: resolve_dataset_name(archive.dataset.as_ref().map(NonEmptyString::as_str)),
             output,
             task_index: archive.task_index,
         })
@@ -426,18 +427,6 @@ impl<'task> SearchTask<'task> {
     }
 }
 
-/// The archive that a search task searches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ArchiveToSearch<'task> {
-    pub id: ArchiveId,
-
-    /// The archive's dataset, or `None` for the default dataset.
-    pub dataset: Option<&'task str>,
-
-    /// The archive's position among the archives that the query job searches.
-    pub task_index: QueryTaskIndex,
-}
-
 /// Where a search task writes its results.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskOutput<'task> {
@@ -475,7 +464,7 @@ pub fn search(
     config: &SpiderTaskExecutorConfig,
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
-    archive: ArchiveToSearch<'_>,
+    archive: &ArchiveToSearch,
     output_handle: &OutputHandle,
 ) -> anyhow::Result<()> {
     let task = SearchTask::new(
@@ -607,6 +596,7 @@ mod tests {
     use clp_rust_utils::clp_config::package::config::Package;
     use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
     use clp_rust_utils::clp_config::package::config::StorageEngine;
+    use clp_rust_utils::task_io::query::ArchiveToSearch;
     use clp_rust_utils::task_io::query::ClpSQueryOption;
     use clp_rust_utils::task_io::query::OutputHandle;
     use clp_rust_utils::types::ArchiveId;
@@ -634,7 +624,6 @@ mod tests {
     use spider_core::types::id::TaskId;
     use spider_tdl::TaskContext;
 
-    use super::ArchiveToSearch;
     use super::ResolvedLocation;
     use super::SearchTask;
     use super::TaskOutput;
@@ -846,10 +835,10 @@ mod tests {
     /// # Returns
     ///
     /// The test archive as task `TASK_INDEX` of the job searches it, in `dataset`.
-    fn archive(dataset: Option<&str>) -> ArchiveToSearch<'_> {
+    fn archive(dataset: Option<&'static str>) -> ArchiveToSearch {
         ArchiveToSearch {
             id: archive_id(),
-            dataset,
+            dataset: dataset.map(NonEmptyString::from_static_str),
             task_index: TASK_INDEX,
         }
     }
@@ -1061,7 +1050,7 @@ mod tests {
             &config,
             QUERY_JOB_ID,
             clp_s_query_option,
-            archive(Some(DATASET)),
+            &archive(Some(DATASET)),
             output_handle,
         )?
         .run(resources)
@@ -1091,7 +1080,7 @@ mod tests {
             config,
             QUERY_JOB_ID,
             clp_s_query_option,
-            archive(Some(DATASET)),
+            &archive(Some(DATASET)),
             &output_handle,
         )?
         .run(resources)
@@ -1136,7 +1125,7 @@ mod tests {
             &SpiderTaskExecutorConfig::default(),
             QUERY_JOB_ID,
             &option,
-            archive(None),
+            &archive(None),
             &results_cache(UNREACHABLE_URI),
         )
         .expect_err("the clp storage engine is unsupported");
@@ -1146,7 +1135,7 @@ mod tests {
             &fs_config(),
             QUERY_JOB_ID,
             &option,
-            archive(None),
+            &archive(None),
             &OutputHandle::File,
         )
         .expect_err("the file output handler is unsupported");
@@ -1161,12 +1150,13 @@ mod tests {
         let option = query_option("*");
         let output_handle = results_cache(UNREACHABLE_URI);
         let config = fs_config();
+        let archive = archive(None);
         let task = SearchTask::new(
             &ctx,
             &config,
             QUERY_JOB_ID,
             &option,
-            archive(None),
+            &archive,
             &output_handle,
         )?;
         assert_eq!(task.dataset, "default");
@@ -1412,12 +1402,13 @@ mod tests {
         let option = query_option("*");
         let ctx = task_context();
         let output_handle = results_cache(UNREACHABLE_URI);
+        let archive = archive(Some(DATASET));
         let task = SearchTask::new(
             &ctx,
             &config,
             QUERY_JOB_ID,
             &option,
-            archive(Some(DATASET)),
+            &archive,
             &output_handle,
         )?;
         let run = |fault| {
@@ -1628,7 +1619,7 @@ mod tests {
                 &config,
                 QUERY_JOB_ID,
                 &option,
-                archive(Some(DATASET)),
+                &archive(Some(DATASET)),
                 output_handle,
             )?
             .scan_request()?;

@@ -17,12 +17,13 @@ use clp_rust_utils::clp_config::package::config::Package;
 use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::job_config::QueryJobStatus;
+use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::types::ArchiveId;
+use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
 use clp_s_spider_adapter::AdapterConfig;
 use clp_s_spider_adapter::AdapterResources;
-use clp_s_spider_adapter::ArchiveToSearch;
 use common::FakeJobStatusSource;
 use futures::StreamExt;
 use non_empty_string::NonEmptyString;
@@ -273,7 +274,7 @@ fn search(
     };
     let archive = ArchiveToSearch {
         id: archive_id,
-        dataset: Some(DATASET),
+        dataset: Some(NonEmptyString::from_static_str(DATASET)),
         task_index,
     };
     let task = match engine {
@@ -285,7 +286,7 @@ fn search(
         &config,
         1,
         &clp_s_query_option,
-        archive,
+        &archive,
         output_handle,
     )
 }

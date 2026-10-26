@@ -12,7 +12,6 @@ mod tracking;
 
 pub use resources::AdapterConfig;
 pub use resources::AdapterResources;
-pub use search::ArchiveToSearch;
 pub use search::resolve_archive_location;
 pub use search::search;
 pub use subprocess::search_with_clp_s_subprocess;

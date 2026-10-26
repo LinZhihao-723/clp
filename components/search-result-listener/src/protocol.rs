@@ -47,6 +47,8 @@ impl TryFrom<u64> for ProtocolVersion {
 pub struct Handshake {
     pub version: ProtocolVersion,
     pub session_token: SessionToken,
+
+    /// The position of the archive among the archives that its query job searches.
     pub task_index: QueryTaskIndex,
     pub archive_id: ArchiveId,
 }

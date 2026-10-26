@@ -26,6 +26,8 @@ pub enum StreamProtocolVersion {
 pub struct StreamHandshake<'handshake> {
     pub version: StreamProtocolVersion,
     pub session_token: &'handshake str,
+
+    /// The position of the archive among the archives that its query job searches.
     pub task_index: u64,
     pub archive_id: &'handshake str,
 }

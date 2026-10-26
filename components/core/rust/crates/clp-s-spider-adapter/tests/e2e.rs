@@ -28,9 +28,11 @@ use clp_rust_utils::clp_config::package::config::ArchiveOutputStorage;
 use clp_rust_utils::clp_config::package::config::Package;
 use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
+use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::types::ArchiveId;
+use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
 use clp_s_difftest::compare::RecordComparison;
 use clp_s_difftest::corpus::Corpus;
 use clp_s_difftest::corpus::QueryCase;
@@ -41,7 +43,6 @@ use clp_s_difftest::multiset::RecordMultiset;
 use clp_s_reader::ReaderContext;
 use clp_s_spider_adapter::AdapterConfig;
 use clp_s_spider_adapter::AdapterResources;
-use clp_s_spider_adapter::ArchiveToSearch;
 use clp_s_spider_adapter::search;
 use clp_s_spider_adapter::search_with_clp_s_subprocess;
 use mongodb::bson::Document;
@@ -407,9 +408,9 @@ impl Harness {
             &self.config(storage),
             query_job_id,
             option,
-            ArchiveToSearch {
+            &ArchiveToSearch {
                 id: archive_id,
-                dataset: Some(DATASET),
+                dataset: Some(NonEmptyString::from_static_str(DATASET)),
                 task_index: 0,
             },
             &output_handle,

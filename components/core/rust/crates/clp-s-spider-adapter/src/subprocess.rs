@@ -20,6 +20,7 @@ use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::SessionToken;
 use clp_rust_utils::s3::generate_s3_url;
+use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
 use clp_rust_utils::task_io::query::QueryTaskIndex;
@@ -27,7 +28,6 @@ use clp_rust_utils::types::ArchiveId;
 use non_empty_string::NonEmptyString;
 
 use crate::AdapterResources;
-use crate::search::ArchiveToSearch;
 use crate::search::SearchTask;
 
 /// Searches one archive by spawning the C++ `clp-s`, exactly as `clp-tdl-package`'s `search` task
@@ -45,7 +45,7 @@ pub fn search_with_clp_s_subprocess(
     config: &SpiderTaskExecutorConfig,
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
-    archive: ArchiveToSearch<'_>,
+    archive: &ArchiveToSearch,
     output_handle: &OutputHandle,
 ) -> anyhow::Result<()> {
     let task = SearchTask::new(
