@@ -153,8 +153,8 @@ Files changed:
     CLP home, and a 60 s base admission timeout. These stay alive across tasks.
 - **Dispatch.** `query::clp_s_search` matches on the engine for each of its archives: `ClpS` calls
   the package's own `search::search`, and `Rust` calls `clp_s_spider_adapter::search` with the
-  same inputs. Errors
-  still become `TdlError::ExecutionError`, so Spider retries a failed task as before.
+  same inputs. Errors still become `TdlError::ExecutionError`, so Spider retries a failed task as
+  before.
 - **One image.** Both engines are in the same `libclp_tdl_package.so`. The `spider-worker`
   service in `compose.clp-spider.yaml` gains
   `CLP_SPIDER_SEARCH_ENGINE: "${CLP_SPIDER_SEARCH_ENGINE:-clp-s}"`. The execution manager passes
