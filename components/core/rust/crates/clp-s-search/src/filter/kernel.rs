@@ -473,8 +473,11 @@ impl Probe {
 enum LogtypeSet {
     Single(u64),
 
-    /// Bit `id` of the words is set for every id.
-    Dense(Box<[u64]>),
+    /// Bit `id - base` of the words is set for every id.
+    Dense {
+        base: u64,
+        words: Box<[u64]>,
+    },
 }
 
 impl LogtypeSet {
@@ -503,11 +506,17 @@ impl LogtypeSet {
         if let [id] = ids.as_slice() {
             return Some(Self::Single(*id));
         }
-        let mut words = vec![0_u64; usize::try_from(ids.last().map_or(0, |id| id / 64 + 1)).ok()?];
+        let base = ids.first().copied().unwrap_or_default();
+        let num_words = ids.last().map_or(0, |last| (last - base) / 64 + 1);
+        let mut words = vec![0_u64; usize::try_from(num_words).ok()?];
         for id in ids {
-            words[usize::try_from(id / 64).ok()?] |= 1 << (id % 64);
+            let offset = id - base;
+            words[usize::try_from(offset / 64).ok()?] |= 1 << (offset % 64);
         }
-        Some(Self::Dense(words.into_boxed_slice()))
+        Some(Self::Dense {
+            base,
+            words: words.into_boxed_slice(),
+        })
     }
 
     /// Selects the `active` rows of `batch` whose logtype is in the set into `candidates` and, if
@@ -536,13 +545,17 @@ impl LogtypeSet {
                 Self::Single(single) => ids.zip(0_u32..).fold(0_u64, |bits, (id, offset)| {
                     bits | (u64::from(*single == id) << offset)
                 }),
-                Self::Dense(words) => ids.zip(0_u32..).fold(0_u64, |bits, (id, offset)| {
-                    let is_member = usize::try_from(id / 64)
-                        .ok()
-                        .and_then(|index| words.get(index))
-                        .is_some_and(|word| 0 != word & (1 << (id % 64)));
-                    bits | (u64::from(is_member) << offset)
-                }),
+                Self::Dense { base, words } => {
+                    ids.zip(0_u32..).fold(0_u64, |bits, (id, row_offset)| {
+                        let is_member = id.checked_sub(*base).is_some_and(|offset| {
+                            usize::try_from(offset / 64)
+                                .ok()
+                                .and_then(|index| words.get(index))
+                                .is_some_and(|word| 0 != word & (1 << (offset % 64)))
+                        });
+                        bits | (u64::from(is_member) << row_offset)
+                    })
+                }
             };
             candidates[word_index] = bits & active_word;
             if let Some(falsy) = falsy.as_deref_mut() {
