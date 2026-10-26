@@ -190,6 +190,7 @@ impl LeafKernel {
 pub struct KernelBuffers {
     text: Vec<u8>,
     walk: WalkScratch,
+    candidates: Vec<u64>,
 }
 
 /// One bound column of a leaf.
@@ -278,6 +279,9 @@ enum Probe {
         members: Arc<[EncodedTextMember]>,
         is_case_sensitive: bool,
         cost: CostClass,
+
+        /// The logtypes some member can match on, or `None` if a member decodes every value.
+        logtypes: Option<LogtypeSet>,
     },
 
     Array(ArrayProbe),
@@ -333,6 +337,7 @@ impl Probe {
                     } else {
                         CostClass::EncodedText
                     },
+                    logtypes: LogtypeSet::of_members(members),
                 }
             }
             (ColumnTest::Array(access), ColumnEncoding::UnstructuredArray) => {
@@ -413,20 +418,29 @@ impl Probe {
                 Self::EncodedText {
                     members,
                     is_case_sensitive,
+                    logtypes,
                     ..
                 },
                 ColumnBatch::ClpString(encoded),
-            ) => mask::try_for_each_row(active, |row| {
-                let is_match = encoded_text_matches(
-                    &encoded,
-                    row,
-                    members,
-                    *is_case_sensitive,
-                    &mut buffers.text,
-                )?;
-                write(row, value::truth(is_match));
-                Ok(())
-            }),
+            ) => {
+                let KernelBuffers {
+                    text, candidates, ..
+                } = buffers;
+                let candidates = logtypes.as_ref().map_or(active, |logtypes| {
+                    logtypes.select_candidates(&encoded, active, candidates, falsy.as_deref_mut())
+                });
+                mask::try_for_each_row(candidates, |row| {
+                    let is_match =
+                        encoded_text_matches(&encoded, row, members, *is_case_sensitive, text)?;
+                    let (word, bit) = ((row / 64) as usize, 1_u64 << (row % 64));
+                    if is_match {
+                        truthy[word] |= bit;
+                    } else if let Some(falsy) = falsy.as_deref_mut() {
+                        falsy[word] |= bit;
+                    }
+                    Ok(())
+                })
+            }
             (Self::Array(probe), ColumnBatch::UnstructuredArray(encoded)) => {
                 mask::try_for_each_row(active, |row| {
                     buffers.text.clear();
@@ -451,6 +465,91 @@ impl Probe {
                 reason: "a window column does not have the compiled encoding",
             }),
         }
+    }
+}
+
+/// A set of logtype ids.
+#[derive(Debug)]
+enum LogtypeSet {
+    Single(u64),
+
+    /// Bit `id` of the words is set for every id.
+    Dense(Box<[u64]>),
+}
+
+impl LogtypeSet {
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// The logtypes some subquery of `members` matches, or `None` if a member decodes every value.
+    fn of_members(members: &[EncodedTextMember]) -> Option<Self> {
+        let mut ids = Vec::new();
+        for member in members {
+            match &member.prefilter {
+                EncodedTextMatch::Never => {}
+                EncodedTextMatch::DecodeAll => return None,
+                EncodedTextMatch::Subqueries(subqueries) => {
+                    ids.extend(
+                        subqueries
+                            .iter()
+                            .flat_map(|subquery| subquery.logtypes.to_vec()),
+                    );
+                }
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        if let [id] = ids.as_slice() {
+            return Some(Self::Single(*id));
+        }
+        let mut words = vec![0_u64; usize::try_from(ids.last().map_or(0, |id| id / 64 + 1)).ok()?];
+        for id in ids {
+            words[usize::try_from(id / 64).ok()?] |= 1 << (id % 64);
+        }
+        Some(Self::Dense(words.into_boxed_slice()))
+    }
+
+    /// Selects the `active` rows of `batch` whose logtype is in the set into `candidates` and, if
+    /// given, writes the others into `falsy`.
+    ///
+    /// # Returns
+    ///
+    /// The selected rows.
+    fn select_candidates<'candidates>(
+        &self,
+        batch: &EncodedTextBatch<'_>,
+        active: &[u64],
+        candidates: &'candidates mut Vec<u64>,
+        mut falsy: Option<&mut [u64]>,
+    ) -> &'candidates [u64] {
+        candidates.clear();
+        candidates.resize(active.len(), 0);
+        let num_rows = batch.num_rows() as usize;
+        for (word_index, active_word) in active.iter().copied().enumerate() {
+            if 0 == active_word {
+                continue;
+            }
+            let base = word_index * 64;
+            let ids = batch.logtype_ids(base..num_rows.min(base + 64));
+            let bits = match self {
+                Self::Single(single) => ids.zip(0_u32..).fold(0_u64, |bits, (id, offset)| {
+                    bits | (u64::from(*single == id) << offset)
+                }),
+                Self::Dense(words) => ids.zip(0_u32..).fold(0_u64, |bits, (id, offset)| {
+                    let is_member = usize::try_from(id / 64)
+                        .ok()
+                        .and_then(|index| words.get(index))
+                        .is_some_and(|word| 0 != word & (1 << (id % 64)));
+                    bits | (u64::from(is_member) << offset)
+                }),
+            };
+            candidates[word_index] = bits & active_word;
+            if let Some(falsy) = falsy.as_deref_mut() {
+                falsy[word_index] = !bits & active_word;
+            }
+        }
+        candidates
     }
 }
 

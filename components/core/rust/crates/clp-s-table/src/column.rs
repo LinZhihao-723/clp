@@ -1,5 +1,7 @@
 //! Typed, alignment-1 views of one column restricted to a window.
 
+use std::ops::Range;
+
 use clp_s_encoding::VariablePlaceholder;
 use clp_s_encoding::decode_dictionary_variable;
 use clp_s_encoding::decode_float_variable;
@@ -174,6 +176,19 @@ impl<'batch> EncodedTextBatch<'batch> {
     #[must_use]
     pub fn logtype_id(&self, row: u32) -> LogTypeId {
         LogTypeId::new(self.logtype_words[row as usize].get() & ColumnData::LOGTYPE_ID_MASK)
+    }
+
+    /// # Returns
+    ///
+    /// The logtype ids of window rows `rows`, in row order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rows` is not within [`Self::num_rows`].
+    pub fn logtype_ids(&self, rows: Range<usize>) -> impl Iterator<Item = u64> + 'batch {
+        self.logtype_words[rows]
+            .iter()
+            .map(|word| word.get() & ColumnData::LOGTYPE_ID_MASK)
     }
 
     /// Returns the logtype of window row `row`.
