@@ -2,7 +2,8 @@
 //!
 //! A response streams the schema of the results, then each batch as a replacement archive ID
 //! dictionary and a record batch, then the end-of-stream marker, followed by a second IPC stream
-//! of one row that summarizes the search.
+//! of one row that summarizes the search. The record batches of a response may be compressed with
+//! zstd, as the IPC format's body compression, so that any Arrow IPC reader decodes them.
 
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -19,6 +20,7 @@ use arrow_array::types::Int32Type;
 use arrow_buffer::Buffer;
 use arrow_buffer::OffsetBuffer;
 use arrow_buffer::ScalarBuffer;
+use arrow_ipc::CompressionType;
 use arrow_ipc::MetadataVersion;
 use arrow_ipc::writer::DictionaryTracker;
 use arrow_ipc::writer::EncodedData;
@@ -53,6 +55,10 @@ use utoipa::ToSchema;
 /// The media type of an Arrow IPC stream.
 pub const ARROW_STREAM_CONTENT_TYPE: &str = "application/vnd.apache.arrow.stream";
 
+/// The media type of an Arrow IPC stream whose record batches are compressed with zstd.
+pub const ARROW_STREAM_ZSTD_CONTENT_TYPE: &str =
+    "application/vnd.apache.arrow.stream; compression=zstd";
+
 /// The header of an Arrow IPC stream response that carries the search's query job ID.
 pub const QUERY_JOB_ID_HEADER: &str = "x-clp-query-job-id";
 
@@ -68,16 +74,55 @@ pub struct ArrowIpcStream(pub Vec<u8>);
 ///
 /// Each batch holds, for every record batch of results, the IPC messages of the connection's
 /// archive ID dictionary and of the record batch, to be streamed after [`schema_message`].
+///
+/// Without compression, the record batches of a protocol-v3 connection are forwarded as they are,
+/// unless another attempt of the task already emitted some of their results. With zstd
+/// compression, each batch holds exactly one record batch, compressed, of all the results the
+/// connection encoded for the batch.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ArrowIpcEncoding;
+pub struct ArrowIpcEncoding {
+    compress_with_zstd: bool,
+}
+
+impl ArrowIpcEncoding {
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// The encoding whose record batches are uncompressed.
+    #[must_use]
+    pub const fn uncompressed() -> Self {
+        Self {
+            compress_with_zstd: false,
+        }
+    }
+
+    /// Factory function.
+    ///
+    /// # Returns
+    ///
+    /// The encoding whose record batches are compressed with zstd.
+    #[must_use]
+    pub const fn zstd() -> Self {
+        Self {
+            compress_with_zstd: true,
+        }
+    }
+}
 
 impl ResultEncoding for ArrowIpcEncoding {
     type Batch = Vec<Bytes>;
     type Encoder = ArrowIpcEncoder;
 
     fn encoder(&self, archive_id: ArchiveId) -> ArrowIpcEncoder {
+        let record_batch_write_options = if self.compress_with_zstd {
+            zstd_write_options()
+        } else {
+            write_options()
+        };
         ArrowIpcEncoder {
-            writer: ResultIpcWriter::new(&archive_id.to_string()),
+            writer: ResultIpcWriter::new(&archive_id.to_string(), record_batch_write_options),
+            compress_with_zstd: self.compress_with_zstd,
             timestamps: Vec::new(),
             offsets: vec![0],
             values: Vec::new(),
@@ -89,6 +134,11 @@ impl ResultEncoding for ArrowIpcEncoding {
 /// The [`ResultEncoder`] of [`ArrowIpcEncoding`].
 pub struct ArrowIpcEncoder {
     writer: ResultIpcWriter,
+
+    /// Whether the encoder compresses its record batches with zstd, which requires re-encoding
+    /// every claimed result, so that the encoder coalesces each batch's results into one record
+    /// batch.
+    compress_with_zstd: bool,
 
     /// The timestamps of the results appended one by one since the last record batch.
     timestamps: Vec<i64>,
@@ -104,6 +154,42 @@ pub struct ArrowIpcEncoder {
 }
 
 impl ArrowIpcEncoder {
+    /// Appends the results of `batch` that follow its first `num_duplicates` to the results
+    /// appended one by one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the batch's message offsets are invalid, which validation rules out.
+    fn append_rows(&mut self, batch: &ArrowResultBatch, num_duplicates: usize) {
+        let messages = batch.messages();
+        let offsets = &messages.value_offsets()[num_duplicates..];
+        let (Some(&first_offset), Some(&last_offset)) = (offsets.first(), offsets.last()) else {
+            unreachable!("a `Utf8` array should have at least one offset");
+        };
+        let values = &messages.value_data()[usize::try_from(first_offset)
+            .expect("validated offsets should be non-negative")
+            ..usize::try_from(last_offset).expect("validated offsets should be non-negative")];
+        self.make_room_for(values.len());
+        let num_pending_bytes =
+            i32::try_from(self.values.len()).expect("the pending messages should fit in `i32`");
+        self.offsets.extend(
+            offsets[1..]
+                .iter()
+                .map(|offset| num_pending_bytes + (offset - first_offset)),
+        );
+        self.values.extend_from_slice(values);
+        self.timestamps
+            .extend_from_slice(&batch.timestamps().values()[num_duplicates..]);
+    }
+
+    /// Encodes the results appended one by one first if appending `num_bytes` more bytes of
+    /// messages would overflow their `i32` offsets.
+    fn make_room_for(&mut self, num_bytes: usize) {
+        if self.values.len() + num_bytes > MAX_PENDING_MESSAGE_BYTES {
+            self.flush_rows();
+        }
+    }
+
     /// Encodes the results appended one by one, if any, as one record batch of the pending batch.
     ///
     /// # Panics
@@ -138,8 +224,9 @@ impl ResultEncoder for ArrowIpcEncoder {
 
     /// # Panics
     ///
-    /// Panics if the pending messages exceed what `i32` offsets address.
+    /// Panics if `message` alone exceeds what `i32` offsets address.
     fn encode(&mut self, timestamp: i64, message: &str) {
+        self.make_room_for(message.len());
         self.timestamps.push(timestamp);
         self.values.extend_from_slice(message.as_bytes());
         self.offsets.push(
@@ -152,6 +239,10 @@ impl ResultEncoder for ArrowIpcEncoder {
     /// Panics if encoding the suffix of a partially duplicated batch fails, which it never does
     /// for a validated batch.
     fn encode_arrow(&mut self, batch: &ArrowResultBatch, num_duplicates: usize) {
+        if self.compress_with_zstd {
+            self.append_rows(batch, num_duplicates);
+            return;
+        }
         self.flush_rows();
         if 0 == num_duplicates {
             self.batch.extend(batch.ipc_messages().into_iter().cloned());
@@ -192,6 +283,7 @@ impl ResultEncoder for ArrowIpcEncoder {
 /// * `BodyStreamType` - The stream of the response's body chunks.
 pub struct ArrowStreamResponse<BodyStreamType> {
     query_job_id: QueryJobId,
+    content_type: &'static str,
     body: BodyStreamType,
 }
 
@@ -200,10 +292,19 @@ impl<BodyStreamType> ArrowStreamResponse<BodyStreamType> {
     ///
     /// # Returns
     ///
-    /// A response that carries `query_job_id` in its headers and streams `body`.
+    /// A response of the media type `content_type` that carries `query_job_id` in its headers and
+    /// streams `body`.
     #[must_use]
-    pub const fn new(query_job_id: QueryJobId, body: BodyStreamType) -> Self {
-        Self { query_job_id, body }
+    pub const fn new(
+        query_job_id: QueryJobId,
+        content_type: &'static str,
+        body: BodyStreamType,
+    ) -> Self {
+        Self {
+            query_job_id,
+            content_type,
+            body,
+        }
     }
 }
 
@@ -215,10 +316,7 @@ where
     fn into_response(self) -> Response {
         (
             [
-                (
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(ARROW_STREAM_CONTENT_TYPE),
-                ),
+                (CONTENT_TYPE, HeaderValue::from_static(self.content_type)),
                 (CACHE_CONTROL, HeaderValue::from_static("no-cache")),
             ],
             [(QUERY_JOB_ID_HEADER, HeaderValue::from(self.query_job_id))],
@@ -315,6 +413,9 @@ struct ResultIpcWriter {
     /// Zero keys that the archive ID columns of the record batches slice.
     zero_keys: Buffer,
 
+    /// The options of the record batch messages, which never compress the dictionary message.
+    record_batch_write_options: IpcWriteOptions,
+
     /// The framed replacement dictionary batch of the writer's archive.
     dictionary_message: Bytes,
 }
@@ -324,34 +425,38 @@ impl ResultIpcWriter {
     ///
     /// # Returns
     ///
-    /// A writer of the results of the archive `archive_id`.
+    /// A writer of the results of the archive `archive_id`, whose record batch messages are
+    /// encoded with `record_batch_write_options`.
     ///
     /// # Panics
     ///
     /// Panics if encoding the archive ID dictionary fails, which it never does.
-    fn new(archive_id: &str) -> Self {
+    fn new(archive_id: &str, record_batch_write_options: IpcWriteOptions) -> Self {
         let mut writer = Self {
             generator: IpcDataGenerator::default(),
             tracker: DictionaryTracker::new(false),
             context: IpcWriteContext::default(),
             archive_ids: Arc::new(StringArray::from(vec![archive_id])),
             zero_keys: Buffer::from_vec(Vec::<i32>::new()),
+            record_batch_write_options,
             dictionary_message: Bytes::new(),
         };
+        let write_options = write_options();
         let _ = writer.generator.schema_to_bytes_with_dictionary_tracker(
             &RESULT_SCHEMA,
             &mut writer.tracker,
-            &write_options(),
+            &write_options,
         );
         let (dictionaries, _) = writer
             .encode(
                 Arc::new(Int64Array::from(Vec::<i64>::new())),
                 Arc::new(StringArray::from(Vec::<&str>::new())),
+                &write_options,
             )
             .expect("encoding the archive ID dictionary shouldn't fail");
         let [dictionary] = <[EncodedData; 1]>::try_from(dictionaries)
             .unwrap_or_else(|_| panic!("the result schema should have exactly one dictionary"));
-        writer.dictionary_message = frame(dictionary, &write_options());
+        writer.dictionary_message = frame(dictionary, &write_options);
         writer
     }
 
@@ -367,11 +472,13 @@ impl ResultIpcWriter {
     ///
     /// * Forwards [`Self::encode`]'s return values on failure.
     fn write(&mut self, timestamps: ArrayRef, messages: ArrayRef) -> Result<Bytes, ArrowError> {
-        let (_, record_batch) = self.encode(timestamps, messages)?;
-        Ok(frame(record_batch, &write_options()))
+        let write_options = self.record_batch_write_options.clone();
+        let (_, record_batch) = self.encode(timestamps, messages, &write_options)?;
+        Ok(frame(record_batch, &write_options))
     }
 
-    /// Encodes the results with `timestamps` and `messages` as one record batch.
+    /// Encodes the results with `timestamps` and `messages` as one record batch, with
+    /// `write_options`.
     ///
     /// # Returns
     ///
@@ -388,6 +495,7 @@ impl ResultIpcWriter {
         &mut self,
         timestamps: ArrayRef,
         messages: ArrayRef,
+        write_options: &IpcWriteOptions,
     ) -> Result<(Vec<EncodedData>, EncodedData), ArrowError> {
         let num_rows = timestamps.len();
         if self.zero_keys.len() < num_rows * size_of::<i32>() {
@@ -402,18 +510,21 @@ impl ResultIpcWriter {
             Arc::clone(&RESULT_SCHEMA),
             vec![archive_ids, timestamps, messages],
         )?;
-        self.generator.encode(
-            &batch,
-            &mut self.tracker,
-            &write_options(),
-            &mut self.context,
-        )
+        self.generator
+            .encode(&batch, &mut self.tracker, write_options, &mut self.context)
     }
 }
 
 /// The alignment of the buffers of the encoded IPC messages: the 8 bytes that the IPC format
 /// requires, rather than arrow-rs's default of 64, which keeps small batches compact.
 const IPC_ALIGNMENT: usize = 8;
+
+/// The zstd level of compressed record batches. On search results, level 1 compresses both faster
+/// and smaller than zstd's default of 3.
+const ZSTD_LEVEL: i32 = 1;
+
+/// The most bytes of messages that one record batch's `i32` offsets address.
+const MAX_PENDING_MESSAGE_BYTES: usize = i32::MAX as usize;
 
 /// # Returns
 ///
@@ -425,6 +536,20 @@ const IPC_ALIGNMENT: usize = 8;
 fn write_options() -> IpcWriteOptions {
     IpcWriteOptions::try_new(IPC_ALIGNMENT, false, MetadataVersion::V5)
         .expect("the IPC write options should be valid")
+}
+
+/// # Returns
+///
+/// The options of the record batch messages that the server compresses with zstd.
+///
+/// # Panics
+///
+/// Panics if the options are invalid, which they never are.
+fn zstd_write_options() -> IpcWriteOptions {
+    write_options()
+        .try_with_compression(Some(CompressionType::ZSTD))
+        .and_then(|write_options| write_options.try_with_compression_level(Some(ZSTD_LEVEL)))
+        .expect("the zstd IPC write options should be valid")
 }
 
 /// Frames an encoded message as in the IPC streaming format.
@@ -441,4 +566,251 @@ fn frame(encoded: EncodedData, write_options: &IpcWriteOptions) -> Bytes {
     arrow_ipc::writer::write_message(&mut framed, encoded, write_options)
         .expect("writing to a `Vec` shouldn't fail");
     Bytes::from(framed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow_array::Array;
+    use arrow_array::DictionaryArray;
+    use arrow_array::Int32Array;
+    use arrow_array::Int64Array;
+    use arrow_array::RecordBatch;
+    use arrow_array::StringArray;
+    use arrow_array::types::Int32Type;
+    use arrow_ipc::CompressionType;
+    use arrow_ipc::MessageHeader;
+    use arrow_ipc::reader::StreamReader;
+    use arrow_ipc::writer::StreamWriter;
+    use axum::body::Bytes;
+    use clp_rust_utils::types::ArchiveId;
+    use search_result_listener::RESULT_SCHEMA;
+    use search_result_listener::ResultEncoder;
+    use search_result_listener::ResultEncoding;
+    use search_result_listener::test_utils::read_arrow_stream;
+
+    use super::ArrowIpcEncoding;
+    use super::END_OF_STREAM;
+    use super::schema_message;
+
+    const ARCHIVE_ID: &str = "018e90e5-8b2a-4a61-a2fc-cac799936caf";
+
+    /// One decoded result: `(archive_id, timestamp, message)`.
+    type Row = (String, i64, String);
+
+    fn archive_id() -> ArchiveId {
+        ARCHIVE_ID.parse().expect("valid archive UUID")
+    }
+
+    fn timestamp(result_index: usize) -> i64 {
+        i64::try_from(result_index).expect("test indices should fit in `i64`") * 1000 - 3
+    }
+
+    fn message(result_index: usize) -> String {
+        format!("result {result_index} {}", "é".repeat(result_index % 5))
+    }
+
+    /// Encodes, as a protocol-v3 producer does, one record batch per range of result indices.
+    ///
+    /// # Returns
+    ///
+    /// The producer's Arrow IPC stream.
+    fn producer_stream(batches: &[std::ops::Range<usize>]) -> Vec<u8> {
+        let archive_ids: Arc<dyn Array> = Arc::new(StringArray::from(vec![ARCHIVE_ID]));
+        let mut stream = Vec::new();
+        let mut writer =
+            StreamWriter::try_new(&mut stream, &RESULT_SCHEMA).expect("the schema should encode");
+        for result_indices in batches {
+            let batch = RecordBatch::try_new(
+                Arc::clone(&RESULT_SCHEMA),
+                vec![
+                    Arc::new(
+                        DictionaryArray::<Int32Type>::try_new(
+                            Int32Array::from(vec![0; result_indices.len()]),
+                            Arc::clone(&archive_ids),
+                        )
+                        .expect("the keys should index the dictionary"),
+                    ),
+                    Arc::new(Int64Array::from_iter_values(
+                        result_indices.clone().map(timestamp),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        result_indices.clone().map(message),
+                    )),
+                ],
+            )
+            .expect("the batch should match the result schema");
+            writer.write(&batch).expect("the batch should encode");
+        }
+        writer.finish().expect("the stream should end");
+        drop(writer);
+        stream
+    }
+
+    /// Splits the framed IPC messages of a result stream body, up to its end-of-stream marker.
+    ///
+    /// # Returns
+    ///
+    /// The header type of each message, and the compression codec of its body, if any.
+    fn message_codecs(mut body: &[u8]) -> Vec<(MessageHeader, Option<CompressionType>)> {
+        let mut codecs = Vec::new();
+        loop {
+            let metadata_len = usize::try_from(u32::from_le_bytes(
+                body[4..8]
+                    .try_into()
+                    .expect("the metadata length should be 4 bytes"),
+            ))
+            .expect("the metadata length should fit in `usize`");
+            if 0 == metadata_len {
+                return codecs;
+            }
+            let message = arrow_ipc::root_as_message(&body[8..8 + metadata_len])
+                .expect("the metadata should be a message");
+            let compression = match message.header_type() {
+                MessageHeader::RecordBatch => message.header_as_record_batch(),
+                MessageHeader::DictionaryBatch => message
+                    .header_as_dictionary_batch()
+                    .and_then(|dictionary_batch| dictionary_batch.data()),
+                _ => None,
+            }
+            .and_then(|record_batch| record_batch.compression())
+            .map(|compression| compression.codec());
+            codecs.push((message.header_type(), compression));
+            let body_len = usize::try_from(message.bodyLength())
+                .expect("the body length should be non-negative");
+            body = &body[8 + metadata_len + body_len..];
+        }
+    }
+
+    /// Decodes the record batches of one encoder batch, streamed after the schema message.
+    ///
+    /// # Returns
+    ///
+    /// The decoded results.
+    fn decode(messages: &[Bytes]) -> Vec<Row> {
+        let mut body = schema_message().to_vec();
+        for message in messages {
+            body.extend_from_slice(message);
+        }
+        body.extend_from_slice(END_OF_STREAM);
+        let mut rows = Vec::new();
+        for batch in StreamReader::try_new(body.as_slice(), None).expect("the schema should decode")
+        {
+            let batch = batch.expect("every batch should decode");
+            let archive_ids = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<DictionaryArray<Int32Type>>()
+                .expect("archive IDs should be a dictionary");
+            let archive_id_values = archive_ids
+                .values()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("archive ID values should be strings");
+            let timestamps = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .expect("timestamps should be `Int64`");
+            let messages = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("messages should be strings");
+            for row in 0..batch.num_rows() {
+                let key = usize::try_from(archive_ids.keys().value(row))
+                    .expect("keys should be non-negative");
+                rows.push((
+                    archive_id_values.value(key).to_owned(),
+                    timestamps.value(row),
+                    messages.value(row).to_owned(),
+                ));
+            }
+        }
+        rows
+    }
+
+    fn expected_rows(result_indices: impl Iterator<Item = usize>) -> Vec<Row> {
+        result_indices
+            .map(|result_index| {
+                (
+                    ARCHIVE_ID.to_owned(),
+                    timestamp(result_index),
+                    message(result_index),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn zstd_encoder_coalesces_each_batch_into_one_compressed_record_batch() {
+        let producer_batches = read_arrow_stream(
+            archive_id(),
+            &producer_stream(&[0..3, 3..8, 8..9, 9..2000, 2000..2005]),
+        );
+        let mut encoder = ArrowIpcEncoding::zstd().encoder(archive_id());
+
+        encoder.encode_arrow(&producer_batches[0], 0);
+        encoder.encode_arrow(&producer_batches[1], 2);
+        encoder.encode_arrow(&producer_batches[2], 0);
+        encoder.encode(-1, "a row-by-row result");
+        encoder.encode_arrow(&producer_batches[3], 1990);
+        let first = encoder.take_batch();
+        encoder.encode_arrow(&producer_batches[3], 0);
+        encoder.encode_arrow(&producer_batches[4], 4);
+        let second = encoder.take_batch();
+
+        let mut expected_first = expected_rows((0..3).chain(5..9));
+        expected_first.push((ARCHIVE_ID.to_owned(), -1, "a row-by-row result".to_owned()));
+        expected_first.extend(expected_rows(1999..2000));
+        assert_eq!(decode(&first), expected_first);
+        assert_eq!(decode(&second), expected_rows((9..2000).chain(2004..2005)));
+        for batch in [&first, &second] {
+            let body: Vec<u8> = batch.iter().flat_map(|message| message.to_vec()).collect();
+            assert_eq!(
+                message_codecs(&[body.as_slice(), END_OF_STREAM].concat()),
+                [
+                    (MessageHeader::DictionaryBatch, None),
+                    (MessageHeader::RecordBatch, Some(CompressionType::ZSTD)),
+                ]
+            );
+        }
+        let uncompressed_size: usize = producer_batches[3]
+            .ipc_messages()
+            .iter()
+            .map(|message| message.len())
+            .sum();
+        let compressed_size: usize = second.iter().map(Bytes::len).sum();
+        assert!(
+            compressed_size * 4 < uncompressed_size,
+            "{compressed_size} compressed bytes vs {uncompressed_size} uncompressed"
+        );
+    }
+
+    #[test]
+    fn uncompressed_encoder_forwards_fully_claimed_batches_and_reencodes_suffixes() {
+        let producer_batches = read_arrow_stream(archive_id(), &producer_stream(&[0..3, 3..8]));
+        let mut encoder = ArrowIpcEncoding::uncompressed().encoder(archive_id());
+
+        encoder.encode_arrow(&producer_batches[0], 0);
+        encoder.encode_arrow(&producer_batches[1], 2);
+        let batch = encoder.take_batch();
+
+        assert_eq!(decode(&batch), expected_rows((0..3).chain(5..8)));
+        assert_eq!(
+            batch[..2],
+            producer_batches[0].ipc_messages().map(Bytes::clone)
+        );
+        let body: Vec<u8> = batch.iter().flat_map(|message| message.to_vec()).collect();
+        assert_eq!(
+            message_codecs(&[body.as_slice(), END_OF_STREAM].concat()),
+            [
+                (MessageHeader::DictionaryBatch, None),
+                (MessageHeader::RecordBatch, None),
+                (MessageHeader::DictionaryBatch, None),
+                (MessageHeader::RecordBatch, None),
+            ]
+        );
+    }
 }

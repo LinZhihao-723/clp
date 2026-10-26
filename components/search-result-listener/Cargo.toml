@@ -7,6 +7,9 @@ edition = { workspace = true }
 name = "search_result_listener"
 path = "src/lib.rs"
 
+[features]
+test-utils = []
+
 [dependencies]
 arrow-array = { workspace = true }
 arrow-buffer = { workspace = true }

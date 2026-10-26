@@ -19,7 +19,7 @@ path = "src/bin/openapi_codegen.rs"
 anyhow = { workspace = true }
 arrow-array = { workspace = true }
 arrow-buffer = { workspace = true }
-arrow-ipc = { workspace = true }
+arrow-ipc = { workspace = true, features = ["zstd"] }
 arrow-schema = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
@@ -50,4 +50,5 @@ utoipa-axum = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
+search-result-listener = { workspace = true, features = ["test-utils"] }
 tower = { workspace = true }

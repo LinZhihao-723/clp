@@ -197,10 +197,12 @@ struct QueryResultsUri {
     description = "Submits a new search job and streams its results back in the same response: \
         as an Arrow IPC stream if the `Accept` header accepts \
         `application/vnd.apache.arrow.stream` with a nonzero quality that is at least the quality \
-        of `text/event-stream`, or as Server-Sent Events (SSE) otherwise. Only \
-        available when the package runs queries on Spider. If the client disconnects before the \
-        end of the response, or the job's status can no longer be tracked, the job is marked as \
-        cancelling.",
+        of `text/event-stream`, or as Server-Sent Events (SSE) otherwise. The media range \
+        `application/vnd.apache.arrow.stream; compression=zstd` accepts an Arrow IPC stream whose \
+        record batches are compressed with zstd, which is preferred over an uncompressed one of \
+        the same quality. Only available when the package runs queries on Spider. If the client \
+        disconnects before the end of the response, or the job's status can no longer be tracked, \
+        the job is marked as cancelling.",
     request_body(
         content = QueryConfig,
         example = json!({
@@ -226,7 +228,10 @@ struct QueryResultsUri {
                 has terminated, the stream ends, and a second IPC stream of one row follows: \
                 `{status: Utf8, num_results_emitted: UInt64, num_duplicates_dropped: UInt64, \
                 num_protocol_errors: UInt64, num_incomplete_connections: UInt64}`, with the \
-                fields of `StreamingSearchEnd`, all null if the job's status can't be tracked.",
+                fields of `StreamingSearchEnd`, all null if the job's status can't be tracked.\n\n\
+                `application/vnd.apache.arrow.stream; compression=zstd`: the same streams, except \
+                that the buffers of every record batch of results are compressed with zstd, as the \
+                IPC format's body compression, which Arrow IPC readers decode transparently.",
             headers(
                 (
                     "X-Clp-Query-Job-Id" = i32,
@@ -244,7 +249,11 @@ struct QueryResultsUri {
                         \"num_duplicates_dropped\":0,\"num_protocol_errors\":0,\
                         \"num_incomplete_connections\":0}\n\n"
                 ),
-                (arrow_ipc::ArrowIpcStream = "application/vnd.apache.arrow.stream")
+                (arrow_ipc::ArrowIpcStream = "application/vnd.apache.arrow.stream"),
+                (
+                    arrow_ipc::ArrowIpcStream =
+                        "application/vnd.apache.arrow.stream; compression=zstd"
+                )
             )
         ),
         (
@@ -373,9 +382,9 @@ async fn serve_streaming_search<QueryJobTableType: QueryJobTable>(
         .submit(query_config, encoding)
         .await
         .inspect_err(|e| tracing::error!(error = % e, "Failed to submit a streaming search."))?;
-    match encoding {
-        NegotiatedEncoding::Sse => Ok(sse_response(search_stream)?.into_response()),
-        NegotiatedEncoding::ArrowIpc => Ok(arrow_response(search_stream).into_response()),
+    match encoding.arrow_content_type() {
+        None => Ok(sse_response(search_stream)?.into_response()),
+        Some(content_type) => Ok(arrow_response(search_stream, content_type).into_response()),
     }
 }
 
@@ -456,9 +465,10 @@ fn sse_response<QueryJobTableType: QueryJobTable>(
 ///
 /// # Returns
 ///
-/// The Arrow IPC stream response.
+/// The Arrow IPC stream response, of the media type `content_type`.
 fn arrow_response<QueryJobTableType: QueryJobTable>(
     search_stream: SearchStream<QueryJobTableType, Vec<Bytes>>,
+    content_type: &'static str,
 ) -> ArrowStreamResponse<
     impl Stream<Item = Result<Bytes, std::convert::Infallible>> + use<QueryJobTableType>,
 > {
@@ -494,6 +504,7 @@ fn arrow_response<QueryJobTableType: QueryJobTable>(
     });
     ArrowStreamResponse::new(
         query_job_id,
+        content_type,
         futures::stream::once(std::future::ready(Ok(arrow_ipc::schema_message()))).chain(chunks),
     )
 }
@@ -1073,6 +1084,7 @@ mod stream_query_tests {
     use super::StreamingSearchResult;
     use super::serve_streaming_search;
     use crate::arrow_ipc::ARROW_STREAM_CONTENT_TYPE;
+    use crate::arrow_ipc::ARROW_STREAM_ZSTD_CONTENT_TYPE;
     use crate::arrow_ipc::QUERY_JOB_ID_HEADER;
     use crate::client::ClientError;
     use crate::client::QueryConfig;
@@ -1798,16 +1810,63 @@ mod stream_query_tests {
         app: &axum::Router,
         query_config: &serde_json::Value,
     ) -> Response {
+        post_query_stream_accepting(app, ARROW_STREAM_CONTENT_TYPE, query_config).await
+    }
+
+    /// Posts `query_config` to `app`'s streaming search route with the `Accept` header `accept`.
+    ///
+    /// # Returns
+    ///
+    /// The app's response.
+    async fn post_query_stream_accepting(
+        app: &axum::Router,
+        accept: &str,
+        query_config: &serde_json::Value,
+    ) -> Response {
         app.clone()
             .oneshot(
                 Request::post("/query/stream")
                     .header(CONTENT_TYPE, "application/json")
-                    .header(ACCEPT, ARROW_STREAM_CONTENT_TYPE)
+                    .header(ACCEPT, accept)
                     .body(Body::from(query_config.to_string()))
                     .expect("the request should be valid"),
             )
             .await
             .expect("the app should respond")
+    }
+
+    /// # Returns
+    ///
+    /// The compression codec of each record batch of the result stream at the start of `body`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `body` doesn't start with a framed IPC stream.
+    fn record_batch_codecs(mut body: &[u8]) -> Vec<Option<arrow_ipc::CompressionType>> {
+        let mut codecs = Vec::new();
+        loop {
+            let metadata_len = usize::try_from(u32::from_le_bytes(
+                body[4..8]
+                    .try_into()
+                    .expect("the metadata length should be 4 bytes"),
+            ))
+            .expect("the metadata length should fit in `usize`");
+            if 0 == metadata_len {
+                return codecs;
+            }
+            let message = arrow_ipc::root_as_message(&body[8..8 + metadata_len])
+                .expect("the metadata should be a message");
+            if let Some(record_batch) = message.header_as_record_batch() {
+                codecs.push(
+                    record_batch
+                        .compression()
+                        .map(|compression| compression.codec()),
+                );
+            }
+            let body_len = usize::try_from(message.bodyLength())
+                .expect("the body length should be non-negative");
+            body = &body[8 + metadata_len + body_len..];
+        }
     }
 
     /// # Returns
@@ -2635,6 +2694,96 @@ mod stream_query_tests {
                     "message": message(result_index),
                 }))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn each_negotiated_encoding_responds_with_its_content_type() {
+        for (accept, expected_content_type) in [
+            ("text/event-stream", "text/event-stream"),
+            (ARROW_STREAM_CONTENT_TYPE, ARROW_STREAM_CONTENT_TYPE),
+            (
+                ARROW_STREAM_ZSTD_CONTENT_TYPE,
+                ARROW_STREAM_ZSTD_CONTENT_TYPE,
+            ),
+        ] {
+            let harness = Harness::start().await;
+            let response =
+                post_query_stream_accepting(&harness.app, accept, &json!({"query_string": "*"}))
+                    .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .map(axum::http::HeaderValue::as_bytes),
+                Some(expected_content_type.as_bytes()),
+                "{accept}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn zstd_arrow_response_streams_compressed_batches_of_each_result_once() {
+        let harness = Harness::start().await;
+        let response = post_query_stream_accepting(
+            &harness.app,
+            ARROW_STREAM_ZSTD_CONTENT_TYPE,
+            &json!({"query_string": "*"}),
+        )
+        .await;
+        assert_eq!(
+            response
+                .headers()
+                .get(QUERY_JOB_ID_HEADER)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(b"1".as_slice())
+        );
+        let network_output = harness
+            .query_job_table
+            .search_job_config(1)
+            .network_output
+            .expect("the query job should have a network output");
+        let mut failed_attempt = FakeArrowTask::connect(&network_output).await;
+        failed_attempt.send_batch(0..4).await;
+        sleep(Duration::from_millis(200)).await;
+        drop(failed_attempt);
+
+        let mut retry = FakeArrowTask::connect(&network_output).await;
+        let mut producer_bytes = retry.send_batch(0..2).await;
+        producer_bytes.extend(retry.send_batch(2..6).await);
+        producer_bytes.extend(retry.send_batch(6..2000).await);
+        assert_eq!(retry.finish(2000).await, acknowledgement(2000));
+        harness
+            .query_job_table
+            .set_status(1, QueryJobStatus::Succeeded);
+        let body = body_bytes(response).await;
+        let (rows, summary) = decode_arrow_body(&body);
+
+        assert_eq!(rows, expected_rows(0..2000));
+        assert_eq!(
+            summary,
+            ArrowSummary {
+                status: Some("Succeeded".to_owned()),
+                num_results_emitted: Some(2000),
+                num_duplicates_dropped: Some(4),
+                num_protocol_errors: Some(0),
+                num_incomplete_connections: Some(1),
+            }
+        );
+        let codecs = record_batch_codecs(&body);
+        assert!(!codecs.is_empty());
+        assert!(
+            codecs
+                .iter()
+                .all(|codec| *codec == Some(arrow_ipc::CompressionType::ZSTD)),
+            "every record batch should be compressed with zstd: {codecs:?}"
+        );
+        assert!(
+            body.len() * 4 < producer_bytes.len(),
+            "{} response bytes vs {} producer bytes",
+            body.len(),
+            producer_bytes.len()
         );
     }
 

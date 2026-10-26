@@ -13,6 +13,8 @@ mod job_status;
 mod listener;
 mod protocol;
 mod session;
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
 
 pub use arrow_stream::ARCHIVE_ID_COLUMN;
 pub use arrow_stream::ArrowResultBatch;

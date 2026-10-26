@@ -99,6 +99,42 @@ Results from different archives arrive in no particular order. Streaming search 
 job is marked for cancellation. If the API server can no longer track the job's status, an `error`
 event replaces the `end` event, and the query job is also marked for cancellation.
 
+### Receiving results as an Arrow IPC stream
+
+To receive the results as an [Apache Arrow IPC stream][arrow-ipc-stream] instead, set the request's
+`Accept` header to `application/vnd.apache.arrow.stream`. To also have the result batches compressed
+with zstd, set it to `application/vnd.apache.arrow.stream; compression=zstd`. The compression is the
+IPC format's own buffer compression, so Arrow readers (e.g., pyarrow, polars, or arrow-rs) decode it
+transparently:
+
+```shell
+curl -N -X POST http://localhost:3001/query/stream \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/vnd.apache.arrow.stream; compression=zstd" \
+    -d '{
+       "query_string": "*log*",
+       "datasets": ["default"],
+       "ignore_case": false
+    }' \
+    -o results.arrows
+```
+
+The response's `Content-Type` header names the encoding the API server chose, and its
+`X-Clp-Query-Job-Id` header carries the query job's ID. The result stream's schema is
+`{archive_id: Dictionary<Int32, Utf8>, timestamp: Int64, message: Utf8}`, with timestamps in epoch
+milliseconds and messages without their trailing newlines. Once the query job has finished, the
+result stream ends, and a second IPC stream of one row follows, with the fields of the `end` event
+(all null if the API server can no longer track the job's status):
+
+```python
+import pyarrow as pa
+
+with open("results.arrows", "rb") as response:
+    results = pa.ipc.open_stream(response).read_all()
+    summary = pa.ipc.open_stream(response).read_all()
+```
+
+[arrow-ipc-stream]: https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format
 [OpenAPI]: https://swagger.io/specification/
 [server-sent-events]: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
 [swagger-ui]: https://petstore.swagger.io/?url=https://docs.yscope.com/clp/DOCS_VAR_CLP_GIT_REF/_static/generated/api-server-openapi.json

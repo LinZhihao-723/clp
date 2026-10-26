@@ -9,26 +9,36 @@ use search_result_listener::ResultEncoder;
 use search_result_listener::ResultEncoding;
 
 use crate::arrow_ipc::ARROW_STREAM_CONTENT_TYPE;
+use crate::arrow_ipc::ARROW_STREAM_ZSTD_CONTENT_TYPE;
 use crate::arrow_ipc::ArrowIpcEncoder;
 use crate::arrow_ipc::ArrowIpcEncoding;
 use crate::sse::SseEncoder;
 use crate::sse::SseEncoding;
 
-/// The [`ResultEncoding`] a streaming search's response uses: Server-Sent Events, or an Arrow IPC
-/// stream. Each batch holds the response's body chunks.
+/// The [`ResultEncoding`] a streaming search's response uses.
+///
+/// The response is Server-Sent Events, an Arrow IPC stream, or an Arrow IPC stream whose record
+/// batches are compressed with zstd. Each batch holds the response's body chunks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NegotiatedEncoding {
     Sse,
     ArrowIpc,
+    ArrowIpcZstd,
 }
 
 impl NegotiatedEncoding {
     /// Negotiates the encoding of a response from the `Accept` header of its request.
     ///
+    /// The Arrow media range with the parameter `compression=zstd` accepts
+    /// [`Self::ArrowIpcZstd`], and the Arrow media range without a `compression` parameter accepts
+    /// [`Self::ArrowIpc`]; an Arrow media range with any other `compression` parameter accepts
+    /// neither.
+    ///
     /// # Returns
     ///
-    /// [`Self::ArrowIpc`] if the request accepts [`ARROW_STREAM_CONTENT_TYPE`] with a nonzero
-    /// quality that is at least the quality of `text/event-stream`, or [`Self::Sse`] otherwise.
+    /// The Arrow IPC encoding accepted with the highest nonzero quality, preferring
+    /// [`Self::ArrowIpcZstd`] on a tie, if that quality is at least the quality of
+    /// `text/event-stream`, or [`Self::Sse`] otherwise.
     #[must_use]
     pub fn from_headers(headers: &HeaderMap) -> Self {
         let media_ranges: Vec<MediaRange<'_>> = headers
@@ -52,12 +62,50 @@ impl NegotiatedEncoding {
                 })
                 .unwrap_or(0.0)
         };
-        let arrow_quality = quality_of(&[ARROW_STREAM_CONTENT_TYPE]);
+        let arrow_quality_of = |compression: Option<&str>| {
+            media_ranges
+                .iter()
+                .filter(|media_range| {
+                    media_range
+                        .media_type
+                        .eq_ignore_ascii_case(ARROW_STREAM_CONTENT_TYPE)
+                        && match (media_range.compression, compression) {
+                            (None, None) => true,
+                            (Some(requested), Some(compression)) => {
+                                requested.eq_ignore_ascii_case(compression)
+                            }
+                            _ => false,
+                        }
+                })
+                .map(|media_range| media_range.quality)
+                .reduce(f32::max)
+                .unwrap_or(0.0)
+        };
+        let arrow_quality = arrow_quality_of(None);
+        let arrow_zstd_quality = arrow_quality_of(Some(ZSTD_COMPRESSION));
         let sse_quality = quality_of(&[SSE_CONTENT_TYPE, "text/*", "*/*"]);
-        if arrow_quality > 0.0 && arrow_quality >= sse_quality {
+        if arrow_zstd_quality > 0.0
+            && arrow_zstd_quality >= arrow_quality
+            && arrow_zstd_quality >= sse_quality
+        {
+            Self::ArrowIpcZstd
+        } else if arrow_quality > 0.0 && arrow_quality >= sse_quality {
             Self::ArrowIpc
         } else {
             Self::Sse
+        }
+    }
+
+    /// # Returns
+    ///
+    /// The media type of the response, which an Arrow IPC encoding carries in its
+    /// `Content-Type` header, or `None` for [`Self::Sse`], whose response sets its own.
+    #[must_use]
+    pub const fn arrow_content_type(self) -> Option<&'static str> {
+        match self {
+            Self::Sse => None,
+            Self::ArrowIpc => Some(ARROW_STREAM_CONTENT_TYPE),
+            Self::ArrowIpcZstd => Some(ARROW_STREAM_ZSTD_CONTENT_TYPE),
         }
     }
 }
@@ -69,8 +117,11 @@ impl ResultEncoding for NegotiatedEncoding {
     fn encoder(&self, archive_id: ArchiveId) -> NegotiatedEncoder {
         match self {
             Self::Sse => NegotiatedEncoder::Sse(SseEncoding.encoder(archive_id)),
-            Self::ArrowIpc => {
-                NegotiatedEncoder::ArrowIpc(Box::new(ArrowIpcEncoding.encoder(archive_id)))
+            Self::ArrowIpc => NegotiatedEncoder::ArrowIpc(Box::new(
+                ArrowIpcEncoding::uncompressed().encoder(archive_id),
+            )),
+            Self::ArrowIpcZstd => {
+                NegotiatedEncoder::ArrowIpc(Box::new(ArrowIpcEncoding::zstd().encoder(archive_id)))
             }
         }
     }
@@ -108,12 +159,16 @@ impl ResultEncoder for NegotiatedEncoder {
 }
 
 const SSE_CONTENT_TYPE: &str = "text/event-stream";
+const ZSTD_COMPRESSION: &str = "zstd";
 const DEFAULT_QUALITY: f32 = 1.0;
 
 /// One media range of an `Accept` header.
 struct MediaRange<'header_lifetime> {
     media_type: &'header_lifetime str,
     quality: f32,
+
+    /// The value of the media range's `compression` parameter, unquoted.
+    compression: Option<&'header_lifetime str>,
 }
 
 impl<'header_lifetime> MediaRange<'header_lifetime> {
@@ -127,14 +182,28 @@ impl<'header_lifetime> MediaRange<'header_lifetime> {
         let media_type = parameters
             .next()
             .filter(|media_type| !media_type.is_empty())?;
-        let quality = parameters
-            .filter_map(|parameter| parameter.split_once('='))
-            .find(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
-            .and_then(|(_, quality)| quality.trim().parse::<f32>().ok())
-            .unwrap_or(DEFAULT_QUALITY);
+        let mut quality = DEFAULT_QUALITY;
+        let mut compression = None;
+        for (name, value) in parameters.filter_map(|parameter| parameter.split_once('=')) {
+            let name = name.trim();
+            let value = value.trim();
+            if name.eq_ignore_ascii_case("q") {
+                if let Ok(parsed_quality) = value.parse::<f32>() {
+                    quality = parsed_quality;
+                }
+            } else if name.eq_ignore_ascii_case("compression") {
+                compression = Some(
+                    value
+                        .strip_prefix('"')
+                        .and_then(|value| value.strip_suffix('"'))
+                        .unwrap_or(value),
+                );
+            }
+        }
         Some(Self {
             media_type,
             quality,
+            compression,
         })
     }
 }
@@ -194,6 +263,62 @@ mod tests {
                    text/event-stream;q=0.2"][..],
                 NegotiatedEncoding::ArrowIpc,
             ),
+            (
+                &["application/vnd.apache.arrow.stream; compression=zstd"][..],
+                NegotiatedEncoding::ArrowIpcZstd,
+            ),
+            (
+                &["Application/Vnd.Apache.Arrow.Stream;Compression=\"ZSTD\";q=0.8"][..],
+                NegotiatedEncoding::ArrowIpcZstd,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream; compression=lz4"][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream; compression=lz4, \
+                   application/vnd.apache.arrow.stream; q=0.1"][..],
+                NegotiatedEncoding::ArrowIpc,
+            ),
+            (
+                &[
+                    "application/vnd.apache.arrow.stream, application/vnd.apache.arrow.stream; \
+                     compression=zstd",
+                ][..],
+                NegotiatedEncoding::ArrowIpcZstd,
+            ),
+            (
+                &[
+                    "application/vnd.apache.arrow.stream; compression=zstd; q=0.5, \
+                     application/vnd.apache.arrow.stream",
+                ][..],
+                NegotiatedEncoding::ArrowIpc,
+            ),
+            (
+                &[
+                    "application/vnd.apache.arrow.stream; compression=zstd; q=0, \
+                     application/vnd.apache.arrow.stream",
+                ][..],
+                NegotiatedEncoding::ArrowIpc,
+            ),
+            (
+                &["application/vnd.apache.arrow.stream; compression=zstd; q=0"][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &[
+                    "application/vnd.apache.arrow.stream; compression=zstd; q=0.5",
+                    "*/*",
+                ][..],
+                NegotiatedEncoding::Sse,
+            ),
+            (
+                &[
+                    "application/vnd.apache.arrow.stream; compression=zstd; q=0.5, \
+                     text/event-stream; q=0.5",
+                ][..],
+                NegotiatedEncoding::ArrowIpcZstd,
+            ),
         ] {
             let mut headers = HeaderMap::new();
             for value in accept_values {
@@ -205,5 +330,18 @@ mod tests {
                 "{accept_values:?}"
             );
         }
+    }
+
+    #[test]
+    fn only_arrow_encodings_have_an_arrow_content_type() {
+        assert_eq!(NegotiatedEncoding::Sse.arrow_content_type(), None);
+        assert_eq!(
+            NegotiatedEncoding::ArrowIpc.arrow_content_type(),
+            Some("application/vnd.apache.arrow.stream")
+        );
+        assert_eq!(
+            NegotiatedEncoding::ArrowIpcZstd.arrow_content_type(),
+            Some("application/vnd.apache.arrow.stream; compression=zstd")
+        );
     }
 }
