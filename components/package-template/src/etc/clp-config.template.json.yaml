@@ -100,13 +100,13 @@ telemetry:
 #query_coordinator: null
 ##  logging_level: "INFO"
 ##  database_connection_pool_size: 10
-##  job_polling_interval_millisecs: 50
+##  job_polling_interval_millisecs: 10
 ##  max_concurrent_jobs: 1000
 ##  max_datasets_per_query: 10  # Set to null to disable the limit
 ##  max_num_archives_per_query_task: 1
 ##  query_task_max_retry: 1
 ##  query_task_parallelism: 8
-##  result_polling_interval_millisecs: 20
+##  result_polling_interval_millisecs: 5
 ##  termination_timeout_secs: 30
 #
 #query_scheduler:

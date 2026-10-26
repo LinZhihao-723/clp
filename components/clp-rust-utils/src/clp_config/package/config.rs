@@ -583,7 +583,7 @@ impl Default for QueryCoordinator {
         Self {
             database_connection_pool_size: NonZeroU32::new(10)
                 .expect("default database connection pool size should not be zero"),
-            job_polling_interval_millisecs: NonZeroU64::new(50)
+            job_polling_interval_millisecs: NonZeroU64::new(10)
                 .expect("default jobs poll delay should not be zero"),
             max_concurrent_jobs: NonZeroUsize::new(1000)
                 .expect("default maximum number of concurrent jobs should not be zero"),
@@ -592,7 +592,7 @@ impl Default for QueryCoordinator {
             query_task_max_retry: 1,
             query_task_parallelism: NonZeroUsize::new(8)
                 .expect("default query task parallelism should not be zero"),
-            result_polling_interval_millisecs: NonZeroU64::new(20)
+            result_polling_interval_millisecs: NonZeroU64::new(5)
                 .expect("default result polling interval should not be zero"),
             termination_timeout_secs: NonZeroU64::new(30)
                 .expect("default termination timeout should not be zero"),
