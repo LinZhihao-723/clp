@@ -306,6 +306,12 @@ const IPC_PREFIX_LEN: usize = 8;
 const MAX_IPC_METADATA_LEN: usize = 1024 * 1024;
 const MAX_IPC_MESSAGE_LEN: usize = 64 * 1024 * 1024;
 
+/// Messages shorter than this are copied out of the connection's buffer instead of sharing its
+/// allocation, which spans at least one socket read of 64 KiB: a short message forwarded to a
+/// session's consumer would otherwise keep alive an allocation many times its size, beyond what the
+/// session's byte budget counts.
+const MIN_SHARED_MESSAGE_LEN: usize = 64 * 1024;
+
 /// The state of an [`ArrowStreamReader`].
 #[derive(Debug)]
 enum State {
@@ -361,7 +367,7 @@ enum IpcFrame {
 }
 
 /// Splits one framed IPC message from the front of `buffer`, consuming its bytes only if it is
-/// complete.
+/// complete. A message shorter than [`MIN_SHARED_MESSAGE_LEN`] is copied out of `buffer`.
 ///
 /// # Returns
 ///
@@ -428,8 +434,15 @@ fn split_message(buffer: &mut BytesMut) -> Result<IpcFrame, ProtocolError> {
     if buffer.len() < message_len {
         return Ok(IpcFrame::Incomplete(message_len));
     }
+    let bytes = if message_len < MIN_SHARED_MESSAGE_LEN {
+        let bytes = Bytes::copy_from_slice(&buffer[..message_len]);
+        buffer.advance(message_len);
+        bytes
+    } else {
+        buffer.split_to(message_len).freeze()
+    };
     Ok(IpcFrame::Message(IpcMessage {
-        bytes: buffer.split_to(message_len).freeze(),
+        bytes,
         metadata_len,
     }))
 }
@@ -508,6 +521,7 @@ mod tests {
     use super::ArrowResultBatch;
     use super::ArrowStreamReader;
     use super::IpcFrame;
+    use super::MIN_SHARED_MESSAGE_LEN;
     use super::RESULT_SCHEMA;
     use super::split_message;
     use crate::error::ProtocolError;
@@ -649,6 +663,36 @@ mod tests {
             assert_eq!(dictionary.as_ref(), messages[1].as_slice());
             assert_eq!(record_batch.as_ref(), record_batch_message.as_slice());
         }
+    }
+
+    #[test]
+    fn only_long_messages_share_the_buffer_allocation() {
+        let timestamps: Vec<i64> = (0..10_000).collect();
+        let bytes = stream(
+            &RESULT_SCHEMA,
+            &[
+                batch(&[ARCHIVE_ID], &[1]),
+                batch(&[ARCHIVE_ID], &timestamps),
+            ],
+        );
+        let mut buffer = BytesMut::from(&bytes[..]);
+        let allocation = buffer.as_ptr().addr()..buffer.as_ptr().addr() + buffer.capacity();
+
+        let mut messages = Vec::new();
+        while let IpcFrame::Message(message) =
+            split_message(&mut buffer).expect("the stream should be well framed")
+        {
+            messages.push((
+                message.bytes.len() >= MIN_SHARED_MESSAGE_LEN,
+                allocation.contains(&message.bytes.as_ptr().addr()),
+            ));
+        }
+
+        // The schema, the dictionary, the short record batch, then the long one.
+        assert_eq!(
+            messages,
+            [(false, false), (false, false), (false, false), (true, true)]
+        );
     }
 
     #[test]
