@@ -909,9 +909,7 @@ class QueryCoordinator(BaseModel):
     job_polling_interval_millisecs: PositiveInt = 10
     max_concurrent_jobs: PositiveInt = 1000
     max_datasets_per_query: PositiveInt | None = 10
-    max_num_archives_per_query_task: PositiveInt = 1
     query_task_max_retry: NonNegativeInt = 1
-    query_task_parallelism: PositiveInt = 8
     result_polling_interval_millisecs: PositiveInt = 5
     termination_timeout_secs: PositiveInt = 30
     # This field is loaded at runtime through `load_credentials_from_file`.

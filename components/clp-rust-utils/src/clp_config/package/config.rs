@@ -571,9 +571,7 @@ pub struct QueryCoordinator {
     pub job_polling_interval_millisecs: NonZeroU64,
     pub max_concurrent_jobs: NonZeroUsize,
     pub max_datasets_per_query: Option<NonZeroUsize>,
-    pub max_num_archives_per_query_task: NonZeroUsize,
     pub query_task_max_retry: u32,
-    pub query_task_parallelism: NonZeroUsize,
     pub result_polling_interval_millisecs: NonZeroU64,
     pub termination_timeout_secs: NonZeroU64,
 }
@@ -588,10 +586,7 @@ impl Default for QueryCoordinator {
             max_concurrent_jobs: NonZeroUsize::new(1000)
                 .expect("default maximum number of concurrent jobs should not be zero"),
             max_datasets_per_query: NonZeroUsize::new(10),
-            max_num_archives_per_query_task: NonZeroUsize::MIN,
             query_task_max_retry: 1,
-            query_task_parallelism: NonZeroUsize::new(8)
-                .expect("default query task parallelism should not be zero"),
             result_polling_interval_millisecs: NonZeroU64::new(5)
                 .expect("default result polling interval should not be zero"),
             termination_timeout_secs: NonZeroU64::new(30)

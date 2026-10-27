@@ -37,47 +37,6 @@ use crate::query_job_submitter::QueryTask;
 pub struct SpiderOption {
     pub poll_interval: Duration,
     pub query_task_max_retry: u32,
-
-    /// The most archives a query task searches.
-    pub max_num_archives_per_query_task: NonZeroUsize,
-
-    /// The number of query tasks expected to run at once, which sizes the tasks that search the
-    /// last archives of a job.
-    pub query_task_parallelism: NonZeroUsize,
-}
-
-impl SpiderOption {
-    /// Groups `archives` into query tasks that search them in order.
-    ///
-    /// Each task takes, of the archives not grouped yet, their number divided by
-    /// [`Self::query_task_parallelism`], but at least one and at most
-    /// [`Self::max_num_archives_per_query_task`]. The tasks thus shrink to one archive each
-    /// toward the end of the job, so that the job's last tasks finish close together. Each task's
-    /// execution policy is derived from the total uncompressed size of its archives.
-    ///
-    /// # Returns
-    ///
-    /// The query tasks.
-    fn group_into_query_tasks(&self, archives: Vec<ArchiveMetadata>) -> Vec<QueryTask> {
-        let mut query_tasks = Vec::new();
-        let mut archives = archives.into_iter();
-        while 0 != archives.len() {
-            let num_archives = (archives.len() / self.query_task_parallelism)
-                .clamp(1, self.max_num_archives_per_query_task.get());
-            let archives: Vec<_> = archives.by_ref().take(num_archives).collect();
-            let uncompressed_size = archives.iter().fold(0_u64, |size, archive| {
-                size.saturating_add(archive.uncompressed_size)
-            });
-            query_tasks.push(QueryTask {
-                archives,
-                execution_policy: compute_query_task_execution_policy(
-                    uncompressed_size,
-                    self.query_task_max_retry,
-                ),
-            });
-        }
-        query_tasks
-    }
 }
 
 /// Options for selecting the archives to search.
@@ -578,13 +537,13 @@ impl ArchiveSelector<'_> {
     ///
     /// This method validates and deduplicates the job's requested datasets, then retrieves from the
     /// CLP database the metadata of the archives matching the query, ordered by descending archive
-    /// end timestamp, and groups them in that order into query tasks with
-    /// [`SpiderOption::group_into_query_tasks`]. Archives that end before the job's archive
-    /// retention lower bound, if any, are excluded.
+    /// end timestamp, and attaches an execution policy derived from each archive's uncompressed
+    /// size to the task that searches it. Archives that end before the job's archive retention
+    /// lower bound, if any, are excluded.
     ///
     /// # Returns
     ///
-    /// The query tasks on success.
+    /// The query tasks on success, each of which searches one archive.
     ///
     /// # Errors
     ///
@@ -603,10 +562,17 @@ impl ArchiveSelector<'_> {
         }
         selected_archives.sort_by_key(|archive| Reverse(archive.end_timestamp));
 
-        Ok(self
-            .context
-            .spider_option
-            .group_into_query_tasks(selected_archives))
+        let query_task_max_retry = self.context.spider_option.query_task_max_retry;
+        Ok(selected_archives
+            .into_iter()
+            .map(|archive| QueryTask {
+                execution_policy: compute_query_task_execution_policy(
+                    archive.uncompressed_size,
+                    query_task_max_retry,
+                ),
+                archives: vec![archive],
+            })
+            .collect())
     }
 
     /// Validates and deduplicates the datasets requested by a query job.
@@ -773,11 +739,11 @@ struct ArchiveRowProjection {
     end_timestamp: i64,
 }
 
-/// Derives the execution policy of the query task that searches archives of `uncompressed_size`
-/// bytes in total, retried at most `max_num_retry` times.
+/// Derives the execution policy of the query task that searches an archive of
+/// `archive_uncompressed_size` bytes, retried at most `max_num_retry` times.
 ///
 /// Each timeout is the sum of a size-independent base, which covers the task executor's startup
-/// and the archives' opens, and a term proportional to the archives' uncompressed size. The soft
+/// and the archive's open, and a term proportional to the archive's uncompressed size. The soft
 /// timeout assumes the throughput `clp-s` is expected to sustain, whereas the hard timeout, after
 /// which Spider kills the task, assumes the worst-case throughput of a fully contended worker.
 ///
@@ -785,7 +751,7 @@ struct ArchiveRowProjection {
 ///
 /// The query task's execution policy.
 fn compute_query_task_execution_policy(
-    uncompressed_size: u64,
+    archive_uncompressed_size: u64,
     max_num_retry: u32,
 ) -> ExecutionPolicy {
     const BYTES_PER_MIB: u64 = 1024 * 1024;
@@ -807,12 +773,12 @@ fn compute_query_task_execution_policy(
     /// The maximum timeout accepted by Spider, in milliseconds (24 hours).
     const MAX_TIMEOUT_MILLISECS: u64 = 1000 * 60 * 60 * 24;
 
-    let uncompressed_mib = uncompressed_size / BYTES_PER_MIB;
-    let hard_timeout_ms = uncompressed_mib
+    let archive_uncompressed_mib = archive_uncompressed_size / BYTES_PER_MIB;
+    let hard_timeout_ms = archive_uncompressed_mib
         .saturating_mul(HARD_TIMEOUT_MILLISECS_PER_UNCOMPRESSED_MIB)
         .saturating_add(HARD_TIMEOUT_BASE_MILLISECS)
         .min(MAX_TIMEOUT_MILLISECS);
-    let soft_timeout_ms = uncompressed_mib
+    let soft_timeout_ms = archive_uncompressed_mib
         .saturating_mul(SOFT_TIMEOUT_MILLISECS_PER_UNCOMPRESSED_MIB)
         .saturating_add(SOFT_TIMEOUT_BASE_MILLISECS)
         .min(hard_timeout_ms - 1);
@@ -830,7 +796,6 @@ fn compute_query_task_execution_policy(
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU16;
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -852,7 +817,6 @@ mod tests {
     use super::SpiderOption;
     use super::compute_query_task_execution_policy;
     use crate::Error;
-    use crate::query_job_submitter::ArchiveMetadata;
     use crate::query_job_submitter::QueryJobOutcome;
     use crate::query_job_submitter::QueryJobSubmitter;
     use crate::query_job_submitter::QueryTask;
@@ -867,13 +831,6 @@ mod tests {
     const MAX_TIMEOUT_MILLISECS: u64 = 1000 * 60 * 60 * 24;
 
     const RESULTS_CACHE_URI: &str = "mongodb://results-cache:27017/clp-query-results";
-
-    const BASE_SPIDER_OPTION: SpiderOption = SpiderOption {
-        poll_interval: Duration::from_millis(100),
-        query_task_max_retry: MAX_NUM_RETRY,
-        max_num_archives_per_query_task: NonZeroUsize::MIN,
-        query_task_parallelism: NonZeroUsize::MIN,
-    };
 
     /// A submitter for tests that only construct job handles and never submit or run a job.
     #[derive(Clone)]
@@ -920,7 +877,10 @@ mod tests {
                 archive_retention_period_millisecs: None,
                 max_datasets_per_query: None,
             },
-            spider_option: BASE_SPIDER_OPTION,
+            spider_option: SpiderOption {
+                poll_interval: Duration::from_millis(100),
+                query_task_max_retry: 1,
+            },
             results_cache_uri: NonEmptyString::from_static_str(RESULTS_CACHE_URI),
         });
         let search_job_config = SearchJobConfig {
@@ -939,27 +899,6 @@ mod tests {
             0,
         )
         .expect("a plain search job config should be accepted")
-    }
-
-    /// # Returns
-    ///
-    /// An archive of each of `uncompressed_sizes`, with distinct IDs.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an archive ID can't be formatted.
-    fn new_archives(uncompressed_sizes: &[u64]) -> Vec<ArchiveMetadata> {
-        (0_u64..)
-            .zip(uncompressed_sizes)
-            .map(|(index, &uncompressed_size)| ArchiveMetadata {
-                id: format!("00000000-0000-4000-8000-{index:012x}")
-                    .parse()
-                    .expect("a formatted archive ID should be a valid UUID"),
-                dataset: None,
-                uncompressed_size,
-                end_timestamp: 0,
-            })
-            .collect()
     }
 
     #[tokio::test]
@@ -993,72 +932,6 @@ mod tests {
             OutputHandle::ResultsCache {
                 uri: NonEmptyString::from_static_str(RESULTS_CACHE_URI),
             }
-        );
-    }
-
-    #[test]
-    fn archives_are_grouped_in_order_into_tasks_that_shrink_to_one_archive() {
-        let spider_option = SpiderOption {
-            max_num_archives_per_query_task: NonZeroUsize::new(4).expect("4 is nonzero"),
-            query_task_parallelism: NonZeroUsize::new(4).expect("4 is nonzero"),
-            ..BASE_SPIDER_OPTION
-        };
-        let archives = new_archives(&[0; 40]);
-
-        let query_tasks = spider_option.group_into_query_tasks(archives.clone());
-
-        assert_eq!(
-            query_tasks
-                .iter()
-                .map(|query_task| query_task.archives.len())
-                .collect::<Vec<_>>(),
-            [4, 4, 4, 4, 4, 4, 4, 3, 2, 1, 1, 1, 1, 1, 1, 1]
-        );
-        assert_eq!(
-            query_tasks
-                .into_iter()
-                .flat_map(|query_task| query_task.archives)
-                .collect::<Vec<_>>(),
-            archives
-        );
-    }
-
-    #[test]
-    fn one_archive_per_task_keeps_a_task_per_archive() {
-        let archives = new_archives(&[0; 40]);
-
-        let query_tasks = BASE_SPIDER_OPTION.group_into_query_tasks(archives.clone());
-
-        assert_eq!(
-            query_tasks
-                .into_iter()
-                .map(|query_task| query_task.archives)
-                .collect::<Vec<_>>(),
-            archives
-                .into_iter()
-                .map(|archive| vec![archive])
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn task_timeouts_cover_the_total_size_of_its_archives() {
-        let spider_option = SpiderOption {
-            max_num_archives_per_query_task: NonZeroUsize::new(2).expect("2 is nonzero"),
-            ..BASE_SPIDER_OPTION
-        };
-        let query_tasks = spider_option
-            .group_into_query_tasks(new_archives(&[100 * BYTES_PER_MIB, 156 * BYTES_PER_MIB]));
-
-        assert_eq!(
-            query_tasks
-                .iter()
-                .map(|query_task| query_task.execution_policy.clone())
-                .collect::<Vec<_>>(),
-            [compute_query_task_execution_policy(
-                256 * BYTES_PER_MIB,
-                MAX_NUM_RETRY
-            )]
         );
     }
 
