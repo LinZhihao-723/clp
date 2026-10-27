@@ -1,6 +1,6 @@
 # Rust clp-s reader: prototyping and benchmark
 
-This document has three parts: the conformance of the prototype against the C++ `clp-s` (Part 1, correctness), indicative query performance on three datasets (Part 2), and the query part of Log Archival Bench on its MongoDB dataset (Part 3). Section numbers without a part refer to the part they appear in. The design is in [design.md](design.md).
+This document has four parts: the conformance of the prototype against the C++ `clp-s` (Part 1, correctness), indicative query performance on three datasets (Part 2), the query part of Log Archival Bench on its MongoDB dataset (Part 3), and the end-to-end streaming search on Spider after the search-path optimizations (Part 4). Section numbers without a part refer to the part they appear in. The design is in [design.md](design.md).
 
 ## Part 1. Conformance against the C++ clp-s
 
@@ -991,3 +991,158 @@ binary or only the archives splits that cost:
   benchmarked.
 - The host is a shared WSL2 machine. The spread is small, but the absolute values are not
   portable.
+
+## Part 4. End-to-end streaming search after the search-path optimizations
+
+Date: 2026-10-27.
+
+This part measures the streaming-search path of the package (`POST /query/stream`, Spider and the
+in-process Rust reader) before and after the reader's search-path optimizations
+([design.md](design.md) Part 2 §16) and the service changes
+([streaming-search-integration-with-spider.md](streaming-search-integration-with-spider.md) §10).
+Presto with the CLP connector and the old Celery path with the C++ `clp-s` are reference columns.
+
+### Summary
+
+- **The optimized path is faster on every query.** Against *before*, *after* is 1.00-1.24x faster on
+  HDFS and 1.36-2.09x on LAB. lab2 halves because the reader decodes only the filter columns of
+  tables without a match. The other LAB queries gain because a job no longer ends on the 100 ms
+  job-status grid.
+- **HDFS gains little because zstd still dominates.** The worker CPU of q2, q3 and q3alt drops only
+  1-3%; about 80% of it is the zstd decode of the message column, which only a format change can
+  cut.
+- **Against Presto**, *after* is 2.0-2.6x faster on HDFS and 1.4-48x on LAB. lab3, a one-row lookup,
+  was the only query Presto won before; *after* now takes 55-64 ms against Presto's 83-92 ms.
+- **Against the old Celery path**, *after* is 3.8-4.2x faster on q2, q3 and q3alt, 12-14x on q1,
+  7.6-8.5x on lab2 and 19-43x on the small LAB queries. The Celery path also spends 2-3.3x the
+  worker CPU on the same searches (C++ `clp-s` plus the per-task Python of Celery).
+- **Correct results.** All 348 measured Spider runs returned the reference rows. On the Celery
+  path, 228 of 230 runs did; the other 2 silently came back short (see [Caveats](#caveats-2)).
+
+### Arms
+
+| Arm | Path | Build | Intervals |
+|---|---|---|---|
+| Celery | `sbin/search.sh --raw`: the Python CLI's TCP result server, the query scheduler, a Celery query worker with concurrency 8 or 16, and one C++ `clp-s` with network output per archive | The package's C++ `clp-s` (stream protocol v1) | Scheduler poll 0.1 s; 16 archives per Celery group, each group waited for in full before the next; CLI status poll 0.5 s |
+| Spider *before* | `POST /query/stream` with Arrow responses; one Spider task per archive; the in-process Rust reader | Worker at `41f88a8a`, API server at `1b58867d` (the start of this work), the package's earlier coordinator | Coordinator job and result polls 50 / 20 ms; scheduler tick 5 ms, dispatch queue 32; API job-status poll 100 ms per search |
+| Spider *after* | The same path | Worker, API server and coordinator at `267e5204` | Coordinator 10 / 5 ms; scheduler tick 1 ms, dispatch queue 128; one shared API job-status poller at 10 ms |
+| Presto | Presto with the CLP connector, one worker with 8 or 16 drivers, in a kind cluster; LAB queries use `SELECT *` | As in the earlier Arrow benchmark | — |
+
+*Workers* means `spider-worker` containers with one executor each for Spider, the Celery query
+worker's concurrency for Celery, and the drivers per task for Presto.
+
+### Method
+
+- **Data:** the 607 HDFS archives of the integration doc (dataset `default`, C++ 0.5.x SFAs) and the
+  65 LAB archives of Part 3 (dataset `lab`). Warm page cache.
+- **Queries:**
+
+  | # | KQL | results |
+  |---|---|---|
+  | q1 | `message: " DEBUG org.apache.hadoop.hdfs.protocol.datatransfer.DataTransferProtocol:*"` | 1,087 |
+  | q2 | `message: "*sendHeartbeat took 2ms\n"` | 107,226 |
+  | q3 | `message: " DEBUG org.apache.hadoop.hdfs.server.datanode.DataNode.clienttrace:*"` | 1,439,548 |
+  | q3alt | `message: "*sendHeartbeat took 1ms\n"` | 1,875,605 |
+  | lab1-lab6 | LAB's Q1-Q6 of Part 3 | 38,611; 336,293; 1; 122; 52,421; 38,611 |
+
+- **Spider runs:** a `curl` client on the same host writes the Arrow body to a file. Blocks run in
+  the order *before*, *after*, *after*, *before*, first at 16 workers and then at 8, each after a
+  priming run. Each block has 1 warm-up and 3 measured runs per HDFS query, or 1 and 5 per LAB
+  query, so each query has 6 (HDFS) or 10 (LAB) measured runs per arm. Presto's kind node was
+  paused throughout.
+- **Celery runs:** per concurrency and query, 1 priming run and then 6 (HDFS) or 10 (LAB) measured
+  runs, with stdout to a file. Switching the package between Spider and Celery follows
+  [streaming-search-integration-with-spider.md](streaming-search-integration-with-spider.md) §4.3.
+- **Presto:** the medians of the earlier Arrow benchmark on the same host and data (2026-10-26, 6
+  runs per query): a `requests` client collects every row, from the POST to the last page.
+- **Metrics:**
+  - End to end: `CLOCK_MONOTONIC` from the client's start to its exit, with every result received.
+  - Worker CPU: the `cpu.stat` delta of the worker containers' cgroups over the run.
+  - Spider speedups: the ratio of the medians, with a 95% bootstrap interval (10,000 resamples).
+- **Verification:** every Spider run checks its row count, the sha256 of its sorted messages
+  against the reference, the end summary, the job id, and the job's status and number of tasks in
+  `query_jobs` (607 or 65). Each Celery run checks its row count, and the sorted output of each
+  query matches the same reference digests.
+
+### Results
+
+End to end, median ms. *after/before* is the speedup of *after* with its 95% interval; the last two
+columns divide the reference's median by *after*'s.
+
+**8 workers**
+
+| Query | Celery | Spider before | Spider after | Presto | after/before | Celery ÷ after | Presto ÷ after |
+|---|---|---|---|---|---|---|---|
+| q1 | 8,817 | 821 | 731 | 1,684 | 1.12x (1.12-1.27) | 12.1x | 2.3x |
+| q2 | 13,344 | 3,551 | 3,397 | 8,548 | 1.05x (1.01-1.06) | 3.9x | 2.5x |
+| q3 | 14,357 | 3,651 | 3,556 | 9,222 | 1.03x (1.02-1.06) | 4.0x | 2.6x |
+| q3alt | 13,891 | 3,747 | 3,621 | 9,010 | 1.03x (1.01-1.07) | 3.8x | 2.5x |
+| lab1 | 2,331 | 109 | 77 | 2,131 | 1.41x (1.27-1.90) | 30x | 28x |
+| lab2 | 3,352 | 922 | 441 | 18,863 | 2.09x (2.07-2.16) | 7.6x | 43x |
+| lab3 | 2,324 | 112 | 64 | 92 | 1.76x (1.49-3.36) | 36x | 1.4x |
+| lab4 | 2,312 | 211 | 120 | 298 | 1.76x (1.74-1.88) | 19x | 2.5x |
+| lab5 | 2,316 | 109 | 80 | 2,943 | 1.37x (1.27-2.77) | 29x | 37x |
+| lab6 | 2,325 | 110 | 81 | 2,258 | 1.36x (1.27-2.71) | 29x | 28x |
+
+**16 workers**
+
+| Query | Celery | Spider before | Spider after | Presto | after/before | Celery ÷ after | Presto ÷ after |
+|---|---|---|---|---|---|---|---|
+| q1 | 8,298 | 720 | 581 | 1,189 | 1.24x (1.20-1.26) | 14.3x | 2.0x |
+| q2 | 11,334 | 2,945 | 2,815 | 5,985 | 1.05x (1.02-1.05) | 4.0x | 2.1x |
+| q3 | 12,361 | 3,047 | 2,960 | 6,884 | 1.03x (1.02-1.05) | 4.2x | 2.3x |
+| q3alt | 11,902 | 2,943 | 2,936 | 6,258 | 1.00x (1.00-1.02) | 4.1x | 2.1x |
+| lab1 | 2,335 | 110 | 70 | 2,114 | 1.58x (1.46-3.01) | 33x | 30x |
+| lab2 | 3,389 | 823 | 401 | 19,438 | 2.05x (2.01-2.09) | 8.5x | 48x |
+| lab3 | 2,348 | 110 | 55 | 83 | 2.01x (1.69-3.82) | 43x | 1.5x |
+| lab4 | 2,341 | 210 | 110 | 289 | 1.91x (1.81-1.99) | 21x | 2.6x |
+| lab5 | 2,323 | 109 | 76 | 2,891 | 1.44x (1.26-2.77) | 31x | 38x |
+| lab6 | 2,323 | 110 | 64 | 2,162 | 1.71x (1.49-3.32) | 36x | 34x |
+
+**Worker CPU at 8 workers** (CPU-s per query):
+
+| | q1 | q2 | q3 | q3alt | lab1 | lab2 | lab3 | lab4 | lab5 | lab6 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Celery | 19.4 | 60.5 | 64.4 | 63.1 | 1.74 | 10.2 | 1.60 | 1.72 | 1.86 | 1.73 |
+| Spider before | 5.86 | 28.97 | 30.50 | 31.23 | 0.35 | 6.39 | 0.28 | 0.34 | 0.42 | 0.39 |
+| Spider after | 5.89 | 28.56 | 29.96 | 30.39 | 0.36 | 3.26 | 0.25 | 0.31 | 0.38 | 0.36 |
+
+At 16 workers the same searches cost more CPU on every arm (Spider q3alt 48.5 / 49.0 CPU-s, lab2
+11.88 / 5.83; Celery q3alt 85.4), because the extra workers share hyperthreads and E-cores.
+
+**Fixed costs of the Celery path.** A query that selects no archive (q1 with a time range before
+the data; the job succeeds with 0 tasks) takes 1.82 s at 8 and 1.79 s at 16: two container
+starts, the Python CLI, the job submission and one 0.5 s status poll. A query that matches nothing
+takes 6.9 s on the 607 HDFS archives and 2.3 s on the 65 LAB archives, about 5 s and 0.5 s above
+that floor: the 16-archive group barriers, the 0.1 s scheduler poll and about 18 ms of worker CPU
+per task. Without the 1.8 s floor, Celery is still 3.3-3.6x slower than *after* on q2-q3alt and
+9.6-11x on q1. Going from 8 to 16 workers gains it only 0.5-2 s on HDFS, because of the barriers.
+
+**Time to the first result.** About 1.1-1.3 s on the Celery path for every query (its CLI startup;
+lab3 and lab4 show 1.7-2.1 s because the CLI's stdout is block-buffered). On Spider, *before*
+47-128 ms and *after* 30-105 ms.
+
+**Memory of the API server** under a client throttled to 10 MB/s (8 workers, peak RSS, median MB):
+q3alt 128 → 63 and lab2 58 → 54, *before* → *after*
+([streaming-search-integration-with-spider.md](streaming-search-integration-with-spider.md)
+§10.3).
+
+### Caveats
+
+- *before* sits on the API server's 100 ms job-status grid, so its median on a small query moves
+  by a whole step between passes: in an earlier pass with the same method, q1 at 8 workers was
+  921 ms and lab1 209 ms. The intervals of the small LAB queries are wide for that reason. *after*
+  has no such grid.
+- Presto was measured a day earlier, in another session on the same host and data. Its client
+  parses the rows inside the timed window, and its LAB queries return whole records
+  (`SELECT *`), so the LAB ratios against Presto are rough.
+- The Celery path silently returned short results twice: q3 at 16 returned 1,417,862 and
+  1,435,346 of 1,439,548 results in 2 of 12 runs, with the job SUCCEEDED, every task completed, no
+  worker error and exit code 0. A likely cause (from reading the CLI, not verified) is that the
+  CLI closes its result server as soon as its poll sees the job succeed, dropping results still in
+  flight. The q3 median at 16 uses the 10 exact runs.
+- The Celery numbers include the CLI's fixed 1.8 s, which a user of that path pays, and run
+  the package's C++ `clp-s` build rather than the Rust reader.
+- All arms share one WSL2 host (i9-14900K, 32 vCPUs). At 16 workers it reaches its CPU ceiling:
+  per-search CPU rises, and 8 → 16 workers gains about 1.2x on HDFS and little on LAB.
+- End-to-end times use `CLOCK_MONOTONIC`, because the WSL2 realtime clock occasionally steps.
