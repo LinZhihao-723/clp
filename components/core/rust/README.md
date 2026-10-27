@@ -20,6 +20,9 @@ Documentation:
   the C++ `clp-s` and indicative query performance.
 - [`docs/streaming-search-integration-with-spider.md`](docs/streaming-search-integration-with-spider.md):
   the in-process Rust search on the Spider streaming-search path, and its smoke test.
+- [`docs/streaming-search-performance-report.md`](docs/streaming-search-performance-report.md):
+  end-to-end streaming search with Spider and the Rust reader against the old Celery path and
+  Presto.
 - [`docs/api-overview.md`](docs/api-overview.md): the public archive iteration API.
 - [`tests/README.md`](tests/README.md): the C++ ground-truth corpus.
 
