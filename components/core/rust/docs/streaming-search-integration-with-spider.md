@@ -238,8 +238,8 @@ token, task index and archive id.
   rejects `OutputHandle::File`.
 - **`ArchiveToSearch`.** `search`, `search_with_clp_s_subprocess` and `SearchTask::new` take
   `ArchiveToSearch { id, dataset, task_index }` instead of separate arguments. Separate arguments
-  would exceed clippy's `too_many_arguments`, and the package's own search function already uses
-  this shape. The type is exported from the adapter.
+  would exceed clippy's `too_many_arguments`. The type lives in `clp-rust-utils`'s
+  `task_io::query`, so the package's own search function takes the same type.
 - **Scan order for network output.** A network task always uses `ResultOrder::Scan` and ignores
   `max_num_results`, because the C++ network command line never passes `--max-num-results`
   (streaming jobs set it to 0 anyway). `ResultOrder::LatestFirst` stays for the results cache
