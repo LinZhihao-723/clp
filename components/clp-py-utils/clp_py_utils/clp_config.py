@@ -153,6 +153,7 @@ CompressionOrchestrationStr = Annotated[CompressionOrchestration, StrEnumSeriali
 
 
 class SpiderSchedulerPolicy(SnakeCaseStrEnum):
+    RESOURCE_GROUP_ROUND_ROBIN = auto()
     ROUND_ROBIN = auto()
 
 
@@ -829,14 +830,28 @@ class SpiderRoundRobin(BaseModel):
     tick_interval_ms: PositiveInt | None = None
 
 
+class SpiderResourceGroupRoundRobin(BaseModel):
+    active_job_list_capacity: PositiveInt | None = None
+    cleanup_ready_task_capacity: PositiveInt | None = None
+    commit_ready_task_capacity: PositiveInt | None = None
+    dispatch_queue_capacity: PositiveInt = 128
+    finalizing_job_expiration_timeout_sec: PositiveInt | None = None
+    ready_task_capacity: PositiveInt | None = None
+    storage_poll_timeout_ms: PositiveInt | None = None
+    tick_interval_ms: PositiveInt = 1
+
+
 class SpiderScheduler(BaseModel):
-    DEFAULT_POLICY: ClassVar[SpiderSchedulerPolicy] = SpiderSchedulerPolicy.ROUND_ROBIN
+    DEFAULT_POLICY: ClassVar[SpiderSchedulerPolicy] = (
+        SpiderSchedulerPolicy.RESOURCE_GROUP_ROUND_ROBIN
+    )
 
     log_level: LoggingLevelRust | None = None
     policy: SpiderSchedulerPolicyStr | None = None
     connection_pool_size: PositiveInt | None = None
     stop_timeout_sec: PositiveInt | None = None
     em_registry: SpiderEmRegistry = SpiderEmRegistry()
+    resource_group_round_robin: SpiderResourceGroupRoundRobin = SpiderResourceGroupRoundRobin()
     round_robin: SpiderRoundRobin = SpiderRoundRobin()
 
 

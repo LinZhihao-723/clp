@@ -76,7 +76,10 @@ telemetry:
 ##    log_level: "INFO"
 ##  scheduler:
 ##    log_level: "INFO"
-##    policy: "round_robin"
+##    policy: "resource_group_round_robin"
+##    resource_group_round_robin:
+##      dispatch_queue_capacity: 128
+##      tick_interval_ms: 1
 ##  worker:
 ##    # Each replica runs one task at a time, so this is the number of concurrent compression and
 ##    # query workers available to the coordinators.
