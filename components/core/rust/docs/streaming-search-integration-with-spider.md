@@ -9,8 +9,10 @@ which replaced protocol v1 after the smoke test; the smoke test in [§6](#6-smok
 protocol v1.
 
 This document records how the Rust clp-s reader was put into the Spider streaming-search path,
-and what the smoke test of that integration found. The reader itself is described in
-[design.md](design.md), and its conformance and standalone performance are in
+and what the smoke test of that integration found.
+[§10](#10-job-completion-and-the-arrow-passthrough) adds the later changes to job completion and
+to the memory of the Arrow passthrough. The reader itself is described in [design.md](design.md),
+and its conformance and standalone performance are in
 [prototyping-and-benchmark.md](prototyping-and-benchmark.md).
 
 ## 1. Summary
@@ -96,8 +98,10 @@ to a listener that the client hosts:
    - Dedup by `(task_index, result_index)` is correct only if every attempt of a task produces
      the same results in the same order. A Rust engine must keep that property
      ([§3.6](#36-determinism)).
-6. **Completion.** The client learns that the job is over by polling `query_jobs.status` every
-   100 ms, not from the connections. It then drains the open connections and reports the
+6. **Completion.** The client learns that the job is over from `query_jobs.status`, not from the
+   connections: the API server waits on the jobs of all its searches through one poller that
+   reads their statuses every 10 ms, and the CLI polls its job every 100 ms
+   ([§10.2](#102-the-job-completion-path)). It then drains the open connections and reports the
    terminal status. Once the job has succeeded, every task has had its results acknowledged, so
    the drain stops reading the remaining (stale) connections at once; a batch already claimed is
    still delivered.
@@ -688,3 +692,107 @@ CLP_S_BINARY=<clp-s> cargo test -p search-result-listener --test spider_adapter 
 cargo test -p clp-s-wire -p clp-s-sinks -p clp-s-spider-adapter
 CLP_S=<clp-s> cargo test -p clp-s-spider-adapter --test network -- --ignored
 ```
+
+## 10. Job completion and the Arrow passthrough
+
+**Date:** 2026-10-27. **Tree:** branch `query-coordinator/streaming-search-reader-opt` at
+`267e5204`. **Package:** 8 and 16 `spider-worker` containers on the host of
+[§4.1](#41-host-and-builds), the 607 HDFS archives (dataset `default`) and the 65 archives of the
+MongoDB dataset `lab` from [prototyping-and-benchmark.md](prototyping-and-benchmark.md) Part 3.
+
+This section records the service-side changes made together with the reader's search-path work
+([design.md](design.md) Part 2 §16). The end-to-end benchmark of both is in
+[prototyping-and-benchmark.md](prototyping-and-benchmark.md) Part 4.
+
+### 10.1 One archive per query task
+
+Each `query::clp_s_search` task searches exactly one archive, and its task index is the archive's
+position among the job's archives ([§2.1](#21-the-streaming-search-path-on-spider)), so a retry
+reuses the index and the listener's per-task cursor deduplicates it.
+
+Grouping several archives into one task was built and measured, then removed. It saved about
+1.3 ms of worker CPU per task saved, mostly on archives that the logtype dictionary prunes, but the
+end-to-end gain was at most 4% (q1 and lab2 at 8 workers) and nothing at 16 workers, where the
+larger tasks left workers idle at the end of the job. One archive per task keeps the task index
+equal to the archive's position, and a retry reruns one archive.
+
+With one archive per task, the gates (10 queries, Arrow and SSE, 8 and 16 workers) returned the same
+rows, digests and response sizes as before the changes, and every job had 607 or 65 tasks. With two
+workers killed 5 s into q3alt, the job still succeeded with the reference results: the listener
+dropped 5,495 (Arrow) and 5,064 (SSE) results that the retries sent again.
+
+### 10.2 The job-completion path
+
+A small query used to end on a 100 ms grid: e2e times of 110 or 210 ms, whatever the search cost.
+Every step between the last search task and the client's end of stream is a poll; none is an event.
+
+| Step | Before | Now | Where it is set |
+|---|---|---|---|
+| The coordinator picks up a new query job from `query_jobs` | every 50 ms | every 10 ms | `query_coordinator.job_polling_interval_millisecs`; default in `clp-rust-utils`'s coordinator config, the Python `clp_config` mirror and the package template |
+| The Spider scheduler fills the dispatch queue of the `resource_group_round_robin` policy | tick 5 ms, 32 entries | tick 1 ms, 128 entries | `spider.scheduler.resource_group_round_robin.{tick_interval_ms, dispatch_queue_capacity}`; the controller writes them to `.env` as `SPIDER_SCHEDULER_RESOURCE_GROUP_ROUND_ROBIN_*` |
+| The coordinator sees that the Spider job is over and updates `query_jobs` | every 20 ms | every 5 ms | `query_coordinator.result_polling_interval_millisecs` |
+| The API server sees the job's terminal status | one poll loop per search, every 100 ms, phase-locked to the request start | one shared poller for all searches, every 10 ms | `JOB_STATUS_POLL_INTERVAL` in `api-server`'s `streaming_search.rs` |
+
+- **Spider's scheduler policy.** The Spider compose file runs `resource_group_round_robin`, which
+  the coordinators' resource groups need. The package config modelled only `round_robin`, whose
+  `SPIDER_SCHEDULER_ROUND_ROBIN_*` variables the running policy ignores. The config now models the
+  running policy and makes it the default.
+- **The shared poller** (`PolledJobStatusSource` in `search-result-listener`). Every wait registers
+  its job id. One background task fetches the statuses of all waited-on jobs with one
+  `SELECT id, status FROM query_jobs WHERE id IN (...)` per poll (1,000 ids per statement) and
+  resolves the waits of jobs that are terminal or missing. It stops when nothing is waited on and
+  restarts on the next wait. So an API server issues at most 100 status queries per second, however
+  many searches it serves.
+  - Polls may fail for up to `POLL_FAILURE_TOLERANCE` (1 s) before the waits fail with
+    `Error::JobStatusPoll`; a successful poll resets the tolerance.
+  - If the background task ends any other way (a panic), every wait ends, and the next wait starts
+    a new task.
+- **Unchanged.** The executors' long poll of the scheduler (`scheduler_poll_wait_ms`) returns as
+  soon as a task is assigned, so it adds no delay. The CLI `clp-streaming-search` still polls its
+  own job every 100 ms.
+
+**Measured, before** (12 runs of lab1 and lab3 at 8 workers, ms from the request): the coordinator
+picked the job up after 34 ms on average (7-51), submitted it in 3.5 ms, and the first task started
+14.6 ms later. The job took about 40 ms on Spider. The coordinator saw its end 12.1 ms (2-21) after
+the last task, and the client's stream ended another 40 ms (3-94) later.
+
+**Measured, after:** across all measured runs of the end-to-end benchmark, the client's stream
+ended a median 8-9 ms after the job's terminal status appeared in `query_jobs` (p90 12-15 ms),
+against 44-47 ms (p90 about 97 ms) before. The status was sampled every 10 ms, so each figure is
+within about 5 ms.
+
+What each change bought, with all the reader changes and the shared poller in place (one archive
+per task, 8 workers, Arrow, median ms):
+
+| Query | Coordinator 50/20 ms, scheduler tick 5 ms / 32 | Coordinator 10/5 ms | And scheduler tick 1 ms / 128 |
+|---|---|---|---|
+| lab1 | 112 | 85 | 75 |
+| lab3 | 98 | 75 | 64 |
+| lab4 | 150 | 123 | 119 |
+| q1 | 804 | 799 | 714 |
+
+The prune-heavy q1 gains most from the scheduler: its 607 tasks are mostly pruned in under a
+millisecond, so the old 32-entry queue drained between 5 ms ticks.
+
+### 10.3 Memory of the Arrow passthrough
+
+The API server forwards the protocol v3 Arrow IPC messages of the search tasks to an Arrow client
+without decoding them. The listener split each message out of its connection's read buffer as a
+`Bytes` slice that shared the buffer's allocation, which spans at least one 64 KiB socket read.
+The session's byte budget (`channel_size`, 16 MiB by default) counts only the slice, and HDFS
+results arrive in batches of a few rows, so under a slow client every small message buffered for
+the consumer kept a whole read buffer alive. The API server's memory grew to 110-190 MB with
+Arrow, against 39-51 MB with SSE.
+
+The listener now copies messages shorter than 64 KiB (`MIN_SHARED_MESSAGE_LEN` in
+`arrow_stream.rs`) out of the read buffer; larger messages still share it.
+
+Measured with a client throttled to 10 MB/s, 8 workers, a fresh API server per query, 3 runs each
+(peak RSS of the API server, median (min-max) MB):
+
+| Query | Before | After |
+|---|---|---|
+| q3alt (1,875,605 results) | 128 (103-149) | 63 (60-65) |
+| lab2 (336,293 results) | 58 (54-72) | 54 (54-56) |
+
+Both pairs are bound by the client there (q3alt 30.9 s, lab2 4.6 s end to end).
