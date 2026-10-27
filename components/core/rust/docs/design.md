@@ -4058,6 +4058,112 @@ Part 1, issues 7 and 10). They describe the code as built; each is tested.
 | X2 | The Spider adapter waits for room and retries a search that failed with a memory-budget `ResourceExhausted`, up to `base_admission_timeout_sec` (`WaitForBase` admission, `admission.rs`). A reservation larger than the whole budget fails at once. | D5 | The budget inside the reader stays try-only, as D5 requires. A Spider worker runs one search per thread, so waiting at the task boundary is better than failing a task that a later attempt can serve. Retries are idempotent because the results cache tolerates duplicate `_id`s. Tests: `base_admission_waits_for_the_budget_to_drain`, `streams_larger_than_the_budget_fail_without_waiting`, the `admission.rs` unit tests. |
 | X3 | `ResultsCacheSink` requires JSON and timestamps only, and always reports `MergeOrder::Commutative`. | §7.3 | The `_id`'s `log_event_idx` is the record id, which every batch carries: the `log_event_idx` under log order, else the table-order ordinal (DV-24). It needs no index column. Under `LatestFirst` the winners arrive in the single `TopK` partition (D10), so no merge order is needed for the limit. |
 
+### 16. Search-path performance
+
+**Date:** 2026-10-27. **Scope:** the per-archive search CPU of the reader on the Spider
+streaming-search path, without changing the archive format. The service side of the same work (job
+completion and the Arrow passthrough) is in
+[streaming-search-integration-with-spider.md](streaming-search-integration-with-spider.md) §10,
+and the end-to-end benchmark is in [prototyping-and-benchmark.md](prototyping-and-benchmark.md)
+Part 4.
+
+On Spider, the end-to-end time of a streaming search is close to the Spider job's span, and the span
+is close to the reader's total search CPU divided by the number of workers: the workers are busy
+almost all the time, and the listener, the API server and the transport add a few percent. So the
+reader's per-archive CPU is the main lever, then the fixed cost of a Spider task, then the latency
+of noticing that the job is over.
+
+#### 16.1 Where the time went
+
+Measured single-threaded on one pinned CPU with a warm cache, per archive, before any change
+(HDFS: 20-archive sample, one table of 82 MB decoded from 7.25 MB; LAB: all 65 MongoDB archives,
+about 268 MB decoded each, in 12 streams):
+
+| Query | ms per archive (Arrow output) | Profile (share of user samples) |
+|---|---|---|
+| HDFS q2, q3, q3alt | 33.2-34.3 | zstd 79-85% (plus 2% of memset for RLE blocks), filter kernel 7.4-7.9%, windows 2-5%, `Table::load` 2%; system time (the 1 MiB `pread` copies) about 1.9 ms |
+| HDFS q1 | 5.6 | 18 of 20 archives pruned by the logtype dictionary in 0.06-0.4 ms; the 2 others take 43 and 64 ms |
+| LAB lab2 (`id: 22419`) | 61.8 | zstd 81-84%: every stream is decoded in full although the filter needs only leading columns |
+| LAB lab4 | 2.9 | variable-dictionary probes 23%, mostly SipHash over every dictionary entry |
+
+- **The message column dominates HDFS.** It holds about 94% of the compressed input of each stream
+  in one zstd frame: 22% logtype words and 72% variables. The filter needs both, so a filter-first
+  decode cannot skip it. zstd decodes it at about 3.1 GB/s.
+- **Contention inflates the per-archive CPU.** K concurrent unpinned copies of the reader cost
+  1.23-1.46x the single-copy CPU per search at K=8 and 2.15-2.85x at K=16. At 8 copies the
+  increase is mostly memory traffic (a full-frame decode +37%, a 256 KiB-ring decode +9%); at 16
+  the shared hyperthreads and E-cores add the rest. The Spider adapter's per-archive time at 8
+  workers (q2 42.6 ms, lab2 90.1 ms) equals the harness at 8 copies.
+- **A Spider task costs 1.2-1.4 ms outside the reader** (scheduler RPC, task registration,
+  dispatch to the executor, result return and adapter setup). Prune-heavy jobs also waited about
+  4 ms at a time for the scheduler: its 32-entry dispatch queue drained faster than its 5 ms tick
+  refilled it.
+
+#### 16.2 Optimizations kept
+
+Effects are single-threaded A/B runs against the previous change (interleaved rounds on one pinned
+CPU, median of the per-round sums over the archive list). Every change keeps the outputs of the ten
+benchmark queries byte-identical, and every divergence in §10 and Part 1 §8.3 unchanged.
+
+| # | Change | Layer (crate) | Measured effect |
+|---|---|---|---|
+| 1 | `VariableDictionary::find_exact` matches its probes by length, then bytes, instead of hashing every entry with SipHash; past 8 probes of one length, it binary-searches them | Format (`clp-s-format`) | LAB count mode: lab3 0.75x, lab4 0.84x, lab5 0.86x, lab6 0.84x; HDFS unchanged. The binary search keeps many probes of one length from being quadratic, within ±1% elsewhere |
+| 2 | `TextPattern::matches` matches prefix and suffix globs (`log_release*`) without splitting the pattern into segments | Query (`clp-s-query`) | lab4 0.97x on top of #1; others within noise |
+| 3 | An encoded-text probe first selects its candidate rows in one pass over the logtype words, against a bitset of the matching logtype ids offset by the smallest one, and then checks only those rows' variables | Search (`clp-s-search` filter kernel) | q1 0.97x, q2 0.96x, q3 0.96x, q3alt 0.97x; the kernel drops from 7.9% to about 3.4% of q2's samples |
+| 4 | Filter-first lazy table-tail decode: the last planned table of a stream is decoded only through its filter columns, and the rest of the table only once a window selects a row and the output needs it (§7.2 steps 5-7) | I/O, table and execution (`clp-s-io`, `clp-s-table`, `clp-s-exec`) | lab2 0.53x (count and Arrow), decoded bytes 17.1 → 9.1 GB, compressed input 297.6 → 250.6 MB; lab2 at 8 concurrent copies 88.8 → 43.5 ms per archive; lab4 0.96-1.00x and lab5 0.93x (Arrow); HDFS Arrow within +0.6% (noise); HDFS count mode 0.86-0.91x, because counts skip the timestamp column |
+
+Cumulative, with Arrow output: HDFS q2 0.96x and q3alt 0.97x, lab2 0.53x, lab4 and lab5 about
+0.80x.
+
+#### 16.3 Measured and not kept
+
+| Candidate | Result | Why not |
+|---|---|---|
+| `mmap` of local archives instead of `pread` copies (prototyped through `ArchiveLocation::Memory`) | q2 0.983x, system time 1.95 → 1.09 ms per archive; lab2 1.00x | Missed its gate (≤ 0.97x, ≤ 0.8 ms of system time); a truncated file would raise SIGBUS. D5 stands |
+| A cheaper eager variable-offset check in `Table::load` (vectorized `check_variable_offsets`) | 1.010-1.015x (slower) | The pass is memory-bound; dropping it would save at most about 0.4 ms per archive and would report corrupt offsets late, so it stays eager |
+| Cache-resident streaming decode through a small ring instead of the whole stream | Decode only: equal single-threaded; at 8 copies +9% instead of +37% contention, at 16 1.58x instead of 2.44x | It needs streaming evaluation over column-major tables (the output's timestamp column follows the message column). Gate before building it: a prototype with q2 at 8 copies ≤ 1.12x its single-copy time and single-copy ≤ 1.03x; not built |
+| Inlined `ByteReader` reads | lab4 0.993x | Within noise |
+| Transparent huge pages for decode buffers | No gain under contention | — |
+| Several archives per Spider task | Saves about 1.3 ms of worker CPU per task saved; end to end up to 4% on q1 and lab2 at 8 workers, nothing at 16 | Not adopted: each query task searches one archive, and its task index stays the archive's position ([streaming-search-integration-with-spider.md](streaming-search-integration-with-spider.md) §10) |
+
+Deferred, each at most 1-2%: timestamp rendering (cached prefixes, no SipHash map, no `i128`
+math) and lazy record ids with SIMD delta folds.
+
+#### 16.4 Where the time goes now
+
+HDFS q2 with Arrow output now takes about 32.9 ms per archive single-threaded, and zstd is still
+about 80% of it. The filter kernel is about 3%, the rest is windows, `Table::load` and the `pread`
+copies. Nearly all of the zstd work is the message column, which every text query on HDFS needs in
+full, because a zstd frame cannot be entered in the middle. Cutting it needs a format change (Q16,
+Part 1 §6.5): per-column or seekable frames would let a query decode the logtype words (22% of the
+compressed input) and then only the variable blocks of candidate rows. Without one, the remaining
+levers are cache-resident decoding (§16.3) and more cores.
+
+#### 16.5 End-to-end effect
+
+Plain Arrow responses, 607 HDFS and 65 LAB archives, one archive per Spider task, median ms;
+*before* is the reader at the start of this work with the old service intervals, *after* is
+everything in this section plus the service changes. Method, Presto and the Celery reference are in
+[prototyping-and-benchmark.md](prototyping-and-benchmark.md) Part 4.
+
+| Query | 8 workers: before → after | 16 workers: before → after |
+|---|---|---|
+| q1 | 821 → 731 (1.12x) | 720 → 581 (1.24x) |
+| q2 | 3,551 → 3,397 (1.05x) | 2,945 → 2,815 (1.05x) |
+| q3 | 3,651 → 3,556 (1.03x) | 3,047 → 2,960 (1.03x) |
+| q3alt | 3,747 → 3,621 (1.03x) | 2,943 → 2,936 (1.00x) |
+| lab1 | 109 → 77 (1.41x) | 110 → 70 (1.58x) |
+| lab2 | 922 → 441 (2.09x) | 823 → 401 (2.05x) |
+| lab3 | 112 → 64 (1.76x) | 110 → 55 (2.01x) |
+| lab4 | 211 → 120 (1.76x) | 210 → 110 (1.91x) |
+| lab5 | 109 → 80 (1.37x) | 109 → 76 (1.44x) |
+| lab6 | 110 → 81 (1.36x) | 110 → 64 (1.71x) |
+
+- lab2 is the reader's win: worker CPU 6.39 → 3.26 CPU-s at 8 workers. On HDFS the worker CPU
+  drops only 1-3%, as §16.4 predicts.
+- The small queries gain from the service changes: their *before* times sit on the API server's
+  100 ms job-status polling grid.
+
 ## Part 3. Search semantics (M0-M3)
 
 **Scope:** M0c, `clp-s-query`. **Status:** the specification for this round. It is the
