@@ -12,7 +12,7 @@ use clp_rust_utils::clp_config::package::config::SpiderTaskExecutorConfig;
 /// The engine that the query tasks search archives with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchEngine {
-    /// The C++ `clp-s` binary, spawned per archive.
+    /// The C++ `clp-s` binary, spawned per task.
     ClpS,
 
     /// The Rust clp-s reader library, in-process.

@@ -1,16 +1,19 @@
 //! [`QueryJobSubmitter`] implementation for [`spider_client::SpiderClient`].
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use clp_rust_utils::job_config::QueryJobId;
-use clp_rust_utils::task_io::query::ArchiveToSearch;
 use clp_rust_utils::task_io::query::ClpSQueryOption;
 use clp_rust_utils::task_io::query::OutputHandle;
+use clp_rust_utils::task_io::query::QueryTaskIndex;
 use spider_client::SpiderClient;
 use spider_client::error::ClientError;
 use spider_core::job::JobState;
 use spider_core::task::DataTypeDescriptor;
+use spider_core::task::ExecutionPolicy;
 use spider_core::task::TaskDescriptor;
 use spider_core::task::TaskGraph;
 use spider_core::task::TdlContext;
@@ -21,9 +24,9 @@ use spider_core::types::io::TaskGraphInput;
 use spider_core::types::io::TaskGraphInputBuilder;
 
 use crate::Error;
+use crate::query_job_submitter::ArchiveMetadata;
 use crate::query_job_submitter::QueryJobOutcome;
 use crate::query_job_submitter::QueryJobSubmitter;
-use crate::query_job_submitter::QueryTask;
 
 #[async_trait]
 impl QueryJobSubmitter for SpiderClient {
@@ -39,13 +42,13 @@ impl QueryJobSubmitter for SpiderClient {
         resource_group_id: ResourceGroupId,
         clp_s_query_option: ClpSQueryOption,
         output_handle: OutputHandle,
-        query_tasks: Vec<QueryTask>,
+        archives_to_search: Vec<(ArchiveMetadata, ExecutionPolicy)>,
     ) -> Result<JobId, Error> {
         let (graph, inputs) = build_query_task_graph(
             query_job_id,
             &clp_s_query_option,
             &output_handle,
-            query_tasks,
+            archives_to_search,
         )?;
         let spider_job_id = self.submit_job(resource_group_id, &graph, &inputs).await?;
 
@@ -106,8 +109,7 @@ impl QueryJobSubmitter for SpiderClient {
     }
 }
 
-/// Builds independent archive-search tasks and their positionally ordered external inputs. Each
-/// archive's task index is its position among the archives of `query_tasks`, taken in order.
+/// Builds independent archive-search tasks and their positionally ordered external inputs.
 ///
 /// # Returns
 ///
@@ -130,7 +132,7 @@ fn build_query_task_graph(
     query_job_id: QueryJobId,
     clp_s_query_option: &ClpSQueryOption,
     output_handle: &OutputHandle,
-    query_tasks: Vec<QueryTask>,
+    archives_to_search: Vec<(ArchiveMetadata, ExecutionPolicy)>,
 ) -> Result<(TaskGraph, TaskGraphInput), Error> {
     // NOTE: Keep these names and the input order in sync with the TDL package definitions.
     const CLP_TDL_PACKAGE_NAME: &str = "clp";
@@ -142,12 +144,8 @@ fn build_query_task_graph(
     let query_job_id_input = inputs.create_shared_input_payload(&query_job_id)?;
     let query_option_input = inputs.create_shared_input_payload(clp_s_query_option)?;
     let output_handle_input = inputs.create_shared_input_payload(output_handle)?;
-    let mut task_indices = 0..;
-    for QueryTask {
-        archives,
-        execution_policy,
-    } in query_tasks
-    {
+    let mut dataset_inputs = HashMap::new();
+    for (task_index, (archive, execution_policy)) in (0..).zip(archives_to_search) {
         graph.insert_task(TaskDescriptor {
             tdl_context: TdlContext {
                 package: CLP_TDL_PACKAGE_NAME.to_owned(),
@@ -159,27 +157,31 @@ fn build_query_task_graph(
                 DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name(
                     "ClpSQueryOption",
                 )?),
+                DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name(
+                    "Option<NonEmptyString>",
+                )?),
+                DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name("NonEmptyString")?),
                 DataTypeDescriptor::Value(ValueTypeDescriptor::struct_from_name("OutputHandle")?),
-                DataTypeDescriptor::Value(ValueTypeDescriptor::list(
-                    ValueTypeDescriptor::struct_from_name("ArchiveToSearch")?,
-                )),
+                // Spider has no unsigned integer type. A task index is below the number of tasks,
+                // so it always fits in `int64`.
+                DataTypeDescriptor::Value(ValueTypeDescriptor::int64()),
             ],
             outputs: vec![],
             input_sources: None,
         })?;
         inputs.append_shared_task_input(query_job_id_input)?;
         inputs.append_shared_task_input(query_option_input)?;
+        let dataset_input = match dataset_inputs.entry(archive.dataset) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => {
+                let input = inputs.create_shared_input_payload(entry.key())?;
+                *entry.insert(input)
+            }
+        };
+        inputs.append_shared_task_input(dataset_input)?;
+        inputs.append_task_input(&archive.id)?;
         inputs.append_shared_task_input(output_handle_input)?;
-        let archives: Vec<ArchiveToSearch> = archives
-            .into_iter()
-            .zip(&mut task_indices)
-            .map(|(archive, task_index)| ArchiveToSearch {
-                id: archive.id,
-                dataset: archive.dataset,
-                task_index,
-            })
-            .collect();
-        inputs.append_task_input(&archives)?;
+        inputs.append_task_input::<QueryTaskIndex>(&task_index)?;
     }
 
     Ok((graph, inputs.build()))
@@ -189,9 +191,9 @@ fn build_query_task_graph(
 mod tests {
     use std::num::NonZeroU16;
 
-    use clp_rust_utils::task_io::query::ArchiveToSearch;
     use clp_rust_utils::task_io::query::ClpSQueryOption;
     use clp_rust_utils::task_io::query::OutputHandle;
+    use clp_rust_utils::task_io::query::QueryTaskIndex;
     use clp_rust_utils::types::ArchiveId;
     use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
     use non_empty_string::NonEmptyString;
@@ -200,37 +202,28 @@ mod tests {
 
     use super::build_query_task_graph;
     use crate::query_job_submitter::ArchiveMetadata;
-    use crate::query_job_submitter::QueryTask;
 
     #[test]
-    fn build_query_task_graph_indexes_archives_by_position_across_tasks() -> anyhow::Result<()> {
-        const ARCHIVES: [(&str, Option<&str>); 4] = [
-            ("018e90e5-8b2a-4a61-a2fc-cac799936caf", Some("ds1")),
-            ("5b0f8c2e-3d41-4a8e-9c7b-1e2f3a4b5c6d", Some("ds2")),
-            ("c3d2e1f0-a9b8-4c7d-8e6f-5a4b3c2d1e0f", Some("ds1")),
-            ("4b0c2f8e-6d13-4f4e-9a57-1c2d3e4f5a6b", None),
+    fn build_query_task_graph_appends_archive_positions_as_task_indices() -> anyhow::Result<()> {
+        const ARCHIVE_IDS: [&str; 3] = [
+            "018e90e5-8b2a-4a61-a2fc-cac799936caf",
+            "5b0f8c2e-3d41-4a8e-9c7b-1e2f3a4b5c6d",
+            "c3d2e1f0-a9b8-4c7d-8e6f-5a4b3c2d1e0f",
         ];
-        const TASK_SIZES: [usize; 3] = [2, 1, 1];
 
-        let mut archives = ARCHIVES
+        let archives_to_search = ARCHIVE_IDS
             .iter()
+            .zip([Some("ds1"), Some("ds2"), Some("ds1")])
             .map(|(archive_id, dataset)| {
-                Ok(ArchiveMetadata {
+                let archive = ArchiveMetadata {
                     id: archive_id.parse::<ArchiveId>()?,
                     dataset: dataset.map(NonEmptyString::from_static_str),
                     uncompressed_size: 0,
                     end_timestamp: 0,
-                })
+                };
+                Ok((archive, ExecutionPolicy::default()))
             })
-            .collect::<anyhow::Result<Vec<_>>>()?
-            .into_iter();
-        let query_tasks = TASK_SIZES
-            .iter()
-            .map(|&num_archives| QueryTask {
-                archives: archives.by_ref().take(num_archives).collect(),
-                execution_policy: ExecutionPolicy::default(),
-            })
-            .collect::<Vec<_>>();
+            .collect::<anyhow::Result<Vec<_>>>()?;
         let clp_s_query_option = ClpSQueryOption {
             query_string: NonEmptyString::from_static_str("*Transmitted*"),
             max_num_results: None,
@@ -245,39 +238,24 @@ mod tests {
         };
 
         let (graph, inputs) =
-            build_query_task_graph(42, &clp_s_query_option, &output_handle, query_tasks)?;
+            build_query_task_graph(42, &clp_s_query_option, &output_handle, archives_to_search)?;
 
-        assert_eq!(graph.get_num_tasks(), TASK_SIZES.len());
+        assert_eq!(graph.get_num_tasks(), ARCHIVE_IDS.len());
         let positional_inputs = inputs.get_positional_inputs();
         assert_eq!(
             positional_inputs.len(),
             graph.get_task_graph_input_indices().len()
         );
-        let tasks_archives = positional_inputs
-            .chunks(positional_inputs.len() / TASK_SIZES.len())
+        let task_indices = positional_inputs
+            .chunks(positional_inputs.len() / ARCHIVE_IDS.len())
             .map(|task_inputs| match task_inputs.last() {
                 Some(TaskGraphInputEntry::ValuePayload(payload)) => {
-                    Ok(rmp_serde::from_slice::<Vec<ArchiveToSearch>>(payload)?)
+                    Ok(rmp_serde::from_slice::<QueryTaskIndex>(payload)?)
                 }
-                entry => anyhow::bail!("unexpected archives input entry: {entry:?}"),
+                entry => anyhow::bail!("unexpected task index input entry: {entry:?}"),
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
-        let archive_to_search = |task_index: u64| -> anyhow::Result<ArchiveToSearch> {
-            let (archive_id, dataset) = ARCHIVES[usize::try_from(task_index)?];
-            Ok(ArchiveToSearch {
-                id: archive_id.parse()?,
-                dataset: dataset.map(NonEmptyString::from_static_str),
-                task_index,
-            })
-        };
-        assert_eq!(
-            tasks_archives,
-            [
-                vec![archive_to_search(0)?, archive_to_search(1)?],
-                vec![archive_to_search(2)?],
-                vec![archive_to_search(3)?],
-            ]
-        );
+        assert_eq!(task_indices, vec![0, 1, 2]);
 
         Ok(())
     }

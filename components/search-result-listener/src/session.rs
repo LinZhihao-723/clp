@@ -29,7 +29,7 @@ use crate::Error;
 use crate::JobStatusSource;
 use crate::ResultEncoding;
 use crate::channel;
-use crate::cursor::ArchiveCursor;
+use crate::cursor::TaskCursor;
 use crate::listener::AcceptBarrier;
 
 /// The sessions of a listener, keyed by their tokens.
@@ -262,7 +262,7 @@ impl Future for OutcomeFuture {
 ///
 /// * `EncodingType` - The encoding of the results the session delivers.
 pub struct State<EncodingType: ResultEncoding> {
-    pub cursors: DashMap<QueryTaskIndex, Arc<ArchiveCursor>>,
+    pub cursors: DashMap<QueryTaskIndex, Arc<TaskCursor>>,
     pub encoding: EncodingType,
     pub batches_sender: channel::Sender<EncodingType::Batch>,
 

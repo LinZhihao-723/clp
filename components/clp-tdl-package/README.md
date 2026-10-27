@@ -15,4 +15,4 @@ documented below.
 
 ### Query
 
-* `query::clp_s_search`: Search a list of archives, one after another, using the `clp-s` engine.
+* `query::clp_s_search`: Search a single archive using the `clp-s` engine.

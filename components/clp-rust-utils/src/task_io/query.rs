@@ -11,19 +11,18 @@ use crate::job_config::NetworkOutput;
 use crate::job_config::SessionToken;
 use crate::types::ArchiveId;
 
-/// The position of an archive among the archives that its query job searches, which keys the
-/// archive's results within the job.
+/// The index of a query task within its query job.
 pub type QueryTaskIndex = u64;
 
-/// An archive that a query task searches.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+/// The archive that a query task searches.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArchiveToSearch {
     pub id: ArchiveId,
 
     /// The archive's dataset, or `None` for the default dataset.
     pub dataset: Option<NonEmptyString>,
 
+    /// The archive's position among the archives that the query job searches.
     pub task_index: QueryTaskIndex,
 }
 
