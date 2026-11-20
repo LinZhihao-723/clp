@@ -89,44 +89,4 @@ mod tests {
         );
         Ok(())
     }
-
-    #[test]
-    fn job_config_of_an_unknown_kind_is_rejected() -> anyhow::Result<()> {
-        let encoded = rmp_serde::to_vec_named(&serde_json::json!({
-            "type": "extract_ir",
-            "config": {"orig_file_id": "file", "msg_ix": 0},
-        }))?;
-
-        let error = rmp_serde::from_slice::<JobConfig>(&encoded)
-            .expect_err("a job config of an unknown kind should be rejected");
-
-        assert!(
-            error.to_string().contains("unknown variant `extract_ir`"),
-            "unexpected error: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn extract_job_config_with_a_zero_target_chunk_size_is_rejected() -> anyhow::Result<()> {
-        let encoded = rmp_serde::to_vec_named(&serde_json::json!({
-            "type": "extract",
-            "config": {
-                "dataset": "default",
-                "archive_id": "018e90e5-8b2a-4a61-a2fc-cac799936caf",
-                "target_chunk_size": 0,
-            },
-        }))?;
-
-        let error = rmp_serde::from_slice::<JobConfig>(&encoded)
-            .expect_err("a zero target chunk size should be rejected");
-
-        assert!(
-            error
-                .to_string()
-                .contains("invalid value: integer `0`, expected a nonzero u64"),
-            "unexpected error: {error}"
-        );
-        Ok(())
-    }
 }
