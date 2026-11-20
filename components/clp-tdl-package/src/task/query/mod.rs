@@ -43,16 +43,6 @@ pub(crate) fn clp_s_extract_json_task(
     input: ExtractTaskInput,
 ) -> Result<(), TdlError> {
     extract::extract_json(&ctx, crate::common::spider_task_executor_config(), &input)
-        .inspect_err(|e| {
-            tracing::error!(
-                job_id = % ctx.job_id,
-                task_id = % ctx.task_id,
-                task_instance_id = % ctx.task_instance_id,
-                query_job_id = % input.job_id,
-                error = ? e,
-                "clp-s JSON extraction task failed."
-            );
-        })
         .map_err(|e| TdlError::ExecutionError(format!("{e:#}")))
 }
 

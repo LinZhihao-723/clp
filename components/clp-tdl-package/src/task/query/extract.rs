@@ -432,6 +432,8 @@ struct PipedChild {
 }
 
 impl PipedChild {
+    /// Factory function.
+    ///
     /// Spawns `command` with a null stdin and piped stdout and stderr.
     ///
     /// # Returns
@@ -467,10 +469,7 @@ impl PipedChild {
 
 /// Runs `clp-s x` to extract the archive in log order into chunk files in `output_directory`.
 ///
-/// clp-s's stdout is read on the calling thread while its stderr is drained into a bounded tail
-/// on another thread. On the first malformed or over-long line of chunk statistics, clp-s is
-/// killed instead of waited for, so this function returns promptly, and clp-s has been reaped by
-/// the time it returns on every path.
+/// clp-s has been reaped by the time this function returns, on every path.
 ///
 /// # Returns
 ///
@@ -578,6 +577,10 @@ fn build_clp_s_extract_args(
 /// * [`ChunkStatsError::TooManyChunks`] if more than `MAX_NUM_CHUNKS` lines are printed.
 /// * [`ChunkStatsError::Read`] if [`BufRead::read_until`] fails.
 /// * [`ChunkStatsError::MalformedLine`] if [`serde_json::from_slice`] fails to parse a line.
+///
+/// # Panics
+///
+/// Panics if `MAX_STATS_LINE_SIZE + 1` doesn't fit in a `u64`.
 fn read_chunk_paths<ReaderType: BufRead>(
     mut reader: ReaderType,
 ) -> Result<Vec<PathBuf>, ChunkStatsError> {
@@ -656,9 +659,8 @@ fn describe_stderr_tail(stderr_tail: ScopedJoinHandle<'_, std::io::Result<Vec<u8
 
 /// Publishes the chunk files from `staging_directory` to the stream output.
 ///
-/// A filesystem stream output receives each file through a rename into its directory, and an S3
-/// stream output through an upload under its key prefix. A file that already exists at the
-/// destination is overwritten, since a chunk's content is determined by its file name.
+/// A file that already exists at the destination is overwritten, since a chunk's content is
+/// determined by its file name.
 ///
 /// # Errors
 ///
