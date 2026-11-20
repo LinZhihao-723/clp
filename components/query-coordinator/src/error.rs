@@ -13,20 +13,20 @@ pub enum Error {
     #[error("invalid Spider endpoint: {0}")]
     InvalidEndpoint(String),
 
-    #[error("invalid query job configuration: {0}")]
-    InvalidQueryJobConfig(String),
+    #[error("invalid job configuration: {0}")]
+    InvalidJobConfig(String),
 
-    #[error("invalid query job status transition from {from:?} to {to:?}")]
-    InvalidQueryJobStatusTransition {
+    #[error("invalid job status transition from {from:?} to {to:?}")]
+    InvalidJobStatusTransition {
         from: QueryJobStatus,
         to: QueryJobStatus,
     },
 
-    #[error("the query job has already been cancelled")]
-    QueryJobCancelled,
+    #[error("the job has already been cancelled")]
+    JobCancelled,
 
-    #[error("metadata corrupted for query job {0}: its row no longer exists")]
-    QueryJobMetadataCorrupted(QueryJobId),
+    #[error("metadata corrupted for job {0}: its row no longer exists")]
+    JobMetadataCorrupted(QueryJobId),
 
     #[error("failed to load the resource group credentials: {0}")]
     ResourceGroupCredentials(#[from] ExternalResourceGroupCredentialsError),
@@ -40,7 +40,7 @@ pub enum Error {
     #[error("sqlx error: {0}")]
     Sqlx(#[from] sqlx::Error),
 
-    #[error("failed to build the query task graph: {0}")]
+    #[error("failed to build the task graph: {0}")]
     TaskGraph(#[from] spider_core::task::Error),
 
     #[error("failed to serialize a task input: {0}")]

@@ -1,7 +1,7 @@
-//! The coordinator poll loop that discovers pending CLP query jobs and dispatches them to Spider.
+//! The coordinator poll loop that discovers pending CLP jobs and dispatches them to Spider.
 //!
-//! The coordinator is responsible for the query jobs in the `query_jobs` table that are in one of
-//! the following states:
+//! The coordinator is responsible for the jobs in the `query_jobs` table that are in one of the
+//! following states:
 //!
 //! | `status`             | `spider_id` | `dispatch_time` | Description                     |
 //! |----------------------|-------------|-----------------|---------------------------------|
@@ -29,7 +29,6 @@ use clp_rust_utils::clp_config::package::config::QueryCoordinator as Coordinator
 use clp_rust_utils::clp_config::package::config::Spider as SpiderConfig;
 use clp_rust_utils::job_config::JobConfig;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
-use clp_rust_utils::job_config::QueryJobConfig;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
 use const_format::formatcp;
@@ -38,6 +37,7 @@ use spider_core::types::id::JobId as SpiderJobId;
 use spider_core::types::id::ResourceGroupId;
 use spider_core::types::resource_group::ExternalResourceGroupCredentials;
 use tokio::select;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -47,16 +47,18 @@ use tonic::transport::Endpoint;
 use crate::Error;
 use crate::cancellation_monitor::CancellationMonitor;
 use crate::job_handle::ArchiveSelectionOptions;
+use crate::job_handle::ExtractJobHandle;
+use crate::job_handle::JobHandle;
+use crate::job_handle::JobHandleContext;
 use crate::job_handle::QueryJobHandle;
-use crate::job_handle::QueryJobHandleContext;
 use crate::job_handle::SpiderOption;
 
-/// Coordinator for fetching new query jobs and submitting them to Spider.
+/// Coordinator for fetching new jobs and submitting them to Spider.
 pub struct Coordinator {
     resource_group_id: ResourceGroupId,
     spider_client: SpiderClient,
     db_pool: sqlx::MySqlPool,
-    job_handle_context: Arc<QueryJobHandleContext>,
+    job_handle_context: Arc<JobHandleContext>,
     is_first_fetch: bool,
     job_polling_interval: Duration,
     cancellation_token: CancellationToken,
@@ -67,7 +69,7 @@ pub struct Coordinator {
 impl Coordinator {
     /// Factory function.
     ///
-    /// On construction, this recovers query jobs that a previous coordinator instance had already
+    /// On construction, this recovers jobs that a previous coordinator instance had already
     /// submitted to Spider (those still non-terminal with a Spider job ID) by spawning a detached
     /// handle to drive each one to completion.
     ///
@@ -125,7 +127,7 @@ impl Coordinator {
                 tracing::error!(error = % e, "Failed to add or verify resource group.");
             })?;
 
-        let job_handle_context = Arc::new(QueryJobHandleContext {
+        let job_handle_context = Arc::new(JobHandleContext {
             db_pool: db_pool.clone(),
             db_config,
             archive_selection_options: ArchiveSelectionOptions {
@@ -174,10 +176,10 @@ impl Coordinator {
 
     /// Runs the coordinator's poll loop until cancelled.
     ///
-    /// On each iteration, this method fetches the pending query jobs, spawns a detached handle to
-    /// drive each one, and then sleeps until the next poll or until the cancellation token is
-    /// triggered. The jobs dispatched in the iteration are marked once the sleep elapses, so their
-    /// update does not contend with concurrent job submissions during the poll interval.
+    /// On each iteration, this method fetches the pending jobs, spawns a detached handle to drive
+    /// each one, and then sleeps until the next poll or until the cancellation token is triggered.
+    /// The jobs dispatched in the iteration are marked once the sleep elapses, so their update does
+    /// not contend with concurrent job submissions during the poll interval.
     ///
     /// # Errors
     ///
@@ -237,8 +239,8 @@ impl Coordinator {
         Ok(())
     }
 
-    /// Spawns a detached handle to drive each query job that a previous coordinator instance had
-    /// already submitted to Spider.
+    /// Spawns a detached handle to drive each job that a previous coordinator instance had already
+    /// submitted to Spider.
     ///
     /// # Errors
     ///
@@ -252,7 +254,7 @@ impl Coordinator {
             id: job_id,
             spider_job_id,
             status,
-            query_job_config,
+            job_config,
             job_creation_timestamp_millisecs,
         } in self.fetch_submitted_jobs().await?
         {
@@ -262,24 +264,36 @@ impl Coordinator {
                 status = ? status,
                 "Recovering a previously submitted job."
             );
-            let job_handle = QueryJobHandle::new(
-                self.job_handle_context.clone(),
-                job_id,
-                self.spider_client.clone(),
-                self.resource_group_id,
-                query_job_config,
-                job_creation_timestamp_millisecs,
-            );
-            tokio::spawn(async move {
-                // `QueryJobHandle::recover` already logs and persists its own failures.
-                let _ = job_handle.recover(spider_job_id).await;
-            });
+            match job_config {
+                JobConfig::Query(query_job_config) => spawn_recovered_job(
+                    QueryJobHandle::new(
+                        self.job_handle_context.clone(),
+                        job_id,
+                        self.spider_client.clone(),
+                        self.resource_group_id,
+                        query_job_config,
+                        job_creation_timestamp_millisecs,
+                    ),
+                    spider_job_id,
+                ),
+                JobConfig::Extract(extract_job_config) => spawn_recovered_job(
+                    ExtractJobHandle::new(
+                        self.job_handle_context.clone(),
+                        job_id,
+                        self.spider_client.clone(),
+                        self.resource_group_id,
+                        extract_job_config,
+                        job_creation_timestamp_millisecs,
+                    ),
+                    spider_job_id,
+                ),
+            }
         }
 
         Ok(())
     }
 
-    /// Marks the query job identified by `job_id` as [`QueryJobStatus::Failed`].
+    /// Marks the job identified by `job_id` as [`QueryJobStatus::Failed`].
     ///
     /// This is a best-effort update; if it fails, the error is logged and otherwise ignored.
     async fn mark_job_failed(&self, job_id: QueryJobId, status_msg: &str) {
@@ -287,7 +301,7 @@ impl Coordinator {
             "UPDATE `{table}` SET `status` = ?, `status_msg` = ? WHERE `id` = ?;",
             table = QUERY_JOBS_TABLE_NAME,
         );
-        tracing::info!(job_id = % job_id, "Failing the query job.");
+        tracing::info!(job_id = % job_id, "Failing the job.");
         if let Err(e) = sqlx::query(QUERY)
             .bind(QueryJobStatus::Failed)
             .bind(status_msg)
@@ -298,21 +312,20 @@ impl Coordinator {
             tracing::error!(
                 error = % e,
                 job_id = % job_id,
-                "Failed to mark the query job as failed."
+                "Failed to mark the job as failed."
             );
         }
     }
 
-    /// Fetches pending query jobs and spawns a detached handle to drive each one as permitted by
-    /// the job-handler semaphore.
+    /// Fetches pending jobs and spawns a detached handle to drive each one as permitted by the
+    /// job-handler semaphore.
     ///
-    /// A job whose config cannot be deserialized, or isn't a [`JobConfig::Query`], is marked
-    /// [`QueryJobStatus::Failed`] and skipped.
+    /// A job whose config cannot be deserialized is marked [`QueryJobStatus::Failed`] and skipped.
     ///
     /// # Returns
     ///
-    /// The IDs of all the query jobs fetched in this poll, including those that were skipped, so
-    /// that a skipped job isn't re-fetched on every subsequent poll.
+    /// The IDs of all the jobs fetched in this poll, including those that were skipped, so that a
+    /// skipped job isn't re-fetched on every subsequent poll.
     ///
     /// # Errors
     ///
@@ -332,14 +345,8 @@ impl Coordinator {
         let dispatched_job_ids: Vec<QueryJobId> = new_job_rows.iter().map(|row| row.id).collect();
         for job_row in new_job_rows {
             let job_id = job_row.id;
-            let query_job_config = match rmp_serde::from_slice(&job_row.serialized_job_config) {
-                Ok(JobConfig::Query(query_job_config)) => query_job_config,
-                Ok(JobConfig::Extract(_)) => {
-                    tracing::error!(job_id = % job_id, "Extract jobs aren't supported. Skipping.");
-                    self.mark_job_failed(job_id, UNSUPPORTED_EXTRACT_JOB_MESSAGE)
-                        .await;
-                    continue;
-                }
+            let job_config = match rmp_serde::from_slice(&job_row.serialized_job_config) {
+                Ok(job_config) => job_config,
                 Err(e) => {
                     tracing::error!(
                         error = % e,
@@ -352,15 +359,6 @@ impl Coordinator {
                 }
             };
             tracing::info!(job_id = % job_id, "Scheduling new job.");
-            let job_handle = QueryJobHandle::new(
-                self.job_handle_context.clone(),
-                job_id,
-                self.spider_client.clone(),
-                self.resource_group_id,
-                query_job_config,
-                job_row.job_creation_timestamp_millisecs,
-            );
-
             let permit = self
                 .job_handler_sem
                 .clone()
@@ -370,16 +368,35 @@ impl Coordinator {
                     Error::Semaphore(format!("failed to acquire a job handler permit: {e}"))
                 })?;
 
-            tokio::spawn(async move {
-                let _permit = permit;
-                // `QueryJobHandle::run` already logs and persists its own failures.
-                let _ = job_handle.run().await;
-            });
+            match job_config {
+                JobConfig::Query(query_job_config) => spawn_job(
+                    permit,
+                    QueryJobHandle::new(
+                        self.job_handle_context.clone(),
+                        job_id,
+                        self.spider_client.clone(),
+                        self.resource_group_id,
+                        query_job_config,
+                        job_row.job_creation_timestamp_millisecs,
+                    ),
+                ),
+                JobConfig::Extract(extract_job_config) => spawn_job(
+                    permit,
+                    ExtractJobHandle::new(
+                        self.job_handle_context.clone(),
+                        job_id,
+                        self.spider_client.clone(),
+                        self.resource_group_id,
+                        extract_job_config,
+                        job_row.job_creation_timestamp_millisecs,
+                    ),
+                ),
+            }
         }
         Ok(dispatched_job_ids)
     }
 
-    /// Marks the query jobs identified by `job_ids` with the current dispatch time.
+    /// Marks the jobs identified by `job_ids` with the current dispatch time.
     ///
     /// # Errors
     ///
@@ -412,7 +429,7 @@ impl Coordinator {
         Ok(())
     }
 
-    /// Fetches pending query jobs eligible for dispatch.
+    /// Fetches pending jobs eligible for dispatch.
     ///
     /// The first fetch after startup returns every [`QueryJobStatus::Pending`] job whose
     /// `dispatch_time` is set, so that jobs dispatched but not started by the previous coordinator
@@ -430,7 +447,7 @@ impl Coordinator {
     /// # Returns
     ///
     /// A vector of rows projected from the query job table on success, each row represents a
-    /// pending query job.
+    /// pending job.
     ///
     /// # Errors
     ///
@@ -473,12 +490,12 @@ impl Coordinator {
     /// in [`QueryJobStatus::Running`], [`QueryJobStatus::CancelRequested`], or
     /// [`QueryJobStatus::Cancelling`].
     ///
-    /// A submitted job whose config cannot be deserialized, or isn't a [`JobConfig::Query`], is
-    /// marked [`QueryJobStatus::Failed`] and skipped.
+    /// A submitted job whose config cannot be deserialized is marked [`QueryJobStatus::Failed`] and
+    /// skipped.
     ///
     /// # Returns
     ///
-    /// A vector of [`SubmittedJob`]s on success, each represents a submitted query job to recover.
+    /// A vector of [`SubmittedJob`]s on success, each represents a submitted job to recover.
     ///
     /// # Errors
     ///
@@ -502,17 +519,8 @@ impl Coordinator {
             .fetch_all(&self.db_pool)
             .await?
         {
-            let query_job_config = match rmp_serde::from_slice(&row.serialized_job_config) {
-                Ok(JobConfig::Query(query_job_config)) => query_job_config,
-                Ok(JobConfig::Extract(_)) => {
-                    tracing::error!(
-                        job_id = % row.id,
-                        "Extract jobs aren't supported. Skipping the submitted job."
-                    );
-                    self.mark_job_failed(row.id, UNSUPPORTED_EXTRACT_JOB_MESSAGE)
-                        .await;
-                    continue;
-                }
+            let job_config = match rmp_serde::from_slice(&row.serialized_job_config) {
+                Ok(job_config) => job_config,
                 Err(e) => {
                     tracing::error!(
                         error = % e,
@@ -529,7 +537,7 @@ impl Coordinator {
                 id: row.id,
                 spider_job_id: row.spider_job_id,
                 status: row.status,
-                query_job_config,
+                job_config,
                 job_creation_timestamp_millisecs: row.job_creation_timestamp_millisecs,
             });
         }
@@ -541,19 +549,16 @@ impl Coordinator {
 const MILLISECS_PER_MINUTE: NonZeroU64 =
     NonZeroU64::new(60_000).expect("constant should not be zero");
 
-const UNSUPPORTED_EXTRACT_JOB_MESSAGE: &str =
-    "Extract jobs aren't supported by the query coordinator yet.";
-
-/// A query job that was submitted to Spider by a previous coordinator instance.
+/// A job that was submitted to Spider by a previous coordinator instance.
 struct SubmittedJob {
     id: QueryJobId,
     spider_job_id: SpiderJobId,
     status: QueryJobStatus,
-    query_job_config: QueryJobConfig,
+    job_config: JobConfig,
     job_creation_timestamp_millisecs: i64,
 }
 
-/// A projection of the columns read from a [`QueryJobStatus::Pending`] query job row.
+/// A projection of the columns read from a [`QueryJobStatus::Pending`] job row.
 #[derive(Debug, sqlx::FromRow)]
 struct PendingJobRowProjection {
     id: QueryJobId,
@@ -562,7 +567,7 @@ struct PendingJobRowProjection {
     job_creation_timestamp_millisecs: i64,
 }
 
-/// A projection of the columns read from a query job row that was submitted to Spider.
+/// A projection of the columns read from a job row that was submitted to Spider.
 #[derive(Debug, sqlx::FromRow)]
 struct SubmittedJobRowProjection {
     id: QueryJobId,
@@ -572,4 +577,31 @@ struct SubmittedJobRowProjection {
     #[sqlx(rename = "job_config")]
     serialized_job_config: Vec<u8>,
     job_creation_timestamp_millisecs: i64,
+}
+
+/// Spawns a detached task that drives the dispatched pending job of `handle` to completion while
+/// holding `permit`.
+///
+/// # Type Parameters
+///
+/// * `HandleType` - The type of the handle of the job to drive.
+fn spawn_job<HandleType: JobHandle>(permit: OwnedSemaphorePermit, handle: HandleType) {
+    tokio::spawn(async move {
+        let _permit = permit;
+        // `JobHandle::run` already logs and persists its own failures.
+        let _ = handle.run().await;
+    });
+}
+
+/// Spawns a detached task that resumes the job of `handle`, whose Spider job identified by
+/// `spider_job_id` was submitted by a previous coordinator instance.
+///
+/// # Type Parameters
+///
+/// * `HandleType` - The type of the handle of the job to resume.
+fn spawn_recovered_job<HandleType: JobHandle>(handle: HandleType, spider_job_id: SpiderJobId) {
+    tokio::spawn(async move {
+        // `JobHandle::recover` already logs and persists its own failures.
+        let _ = handle.recover(spider_job_id).await;
+    });
 }

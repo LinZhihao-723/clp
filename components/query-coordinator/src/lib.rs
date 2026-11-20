@@ -1,9 +1,9 @@
-//! Coordination for CLP query jobs.
+//! Coordination for CLP query and stream extraction jobs.
 
 pub mod cancellation_monitor;
 pub mod coordination;
 mod error;
 pub mod job_handle;
-pub mod query_job_submitter;
+pub mod spider_job_submitter;
 
 pub use error::Error;
