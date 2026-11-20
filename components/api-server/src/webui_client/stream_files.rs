@@ -155,11 +155,7 @@ impl WebuiClient {
     ///   before it finishes.
     /// * [`ClientError::ExtractionJobFailed`] if the job fails, is killed, or is cancelled.
     /// * Forwards [`query_job::submit`]'s return values on failure.
-    /// * Forwards [`QueryJobPollingBackoff::wait_for_query_job`]'s return values on failure.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self.config.api_server` is `None`.
+    /// * Forwards [`QueryJobPollingBackoff::wait_for_job`]'s return values on failure.
     async fn submit_and_wait_for_extraction_job(
         &self,
         job_config: ExtractJobConfig,
@@ -167,7 +163,7 @@ impl WebuiClient {
         let job_id = query_job::submit(&self.sql_pool, &JobConfig::Extract(job_config)).await?;
 
         QueryJobPollingBackoff::new(&self.get_api_server_config().query_job_polling)
-            .wait_for_query_job(&self.sql_pool, job_id, decide_extraction_wait)
+            .wait_for_job(&self.sql_pool, job_id, decide_extraction_wait)
             .await?
             .ok_or(ClientError::ExtractionJobNotFound(job_id))?
             .map_err(|status| ClientError::ExtractionJobFailed { job_id, status })

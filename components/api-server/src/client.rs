@@ -575,13 +575,13 @@ impl Client {
     /// Returns an error if:
     ///
     /// * [`ClientError::QueryJobNotFound`] if the job doesn't exist.
-    /// * Forwards [`QueryJobPollingBackoff::wait_for_query_job`]'s return values on failure.
+    /// * Forwards [`QueryJobPollingBackoff::wait_for_job`]'s return values on failure.
     async fn wait_for_query_job_termination(
         &self,
         query_job_id: u64,
     ) -> Result<QueryJobStatus, ClientError> {
         QueryJobPollingBackoff::new(&self.get_api_server_config().query_job_polling)
-            .wait_for_query_job(&self.sql_pool, query_job_id, |status| {
+            .wait_for_job(&self.sql_pool, query_job_id, |status| {
                 if status.is_terminal() {
                     ControlFlow::Break(status)
                 } else {
@@ -600,10 +600,10 @@ impl Client {
     ///
     /// * [`ClientError::QueryJobNotFound`] if the job doesn't exist.
     /// * [`ClientError::QueryNotSucceeded`] if the query fails or cancellation has begun.
-    /// * Forwards [`QueryJobPollingBackoff::wait_for_query_job`]'s return values on failure.
+    /// * Forwards [`QueryJobPollingBackoff::wait_for_job`]'s return values on failure.
     async fn wait_for_query_success(&self, query_job_id: u64) -> Result<(), ClientError> {
         QueryJobPollingBackoff::new(&self.get_api_server_config().query_job_polling)
-            .wait_for_query_job(&self.sql_pool, query_job_id, decide_query_success_wait)
+            .wait_for_job(&self.sql_pool, query_job_id, decide_query_success_wait)
             .await?
             .ok_or(ClientError::QueryJobNotFound(query_job_id))?
             .map_err(|_| ClientError::QueryNotSucceeded)
@@ -1018,8 +1018,8 @@ impl QueryJobPollingBackoff {
         }
     }
 
-    /// Reads the status of the query job with ID `query_job_id` until `decide` stops the wait,
-    /// sleeping for the backoff's next delay between the reads.
+    /// Reads the status of the job with ID `job_id` until `decide` stops the wait, sleeping for the
+    /// backoff's next delay between the reads.
     ///
     /// # Type Parameters
     ///
@@ -1034,14 +1034,14 @@ impl QueryJobPollingBackoff {
     /// Returns an error if:
     ///
     /// * Forwards [`query_job::get_status`]'s return values on failure.
-    pub(crate) async fn wait_for_query_job<OutputType>(
+    pub(crate) async fn wait_for_job<OutputType>(
         mut self,
         sql_pool: &sqlx::MySqlPool,
-        query_job_id: u64,
+        job_id: u64,
         decide: fn(QueryJobStatus) -> ControlFlow<OutputType>,
     ) -> Result<Option<OutputType>, ClientError> {
         loop {
-            let Some(status) = query_job::get_status(sql_pool, query_job_id).await? else {
+            let Some(status) = query_job::get_status(sql_pool, job_id).await? else {
                 return Ok(None);
             };
             if let ControlFlow::Break(output) = decide(status) {
