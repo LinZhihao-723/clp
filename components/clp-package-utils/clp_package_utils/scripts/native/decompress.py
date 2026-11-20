@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import sys
 import uuid
-from contextlib import closing
+from typing import Any
 
 from clp_py_utils.clp_config import (
     CLP_DB_PASS_ENV_VAR_NAME,
@@ -18,18 +18,11 @@ from clp_py_utils.clp_config import (
     ClpDbUserType,
     Database,
 )
-from clp_py_utils.clp_metadata_db_utils import get_files_table_name
 from clp_py_utils.sql_adapter import SqlAdapter
-from job_orchestration.scheduler.constants import QueryJobStatus, QueryJobType
-from job_orchestration.scheduler.job_config import (
-    ExtractIrJobConfig,
-    ExtractJsonJobConfig,
-    QueryJobConfig,
-)
+from job_orchestration.scheduler.constants import QueryJobStatus
 
 from clp_package_utils.general import (
     EXTRACT_FILE_CMD,
-    EXTRACT_IR_CMD,
     EXTRACT_JSON_CMD,
     get_clp_home,
     load_config_file,
@@ -44,56 +37,18 @@ from clp_package_utils.scripts.native.utils import (
 logger = logging.getLogger(__file__)
 
 
-def get_orig_file_id(db_config: Database, path: str) -> str | None:
-    """
-    :param db_config:
-    :param path: Path of the original file.
-    :return: The ID of an original file which has the given path, or None if no such file exists.
-    NOTE: Multiple original files may have the same path in which case this method returns the ID of
-    only one of them.
-    """
-    sql_adapter = SqlAdapter(db_config)
-    clp_db_connection_params = db_config.get_clp_connection_params_and_type(True)
-    table_prefix = clp_db_connection_params["table_prefix"]
-    with (
-        closing(sql_adapter.create_connection(True)) as db_conn,
-        closing(db_conn.cursor(dictionary=True)) as db_cursor,
-    ):
-        files_table_name = get_files_table_name(table_prefix, None)
-        db_cursor.execute(
-            f"SELECT orig_file_id FROM `{files_table_name}` WHERE path = (%s)",
-            (path,),
-        )
-        results = db_cursor.fetchall()
-        db_conn.commit()
-
-        if len(results) == 0:
-            logger.error("No file found for the given path.")
-            return None
-
-        if len(results) > 1:
-            logger.warning(
-                "Multiple files found for the given path."
-                " Returning the orig_file_id of one of them."
-            )
-
-        return results[0]["orig_file_id"]
-
-
 def submit_and_monitor_extraction_job_in_db(
     db_config: Database,
-    job_type: QueryJobType,
-    job_config: QueryJobConfig,
+    job_config: dict[str, Any],
 ) -> int:
     """
     Submits a stream extraction job to the scheduler and waits until it finishes.
     :param db_config:
-    :param job_type:
-    :param job_config:
+    :param job_config: The config of the extract job.
     :return: 0 on success, -1 otherwise.
     """
     sql_adapter = SqlAdapter(db_config)
-    job_id = submit_query_job(sql_adapter, job_config, job_type)
+    job_id = submit_query_job(sql_adapter, "extract", job_config)
     job_status = wait_for_query_job(sql_adapter, job_id)
 
     if QueryJobStatus.SUCCEEDED == job_status:
@@ -124,50 +79,34 @@ def handle_extract_stream_cmd(
         return -1
 
     command = parsed_args.command
-
-    job_config: QueryJobConfig
-    job_type: QueryJobType
-    if EXTRACT_IR_CMD == command:
-        job_type = QueryJobType.EXTRACT_IR
-        orig_file_id: str
-        if parsed_args.orig_file_id:
-            orig_file_id = parsed_args.orig_file_id
-        else:
-            orig_file_path = parsed_args.orig_file_path
-            orig_file_id = get_orig_file_id(clp_config.database, orig_file_path)
-            if orig_file_id is None:
-                logger.error(f"Cannot find orig_file_id corresponding to '{orig_file_path}'.")
-                return -1
-        job_config = ExtractIrJobConfig(
-            orig_file_id=orig_file_id,
-            msg_ix=parsed_args.msg_ix,
-            target_uncompressed_size=parsed_args.target_uncompressed_size,
-        )
-    elif EXTRACT_JSON_CMD == command:
-        dataset = parsed_args.dataset
-        dataset = CLP_DEFAULT_DATASET_NAME if dataset is None else dataset
-        try:
-            validate_datasets_exist(clp_config.database, [dataset])
-        except Exception as e:
-            logger.error(e)
-            return -1
-
-        job_type = QueryJobType.EXTRACT_JSON
-        job_config = ExtractJsonJobConfig(
-            dataset=dataset,
-            archive_id=parsed_args.archive_id,
-            target_chunk_size=parsed_args.target_chunk_size,
-        )
-    else:
+    if EXTRACT_JSON_CMD != command:
         logger.error(f"Unsupported stream extraction command: {command}")
         return -1
+
+    target_chunk_size = parsed_args.target_chunk_size
+    if target_chunk_size is not None and target_chunk_size <= 0:
+        logger.error(f"--target-chunk-size must be positive, got {target_chunk_size}.")
+        return -1
+
+    dataset = parsed_args.dataset
+    dataset = CLP_DEFAULT_DATASET_NAME if dataset is None else dataset
+    try:
+        validate_datasets_exist(clp_config.database, [dataset])
+    except Exception as e:
+        logger.error(e)
+        return -1
+
+    job_config = {
+        "dataset": dataset,
+        "archive_id": parsed_args.archive_id,
+        "target_chunk_size": target_chunk_size,
+    }
 
     try:
         return asyncio.run(
             run_function_in_process(
                 submit_and_monitor_extraction_job_in_db,
                 clp_config.database,
-                job_type,
                 job_config,
             )
         )
@@ -311,17 +250,6 @@ def main(argv):
         "-d", "--extraction-dir", metavar="DIR", default=".", help="Extract files into DIR."
     )
 
-    # IR extraction command parser
-    ir_extraction_parser = command_args_parser.add_parser(EXTRACT_IR_CMD)
-    ir_extraction_parser.add_argument("msg_ix", type=int, help="Message index.")
-    ir_extraction_parser.add_argument(
-        "--target-uncompressed-size", type=int, help="Target uncompressed IR size."
-    )
-
-    group = ir_extraction_parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--orig-file-id", type=str, help="Original file's ID.")
-    group.add_argument("--orig-file-path", type=str, help="Original file's path.")
-
     # JSON extraction command parser
     json_extraction_parser = command_args_parser.add_parser(EXTRACT_JSON_CMD)
     json_extraction_parser.add_argument("archive_id", type=str, help="Archive ID")
@@ -344,7 +272,7 @@ def main(argv):
     command = parsed_args.command
     if EXTRACT_FILE_CMD == command:
         return handle_extract_file_cmd(parsed_args, clp_home, default_config_file_path)
-    if command in (EXTRACT_IR_CMD, EXTRACT_JSON_CMD):
+    if EXTRACT_JSON_CMD == command:
         return handle_extract_stream_cmd(parsed_args, clp_home, default_config_file_path)
     logger.exception(f"Unexpected command: {command}")
     return -1

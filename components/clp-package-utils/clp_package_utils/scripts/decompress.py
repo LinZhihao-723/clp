@@ -22,7 +22,6 @@ from clp_package_utils.general import (
     DockerMountType,
     dump_container_config,
     EXTRACT_FILE_CMD,
-    EXTRACT_IR_CMD,
     EXTRACT_JSON_CMD,
     generate_container_config,
     generate_container_name,
@@ -199,9 +198,6 @@ def handle_extract_stream_cmd(
         return -1
 
     job_command = parsed_args.command
-    if EXTRACT_IR_CMD == job_command and StorageEngine.CLP != storage_engine:
-        logger.error(f"IR extraction is not supported for storage engine `{storage_engine}`.")
-        return -1
     if EXTRACT_JSON_CMD == job_command and StorageEngine.CLP_S != storage_engine:
         logger.error(f"JSON extraction is not supported for storage engine `{storage_engine}`.")
         return -1
@@ -232,18 +228,7 @@ def handle_extract_stream_cmd(
     if parsed_args.verbose:
         extract_cmd.append("--verbose")
 
-    if EXTRACT_IR_CMD == job_command:
-        extract_cmd.append(str(parsed_args.msg_ix))
-        if parsed_args.orig_file_id:
-            extract_cmd.append("--orig-file-id")
-            extract_cmd.append(str(parsed_args.orig_file_id))
-        else:
-            extract_cmd.append("--orig-file-path")
-            extract_cmd.append(str(parsed_args.orig_file_path))
-        if parsed_args.target_uncompressed_size:
-            extract_cmd.append("--target-uncompressed-size")
-            extract_cmd.append(str(parsed_args.target_uncompressed_size))
-    elif EXTRACT_JSON_CMD == job_command:
+    if EXTRACT_JSON_CMD == job_command:
         dataset = parsed_args.dataset
         dataset = CLP_DEFAULT_DATASET_NAME if dataset is None else dataset
         try:
@@ -257,7 +242,7 @@ def handle_extract_stream_cmd(
         if dataset is not None:
             extract_cmd.append("--dataset")
             extract_cmd.append(dataset)
-        if parsed_args.target_chunk_size:
+        if parsed_args.target_chunk_size is not None:
             extract_cmd.append("--target-chunk-size")
             extract_cmd.append(str(parsed_args.target_chunk_size))
     else:
@@ -316,17 +301,6 @@ def main(argv):
         help="Extract files into DIR.",
     )
 
-    # IR extraction command parser
-    ir_extraction_parser = command_args_parser.add_parser(EXTRACT_IR_CMD)
-    ir_extraction_parser.add_argument("msg_ix", type=int, help="Message index.")
-    ir_extraction_parser.add_argument(
-        "--target-uncompressed-size", type=int, help="Target uncompressed IR size."
-    )
-
-    group = ir_extraction_parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--orig-file-id", type=str, help="Original file's ID.")
-    group.add_argument("--orig-file-path", type=str, help="Original file's path.")
-
     # JSON extraction command parser
     json_extraction_parser = command_args_parser.add_parser(EXTRACT_JSON_CMD)
     json_extraction_parser.add_argument("archive_id", type=str, help="Archive ID")
@@ -351,7 +325,7 @@ def main(argv):
     command = parsed_args.command
     if EXTRACT_FILE_CMD == command:
         return handle_extract_file_cmd(parsed_args, clp_home, default_config_file_path)
-    if command in (EXTRACT_IR_CMD, EXTRACT_JSON_CMD):
+    if EXTRACT_JSON_CMD == command:
         return handle_extract_stream_cmd(parsed_args, clp_home, default_config_file_path)
     logger.exception(f"Unexpected command: {command}")
     return -1

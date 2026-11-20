@@ -200,7 +200,7 @@ async fn query(
 ) -> Result<Json<QueryResultsUri>, HandlerError> {
     tracing::info!("Submitting query: {:?}", query_config);
     let query_job_config = QueryJobConfig::from(query_config);
-    let query_job_id = match client.submit_query(&query_job_config).await {
+    let query_job_id = match client.submit_query(query_job_config).await {
         Ok(id) => {
             tracing::info!("Submitted query job ID: {}", id);
             id

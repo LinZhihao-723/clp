@@ -5,7 +5,6 @@ use std::time::Duration;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
-use clp_rust_utils::job_config::QueryJobType;
 use const_format::formatcp;
 use spider_client::error::ClientError;
 use spider_core::types::id::JobId as SpiderJobId;
@@ -84,12 +83,11 @@ impl<SubmitterType: QueryJobSubmitter> CancellationMonitor<SubmitterType> {
     /// * Forwards [`sqlx::query::QueryScalar::fetch_all`]'s return values on failure.
     pub async fn sweep_unsubmitted_jobs(&self) -> Result<(), Error> {
         const QUERY: &str = formatcp!(
-            "SELECT `id` FROM `{QUERY_JOBS_TABLE_NAME}` WHERE `type` = ? AND `status` = ? AND \
-             `spider_id` IS NULL ORDER BY `id` ASC"
+            "SELECT `id` FROM `{QUERY_JOBS_TABLE_NAME}` WHERE `status` = ? AND `spider_id` IS \
+             NULL ORDER BY `id` ASC"
         );
 
         let query_job_ids = sqlx::query_scalar::<_, QueryJobId>(QUERY)
-            .bind(QueryJobType::SearchOrAggregation)
             .bind(QueryJobStatus::CancelRequested)
             .fetch_all(&self.db_pool)
             .await?;
@@ -147,12 +145,11 @@ impl<SubmitterType: QueryJobSubmitter> CancellationMonitor<SubmitterType> {
         &self,
     ) -> Result<Option<CancelRequestedJobRowProjection>, Error> {
         const QUERY: &str = formatcp!(
-            "SELECT `id`, `spider_id` FROM `{QUERY_JOBS_TABLE_NAME}` WHERE `type` = ? AND \
-             `status` = ? ORDER BY `id` ASC LIMIT 1"
+            "SELECT `id`, `spider_id` FROM `{QUERY_JOBS_TABLE_NAME}` WHERE `status` = ? ORDER BY \
+             `id` ASC LIMIT 1"
         );
 
         Ok(sqlx::query_as::<_, CancelRequestedJobRowProjection>(QUERY)
-            .bind(QueryJobType::SearchOrAggregation)
             .bind(QueryJobStatus::CancelRequested)
             .fetch_optional(&self.db_pool)
             .await?)

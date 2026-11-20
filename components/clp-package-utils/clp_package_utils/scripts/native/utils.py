@@ -2,6 +2,7 @@ import asyncio
 import multiprocessing
 import time
 from contextlib import closing
+from typing import Any
 
 import msgpack
 from clp_py_utils.clp_config import (
@@ -10,8 +11,7 @@ from clp_py_utils.clp_config import (
 )
 from clp_py_utils.clp_metadata_db_utils import fetch_existing_datasets
 from clp_py_utils.sql_adapter import SqlAdapter
-from job_orchestration.scheduler.constants import QueryJobStatus, QueryJobType
-from job_orchestration.scheduler.scheduler_data import QueryJobConfig
+from job_orchestration.scheduler.constants import QueryJobStatus
 
 
 async def run_function_in_process(function, *args, initializer=None, init_args=None):
@@ -49,14 +49,12 @@ async def run_function_in_process(function, *args, initializer=None, init_args=N
         pool.close()
 
 
-def submit_query_job(
-    sql_adapter: SqlAdapter, job_config: QueryJobConfig, job_type: QueryJobType
-) -> int:
+def submit_query_job(sql_adapter: SqlAdapter, job_type: str, job_config: dict[str, Any]) -> int:
     """
-    Submits a query job.
+    Submits a job to the query jobs table.
     :param sql_adapter:
-    :param job_config:
-    :param job_type:
+    :param job_type: The kind of the job, which tags its config.
+    :param job_config: The config of the job's kind.
     :return: The job's ID.
     """
     with (
@@ -65,8 +63,8 @@ def submit_query_job(
     ):
         # Create job
         db_cursor.execute(
-            f"INSERT INTO `{QUERY_JOBS_TABLE_NAME}` (`job_config`, `type`) VALUES (%s, %s)",
-            (msgpack.packb(job_config.model_dump()), job_type),
+            f"INSERT INTO `{QUERY_JOBS_TABLE_NAME}` (`job_config`) VALUES (%s)",
+            (msgpack.packb({"type": job_type, "config": job_config}),),
         )
         db_conn.commit()
         return db_cursor.lastrowid

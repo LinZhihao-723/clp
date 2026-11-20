@@ -11,7 +11,6 @@ from pymongo import AsyncMongoClient
 from clp_mcp_server.constants import (
     POLLING_INTERVAL_SECONDS,
     QueryJobStatus,
-    QueryJobType,
     SEARCH_MAX_NUM_RESULTS,
 )
 from clp_mcp_server.settings import CLP_DB_PASS, CLP_DB_USER
@@ -59,20 +58,27 @@ class ClpConnector:
 
         job_config = msgpack.packb(
             {
-                "begin_timestamp": begin_ts,
-                "datasets": [CLP_DEFAULT_DATASET_NAME],
-                "end_timestamp": end_ts,
-                "ignore_case": True,
-                "max_num_results": SEARCH_MAX_NUM_RESULTS,
-                "query_string": query,
+                "type": "query",
+                "config": {
+                    "query": {
+                        "datasets": [CLP_DEFAULT_DATASET_NAME],
+                        "query_string": query,
+                        "time_range": {
+                            "begin_timestamp_millisecs": begin_ts,
+                            "end_timestamp_millisecs": end_ts,
+                        },
+                        "ignore_case": True,
+                    },
+                    "output": {
+                        "type": "results_cache",
+                        "max_num_results": SEARCH_MAX_NUM_RESULTS,
+                    },
+                },
             }
         )
 
         async with aiomysql.connect(**self._db_conf) as conn, conn.cursor() as cur:
-            await cur.execute(
-                "INSERT INTO query_jobs (type, job_config) VALUES (%s, %s);",
-                (int(QueryJobType.SEARCH_OR_AGGREGATION), job_config),
-            )
+            await cur.execute("INSERT INTO query_jobs (job_config) VALUES (%s);", (job_config,))
             await conn.commit()
             await cur.execute("SELECT LAST_INSERT_ID();")
             result = await cur.fetchone()

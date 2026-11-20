@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from clp_mcp_server.constants import QueryJobType
+from clp_mcp_server.constants import QueryJobStatus
 from clp_package_utils.general import JobType
 from clp_py_utils.clp_config import StorageEngine
 from clp_py_utils.core import FileMetadata
@@ -19,7 +19,7 @@ def test_clp_native_py_project_enum_classes() -> None:
     - clp-py-utils
     - job-orchestration
     """
-    assert QueryJobType.SEARCH_OR_AGGREGATION == QueryJobType(0)
+    assert QueryJobStatus.PENDING == QueryJobStatus(0)
     assert JobType.COMPRESSION == JobType("compression")
     assert StorageEngine.CLP_S == StorageEngine("clp-s")
     assert CompressionJobStatus.PENDING == CompressionJobStatus(0)

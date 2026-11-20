@@ -1,5 +1,6 @@
 //! Extraction of stream files for the `WebUI`'s log viewer.
 
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use aws_sdk_s3::presigning::PresigningConfig;
@@ -7,11 +8,11 @@ use clp_rust_utils::aws::AWS_DEFAULT_REGION;
 use clp_rust_utils::clp_config::package::config::ApiServer;
 use clp_rust_utils::clp_config::package::config::StorageEngine;
 use clp_rust_utils::clp_config::package::config::StreamOutputStorage;
+use clp_rust_utils::database::mysql::query_job;
 use clp_rust_utils::dataset::DatasetName;
-use clp_rust_utils::job_config::ExtractJsonJobConfig;
-use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
+use clp_rust_utils::job_config::ExtractJobConfig;
+use clp_rust_utils::job_config::JobConfig;
 use clp_rust_utils::job_config::QueryJobStatus;
-use clp_rust_utils::job_config::QueryJobType;
 use clp_rust_utils::types::ArchiveId;
 use mongodb::bson::doc;
 use non_empty_string::NonEmptyString;
@@ -19,6 +20,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::client::QueryJobPollingBackoff;
 use crate::error::ClientError;
 use crate::webui_client::WebuiClient;
 
@@ -115,14 +117,14 @@ impl WebuiClient {
                 .get_api_server_config()
                 .stream_file_extraction_timeout_secs
                 .get();
-            let job_config = ExtractJsonJobConfig {
+            let job_config = ExtractJobConfig {
                 dataset: extraction.dataset,
                 archive_id: extraction.archive_id,
-                target_chunk_size: Some(self.config.stream_output.target_uncompressed_size.get()),
+                target_chunk_size: Some(self.config.stream_output.target_uncompressed_size),
             };
             tokio::time::timeout(
                 Duration::from_secs(timeout_secs),
-                self.submit_and_wait_for_extraction_job(&job_config),
+                self.submit_and_wait_for_extraction_job(job_config),
             )
             .await
             .map_err(|_| ClientError::StreamExtractionTimeout(timeout_secs))??;
@@ -152,51 +154,23 @@ impl WebuiClient {
     /// * [`ClientError::ExtractionJobNotFound`] if the job disappears from the query jobs table
     ///   before it finishes.
     /// * [`ClientError::ExtractionJobFailed`] if the job fails, is killed, or is cancelled.
-    /// * Forwards [`rmp_serde::to_vec_named`]'s return values on failure.
-    /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
-    /// * Forwards [`sqlx::query::QueryScalar::fetch_optional`]'s return values on failure.
+    /// * Forwards [`query_job::submit`]'s return values on failure.
+    /// * Forwards [`QueryJobPollingBackoff::wait_for_query_job`]'s return values on failure.
     ///
     /// # Panics
     ///
     /// Panics if `self.config.api_server` is `None`.
     async fn submit_and_wait_for_extraction_job(
         &self,
-        job_config: &ExtractJsonJobConfig,
+        job_config: ExtractJobConfig,
     ) -> Result<(), ClientError> {
-        let job_id = sqlx::query(&format!(
-            "INSERT INTO `{QUERY_JOBS_TABLE_NAME}` (`job_config`, `type`) VALUES (?, ?)"
-        ))
-        .bind(rmp_serde::to_vec_named(job_config)?)
-        .bind(QueryJobType::ExtractJson)
-        .execute(&self.sql_pool)
-        .await?
-        .last_insert_id();
+        let job_id = query_job::submit(&self.sql_pool, &JobConfig::Extract(job_config)).await?;
 
-        let polling = &self.get_api_server_config().query_job_polling;
-        let mut delay_ms = polling.initial_backoff_ms.max(1);
-        let max_delay_ms = polling.max_backoff_ms.max(delay_ms);
-        loop {
-            let status = sqlx::query_scalar::<_, QueryJobStatus>(&format!(
-                "SELECT `status` FROM `{QUERY_JOBS_TABLE_NAME}` WHERE `id` = ?"
-            ))
-            .bind(job_id)
-            .fetch_optional(&self.sql_pool)
+        QueryJobPollingBackoff::new(&self.get_api_server_config().query_job_polling)
+            .wait_for_query_job(&self.sql_pool, job_id, decide_extraction_wait)
             .await?
-            .ok_or(ClientError::ExtractionJobNotFound(job_id))?;
-            match status {
-                QueryJobStatus::Succeeded => return Ok(()),
-                QueryJobStatus::Pending
-                | QueryJobStatus::Running
-                | QueryJobStatus::CancelRequested
-                | QueryJobStatus::Cancelling => {
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    delay_ms = std::cmp::min(delay_ms.saturating_mul(2), max_delay_ms);
-                }
-                QueryJobStatus::Failed | QueryJobStatus::Killed | QueryJobStatus::Cancelled => {
-                    return Err(ClientError::ExtractionJobFailed { job_id, status });
-                }
-            }
-        }
+            .ok_or(ClientError::ExtractionJobNotFound(job_id))?
+            .map_err(|status| ClientError::ExtractionJobFailed { job_id, status })
     }
 
     /// # Returns
@@ -296,8 +270,30 @@ impl StreamFileStorage {
     }
 }
 
+/// Decides whether a wait for an extraction job to finish stops at `status`.
+///
+/// # Returns
+///
+/// * [`ControlFlow::Break`] with `Ok(())` if the job succeeded.
+/// * [`ControlFlow::Break`] with `Err(status)` if the job failed, was killed, or was cancelled.
+/// * [`ControlFlow::Continue`] if the job is pending, running, or being cancelled.
+const fn decide_extraction_wait(status: QueryJobStatus) -> ControlFlow<Result<(), QueryJobStatus>> {
+    match status {
+        QueryJobStatus::Succeeded => ControlFlow::Break(Ok(())),
+        QueryJobStatus::Failed | QueryJobStatus::Killed | QueryJobStatus::Cancelled => {
+            ControlFlow::Break(Err(status))
+        }
+        QueryJobStatus::Pending
+        | QueryJobStatus::Running
+        | QueryJobStatus::CancelRequested
+        | QueryJobStatus::Cancelling => ControlFlow::Continue(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+
     use clp_rust_utils::aws::AWS_DEFAULT_REGION;
     use clp_rust_utils::clp_config::AwsAuthentication;
     use clp_rust_utils::clp_config::AwsCredentials;
@@ -308,12 +304,43 @@ mod tests {
     use clp_rust_utils::clp_config::package::config::StreamOutput;
     use clp_rust_utils::clp_config::package::config::StreamOutputStorage;
     use clp_rust_utils::dataset::DatasetName;
+    use clp_rust_utils::job_config::QueryJobStatus;
     use clp_rust_utils::types::non_empty_string::ExpectedNonEmpty;
     use non_empty_string::NonEmptyString;
 
     use super::StreamFileExtraction;
     use super::StreamFileStorage;
+    use super::decide_extraction_wait;
     use crate::webui_client::WebuiClient;
+
+    #[test]
+    fn extraction_wait_stops_at_success_and_termination_but_not_cancellation() {
+        for (status, expected) in [
+            (QueryJobStatus::Pending, ControlFlow::Continue(())),
+            (QueryJobStatus::Running, ControlFlow::Continue(())),
+            (QueryJobStatus::CancelRequested, ControlFlow::Continue(())),
+            (QueryJobStatus::Cancelling, ControlFlow::Continue(())),
+            (QueryJobStatus::Succeeded, ControlFlow::Break(Ok(()))),
+            (
+                QueryJobStatus::Failed,
+                ControlFlow::Break(Err(QueryJobStatus::Failed)),
+            ),
+            (
+                QueryJobStatus::Cancelled,
+                ControlFlow::Break(Err(QueryJobStatus::Cancelled)),
+            ),
+            (
+                QueryJobStatus::Killed,
+                ControlFlow::Break(Err(QueryJobStatus::Killed)),
+            ),
+        ] {
+            assert_eq!(
+                decide_extraction_wait(status),
+                expected,
+                "status: {status:?}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn extraction_is_rejected_under_the_clp_storage_engine() -> anyhow::Result<()> {

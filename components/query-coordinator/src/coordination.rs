@@ -27,11 +27,11 @@ use clp_rust_utils::clp_config::package::config::ArchiveOutput as ArchiveOutputC
 use clp_rust_utils::clp_config::package::config::Database as DatabaseConfig;
 use clp_rust_utils::clp_config::package::config::QueryCoordinator as CoordinatorConfig;
 use clp_rust_utils::clp_config::package::config::Spider as SpiderConfig;
+use clp_rust_utils::job_config::JobConfig;
 use clp_rust_utils::job_config::QUERY_JOBS_TABLE_NAME;
 use clp_rust_utils::job_config::QueryJobConfig;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryJobStatus;
-use clp_rust_utils::job_config::QueryJobType;
 use const_format::formatcp;
 use spider_client::SpiderClient;
 use spider_core::types::id::JobId as SpiderJobId;
@@ -306,7 +306,8 @@ impl Coordinator {
     /// Fetches pending query jobs and spawns a detached handle to drive each one as permitted by
     /// the job-handler semaphore.
     ///
-    /// A job whose config cannot be deserialized is marked [`QueryJobStatus::Failed`] and skipped.
+    /// A job whose config cannot be deserialized, or isn't a [`JobConfig::Query`], is marked
+    /// [`QueryJobStatus::Failed`] and skipped.
     ///
     /// # Returns
     ///
@@ -331,23 +332,25 @@ impl Coordinator {
         let dispatched_job_ids: Vec<QueryJobId> = new_job_rows.iter().map(|row| row.id).collect();
         for job_row in new_job_rows {
             let job_id = job_row.id;
-            let query_job_config: QueryJobConfig =
-                match rmp_serde::from_slice(&job_row.serialized_query_job_config) {
-                    Ok(query_job_config) => query_job_config,
-                    Err(e) => {
-                        tracing::error!(
-                            error = % e,
-                            job_id = % job_id,
-                            "Failed to deserialize query job config. Skipping."
-                        );
-                        self.mark_job_failed(
-                            job_id,
-                            &format!("Failed to deserialize query job config: {e}"),
-                        )
+            let query_job_config = match rmp_serde::from_slice(&job_row.serialized_job_config) {
+                Ok(JobConfig::Query(query_job_config)) => query_job_config,
+                Ok(JobConfig::Extract(_)) => {
+                    tracing::error!(job_id = % job_id, "Extract jobs aren't supported. Skipping.");
+                    self.mark_job_failed(job_id, UNSUPPORTED_EXTRACT_JOB_MESSAGE)
                         .await;
-                        continue;
-                    }
-                };
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = % e,
+                        job_id = % job_id,
+                        "Failed to deserialize job config. Skipping."
+                    );
+                    self.mark_job_failed(job_id, &format!("Failed to deserialize job config: {e}"))
+                        .await;
+                    continue;
+                }
+            };
             tracing::info!(job_id = % job_id, "Scheduling new job.");
             let job_handle = QueryJobHandle::new(
                 self.job_handle_context.clone(),
@@ -437,25 +440,23 @@ impl Coordinator {
     async fn fetch_new_job_rows(&mut self) -> Result<Vec<PendingJobRowProjection>, Error> {
         const FIRST_FETCH_QUERY: &str = formatcp!(
             "SELECT `id`, `job_config`, CAST(UNIX_TIMESTAMP(`creation_time`) * 1000 AS SIGNED) AS \
-             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `type` = ? AND `status` = ? \
-             AND `dispatch_time` IS NOT NULL ORDER BY `id` ASC;",
+             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `status` = ? AND \
+             `dispatch_time` IS NOT NULL ORDER BY `id` ASC;",
             table = QUERY_JOBS_TABLE_NAME,
         );
         const SUBSEQUENT_FETCH_QUERY: &str = formatcp!(
             "SELECT `id`, `job_config`, CAST(UNIX_TIMESTAMP(`creation_time`) * 1000 AS SIGNED) AS \
-             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `type` = ? AND `status` = ? \
-             AND `dispatch_time` IS NULL ORDER BY `id` ASC LIMIT ?;",
+             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `status` = ? AND \
+             `dispatch_time` IS NULL ORDER BY `id` ASC LIMIT ?;",
             table = QUERY_JOBS_TABLE_NAME,
         );
 
         let query = if self.is_first_fetch {
             self.is_first_fetch = false;
             sqlx::query_as::<_, PendingJobRowProjection>(FIRST_FETCH_QUERY)
-                .bind(QueryJobType::SearchOrAggregation)
                 .bind(QueryJobStatus::Pending)
         } else {
             sqlx::query_as::<_, PendingJobRowProjection>(SUBSEQUENT_FETCH_QUERY)
-                .bind(QueryJobType::SearchOrAggregation)
                 .bind(QueryJobStatus::Pending)
                 .bind(
                     i64::try_from(self.job_handler_sem.available_permits())
@@ -472,8 +473,8 @@ impl Coordinator {
     /// in [`QueryJobStatus::Running`], [`QueryJobStatus::CancelRequested`], or
     /// [`QueryJobStatus::Cancelling`].
     ///
-    /// A submitted job whose config cannot be deserialized is marked [`QueryJobStatus::Failed`] and
-    /// skipped.
+    /// A submitted job whose config cannot be deserialized, or isn't a [`JobConfig::Query`], is
+    /// marked [`QueryJobStatus::Failed`] and skipped.
     ///
     /// # Returns
     ///
@@ -488,36 +489,39 @@ impl Coordinator {
         const QUERY: &str = formatcp!(
             "SELECT `id`, `spider_id`, `status`, `job_config`, \
              CAST(UNIX_TIMESTAMP(`creation_time`) * 1000 AS SIGNED) AS \
-             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `type` = ? AND `status` IN \
-             (?, ?, ?) AND `spider_id` IS NOT NULL;",
+             `job_creation_timestamp_millisecs` FROM `{table}` WHERE `status` IN (?, ?, ?) AND \
+             `spider_id` IS NOT NULL;",
             table = QUERY_JOBS_TABLE_NAME,
         );
 
         let mut recovery_context = Vec::new();
         for row in sqlx::query_as::<_, SubmittedJobRowProjection>(QUERY)
-            .bind(QueryJobType::SearchOrAggregation)
             .bind(QueryJobStatus::Running)
             .bind(QueryJobStatus::CancelRequested)
             .bind(QueryJobStatus::Cancelling)
             .fetch_all(&self.db_pool)
             .await?
         {
-            let query_job_config: QueryJobConfig = match rmp_serde::from_slice(
-                &row.serialized_query_job_config,
-            ) {
-                Ok(query_job_config) => query_job_config,
+            let query_job_config = match rmp_serde::from_slice(&row.serialized_job_config) {
+                Ok(JobConfig::Query(query_job_config)) => query_job_config,
+                Ok(JobConfig::Extract(_)) => {
+                    tracing::error!(
+                        job_id = % row.id,
+                        "Extract jobs aren't supported. Skipping the submitted job."
+                    );
+                    self.mark_job_failed(row.id, UNSUPPORTED_EXTRACT_JOB_MESSAGE)
+                        .await;
+                    continue;
+                }
                 Err(e) => {
                     tracing::error!(
                         error = % e,
                         job_id = % row.id,
-                        "Failed to deserialize query job config of a submitted job. The database \
-                         might be corrupted. Skipping."
+                        "Failed to deserialize job config of a submitted job. The database might \
+                         be corrupted. Skipping."
                     );
-                    self.mark_job_failed(
-                        row.id,
-                        &format!("Failed to deserialize query job config: {e}"),
-                    )
-                    .await;
+                    self.mark_job_failed(row.id, &format!("Failed to deserialize job config: {e}"))
+                        .await;
                     continue;
                 }
             };
@@ -537,6 +541,9 @@ impl Coordinator {
 const MILLISECS_PER_MINUTE: NonZeroU64 =
     NonZeroU64::new(60_000).expect("constant should not be zero");
 
+const UNSUPPORTED_EXTRACT_JOB_MESSAGE: &str =
+    "Extract jobs aren't supported by the query coordinator yet.";
+
 /// A query job that was submitted to Spider by a previous coordinator instance.
 struct SubmittedJob {
     id: QueryJobId,
@@ -551,7 +558,7 @@ struct SubmittedJob {
 struct PendingJobRowProjection {
     id: QueryJobId,
     #[sqlx(rename = "job_config")]
-    serialized_query_job_config: Vec<u8>,
+    serialized_job_config: Vec<u8>,
     job_creation_timestamp_millisecs: i64,
 }
 
@@ -563,6 +570,6 @@ struct SubmittedJobRowProjection {
     spider_job_id: SpiderJobId,
     status: QueryJobStatus,
     #[sqlx(rename = "job_config")]
-    serialized_query_job_config: Vec<u8>,
+    serialized_job_config: Vec<u8>,
     job_creation_timestamp_millisecs: i64,
 }

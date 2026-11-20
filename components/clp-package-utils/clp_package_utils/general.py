@@ -56,7 +56,6 @@ from strenum import KebabCaseStrEnum
 
 # CONSTANTS
 EXTRACT_FILE_CMD = "x"
-EXTRACT_IR_CMD = "i"
 EXTRACT_JSON_CMD = "j"
 
 DOCKER_MOUNT_TYPE_STRINGS = ["bind"]
