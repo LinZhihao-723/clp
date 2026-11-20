@@ -1010,6 +1010,7 @@ dependencies = [
  "spider-tdl",
  "sqlx",
  "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",

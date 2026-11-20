@@ -4,12 +4,15 @@ use clp_rust_utils::dataset::DatasetName;
 use clp_rust_utils::job_config::QueryJobId;
 use clp_rust_utils::job_config::QueryOutput;
 use clp_rust_utils::job_config::SearchQuery;
+use clp_rust_utils::task_io::extraction::ExtractTaskInput;
 use clp_rust_utils::types::ArchiveId;
 use spider_tdl::TaskContext;
 use spider_tdl::TdlError;
 use spider_tdl::task;
 
+mod archive_input;
 mod commit;
+mod extract;
 mod results_cache;
 mod search;
 
@@ -32,6 +35,25 @@ pub(crate) fn clp_s_search_task(
         &output,
     )
     .map_err(|e| TdlError::ExecutionError(format!("{e:#}")))
+}
+
+#[task(name = "query::clp_s_extract_json")]
+pub(crate) fn clp_s_extract_json_task(
+    ctx: TaskContext,
+    input: ExtractTaskInput,
+) -> Result<(), TdlError> {
+    extract::extract_json(&ctx, crate::common::spider_task_executor_config(), &input)
+        .inspect_err(|e| {
+            tracing::error!(
+                job_id = % ctx.job_id,
+                task_id = % ctx.task_id,
+                task_instance_id = % ctx.task_instance_id,
+                query_job_id = % input.job_id,
+                error = ? e,
+                "clp-s JSON extraction task failed."
+            );
+        })
+        .map_err(|e| TdlError::ExecutionError(format!("{e:#}")))
 }
 
 #[task(name = "query::commit_timeline")]
