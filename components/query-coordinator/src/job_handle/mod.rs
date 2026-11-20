@@ -10,7 +10,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use clp_rust_utils::clp_config::package::config::Database;
-pub use extract::ExtractJobHandle;
+pub(crate) use extract::ExtractJobHandle;
 pub use query::QueryJobHandle;
 use spider_core::types::id::JobId as SpiderJobId;
 use sqlx::MySqlPool;
@@ -18,7 +18,7 @@ use sqlx::MySqlPool;
 use crate::Error;
 
 /// Drives one job of the query jobs table to a terminal status.
-pub trait JobHandle: Send + 'static {
+pub(crate) trait JobHandle: Send + 'static {
     /// Plans, submits, and drives a dispatched pending job to completion.
     ///
     /// On failure, the handle attempts to persist a terminal status for the job before the error is

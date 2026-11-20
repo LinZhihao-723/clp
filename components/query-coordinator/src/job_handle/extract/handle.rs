@@ -1,5 +1,6 @@
 //! Handle for driving a single extract job to completion.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use clp_rust_utils::job_config::ExtractJobConfig;
@@ -106,7 +107,7 @@ impl<SubmitterType: SpiderJobSubmitter> ExtractJobHandle<SubmitterType> {
         } = &self.task_input;
 
         context
-            .ensure_datasets_exist(std::iter::once(dataset))
+            .ensure_datasets_exist(&HashSet::from([dataset.clone()]))
             .await?;
         let archive = context
             .fetch_archive(dataset, *archive_id)
@@ -138,11 +139,7 @@ impl<SubmitterType: SpiderJobSubmitter> JobHandle for ExtractJobHandle<Submitter
             "Starting extract job.",
         );
 
-        let result = self.plan_and_run().await;
-        if let Err(error) = &result {
-            self.lifecycle.finalize_on_error(error).await;
-        }
-        result
+        self.lifecycle.run_to_terminal(self.plan_and_run()).await
     }
 
     async fn recover(self, spider_job_id: SpiderJobId) -> Result<(), Error> {

@@ -132,7 +132,27 @@ impl<SubmitterType: SpiderJobSubmitter> JobLifecycle<SubmitterType> {
             "Recovering job.",
         );
 
-        let result = self.to_completion(spider_job_id).await;
+        self.run_to_terminal(self.to_completion(spider_job_id))
+            .await
+    }
+
+    /// Drives the job with `driver`, and finalizes the job with [`Self::finalize_on_error`] if
+    /// `driver` fails.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `DriverType` - The type of the future that drives the job to a terminal status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards `driver`'s return values on failure.
+    pub(super) async fn run_to_terminal<DriverType: Future<Output = Result<(), Error>>>(
+        &self,
+        driver: DriverType,
+    ) -> Result<(), Error> {
+        let result = driver.await;
         if let Err(error) = &result {
             self.finalize_on_error(error).await;
         }
@@ -166,27 +186,56 @@ impl<SubmitterType: SpiderJobSubmitter> JobLifecycle<SubmitterType> {
         self.terminate(outcome).await
     }
 
+    /// Terminates the job with the given outcome in the CLP database.
+    ///
+    /// This method runs in a transaction that locks the job's row, and persists the status that
+    /// [`Self::resolve_terminal_status`] resolves from the locked status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// * Forwards [`sqlx::Pool::begin`]'s return values on failure.
+    /// * Forwards [`Self::lock_and_get_status`]'s return values on failure.
+    /// * Forwards [`Self::resolve_terminal_status`]'s return values on failure.
+    /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
+    /// * Forwards [`sqlx::Transaction::commit`]'s return values on failure.
+    pub(super) async fn terminate(&self, outcome: JobOutcome) -> Result<(), Error> {
+        const UPDATE_QUERY: &str = formatcp!(
+            "UPDATE `{QUERY_JOBS_TABLE_NAME}` SET `status` = ?, `status_msg` = ? WHERE `id` = ?"
+        );
+
+        let mut tx = self.context.db_pool.begin().await?;
+        let current_status = self.lock_and_get_status(&mut tx).await?;
+        let (status_to_persist, status_message) =
+            self.resolve_terminal_status(outcome, current_status)?;
+
+        sqlx::query(UPDATE_QUERY)
+            .bind(status_to_persist)
+            .bind(status_message)
+            .bind(self.job_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
     /// Finalizes the job after the handle failed to drive it to completion.
     ///
     /// This method logs `error` as a job-handle failure and then attempts to terminate the job with
-    /// the terminal status implied by `error`. Nothing is persisted if `error` shows that the job's
-    /// row is gone or that the job already reached a terminal status through another path.
+    /// the outcome implied by `error`, as resolved by [`Error::job_outcome`].
     ///
     /// A failed attempt is logged and otherwise ignored, so that it can't re-enter this path.
-    pub(super) async fn finalize_on_error(&self, error: &Error) {
+    async fn finalize_on_error(&self, error: &Error) {
         tracing::error!(
             job_id = % self.job_id,
             error = % error,
             "Job failed.",
         );
 
-        let outcome = match error {
-            Error::JobMetadataCorrupted(_) => return,
-            Error::InvalidJobStatusTransition { from, .. } if from.is_terminal() => return,
-            Error::JobCancelled => JobOutcome::Cancelled,
-            error => JobOutcome::Failed {
-                error_message: format!("Job failed: {error}"),
-            },
+        let Some(outcome) = error.job_outcome() else {
+            return;
         };
 
         let Err(terminate_error) = self.terminate(outcome).await else {
@@ -210,10 +259,8 @@ impl<SubmitterType: SpiderJobSubmitter> JobLifecycle<SubmitterType> {
         }
     }
 
-    /// Terminates the job with the given outcome in the CLP database.
-    ///
-    /// This method runs in a transaction that locks the job's row, and resolves the status to
-    /// persist from the locked status as follows:
+    /// Resolves the status that terminating the job with `outcome` persists, given the job's
+    /// `current_status`:
     ///
     /// * [`JobOutcome::Succeeded`] is permitted from [`QueryJobStatus::Pending`] and
     ///   [`QueryJobStatus::Running`]. From [`QueryJobStatus::CancelRequested`] and
@@ -225,70 +272,55 @@ impl<SubmitterType: SpiderJobSubmitter> JobLifecycle<SubmitterType> {
     /// * [`JobOutcome::Failed`] is permitted from any non-terminal status, since a failure wins
     ///   over both a success and a cancellation.
     ///
+    /// # Returns
+    ///
+    /// A tuple on success, containing:
+    ///
+    /// * The status to persist.
+    /// * The status message to persist, if any.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
     ///
-    /// * [`Error::InvalidJobStatusTransition`] if the job's current status doesn't permit a
-    ///   transition to `outcome`'s status.
-    /// * Forwards [`sqlx::Pool::begin`]'s return values on failure.
-    /// * Forwards [`Self::lock_and_get_status`]'s return values on failure.
-    /// * Forwards [`sqlx::query::Query::execute`]'s return values on failure.
-    /// * Forwards [`sqlx::Transaction::commit`]'s return values on failure.
-    pub(super) async fn terminate(&self, outcome: JobOutcome) -> Result<(), Error> {
-        const UPDATE_QUERY: &str = formatcp!(
-            "UPDATE `{QUERY_JOBS_TABLE_NAME}` SET `status` = ?, `status_msg` = ? WHERE `id` = ?"
-        );
-        const CANCELLED_AFTER_COMPLETION_MESSAGE: &str =
-            "The job completed, but it had already been requested to be cancelled.";
-        const CANCELLED_MESSAGE: &str = "The job was cancelled.";
-        const CANCELLED_UNEXPECTED_MESSAGE: &str =
-            "The job was cancelled unexpectedly without a cancellation request.";
-
-        let mut tx = self.context.db_pool.begin().await?;
-        let current_status = self.lock_and_get_status(&mut tx).await?;
-
+    /// * [`Error::InvalidJobStatusTransition`] if `current_status` doesn't permit a transition to
+    ///   `outcome`'s status.
+    fn resolve_terminal_status(
+        &self,
+        outcome: JobOutcome,
+        current_status: QueryJobStatus,
+    ) -> Result<(QueryJobStatus, Option<String>), Error> {
         let to = QueryJobStatus::from(&outcome);
-        let (status_to_persist, status_message) = match (outcome, current_status) {
+        match (outcome, current_status) {
             (JobOutcome::Succeeded, QueryJobStatus::Pending | QueryJobStatus::Running) => {
-                (to, None)
+                Ok((to, None))
             }
             (
                 JobOutcome::Cancelled,
                 QueryJobStatus::CancelRequested | QueryJobStatus::Cancelling,
-            ) => (to, Some(CANCELLED_MESSAGE.to_owned())),
+            ) => Ok((to, Some(CANCELLED_MESSAGE.to_owned()))),
             (
                 JobOutcome::Succeeded,
                 QueryJobStatus::CancelRequested | QueryJobStatus::Cancelling,
             ) => {
                 tracing::info!(job_id = % self.job_id, "{CANCELLED_AFTER_COMPLETION_MESSAGE}");
-                (
+                Ok((
                     QueryJobStatus::Cancelled,
                     Some(CANCELLED_AFTER_COMPLETION_MESSAGE.to_owned()),
-                )
+                ))
             }
             (JobOutcome::Cancelled, QueryJobStatus::Running) => {
                 tracing::error!(job_id = % self.job_id, "{CANCELLED_UNEXPECTED_MESSAGE}");
-                (
+                Ok((
                     QueryJobStatus::Failed,
                     Some(CANCELLED_UNEXPECTED_MESSAGE.to_owned()),
-                )
+                ))
             }
             (JobOutcome::Failed { error_message }, from) if !from.is_terminal() => {
-                (to, Some(error_message))
+                Ok((to, Some(error_message)))
             }
-            (_, from) => return Err(Error::InvalidJobStatusTransition { from, to }),
-        };
-
-        sqlx::query(UPDATE_QUERY)
-            .bind(status_to_persist)
-            .bind(status_message)
-            .bind(self.job_id)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-
-        Ok(())
+            (_, from) => Err(Error::InvalidJobStatusTransition { from, to }),
+        }
     }
 
     /// Persists the Spider job ID and marks the job as running.
@@ -372,6 +404,30 @@ impl<SubmitterType: SpiderJobSubmitter> JobLifecycle<SubmitterType> {
     }
 }
 
+const CANCELLED_AFTER_COMPLETION_MESSAGE: &str =
+    "The job completed, but it had already been requested to be cancelled.";
+const CANCELLED_MESSAGE: &str = "The job was cancelled.";
+const CANCELLED_UNEXPECTED_MESSAGE: &str =
+    "The job was cancelled unexpectedly without a cancellation request.";
+
+impl Error {
+    /// # Returns
+    ///
+    /// The outcome to terminate a job with after its handle failed with this error, or `None` if
+    /// nothing should be persisted, since the job's row is gone or the job already reached a
+    /// terminal status through another path.
+    fn job_outcome(&self) -> Option<JobOutcome> {
+        match self {
+            Self::JobMetadataCorrupted(_) => None,
+            Self::InvalidJobStatusTransition { from, .. } if from.is_terminal() => None,
+            Self::JobCancelled => Some(JobOutcome::Cancelled),
+            error => Some(JobOutcome::Failed {
+                error_message: format!("Job failed: {error}"),
+            }),
+        }
+    }
+}
+
 impl From<&JobOutcome> for QueryJobStatus {
     fn from(outcome: &JobOutcome) -> Self {
         match outcome {
@@ -390,6 +446,7 @@ mod tests {
 
     use async_trait::async_trait;
     use clp_rust_utils::clp_config::package::config::Database;
+    use clp_rust_utils::job_config::QueryJobStatus;
     use spider_client::error::ClientError;
     use spider_core::task::TaskGraph;
     use spider_core::types::id::JobId as SpiderJobId;
@@ -398,6 +455,9 @@ mod tests {
     use spider_core::types::io::TaskGraphInputBuilder;
     use sqlx::mysql::MySqlPoolOptions;
 
+    use super::CANCELLED_AFTER_COMPLETION_MESSAGE;
+    use super::CANCELLED_MESSAGE;
+    use super::CANCELLED_UNEXPECTED_MESSAGE;
     use super::JobLifecycle;
     use crate::Error;
     use crate::job_handle::ArchiveSelectionOptions;
@@ -440,6 +500,142 @@ mod tests {
         );
         assert_eq!(submitter.cancelled_spider_job_ids(), vec![]);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_terminal_status_covers_every_outcome_and_status() {
+        const ERROR_MESSAGE: &str = "the task failed";
+
+        let lifecycle = lifecycle(MockSubmitter::new(true));
+        let failed = JobOutcome::Failed {
+            error_message: ERROR_MESSAGE.to_owned(),
+        };
+        for (outcome, current_status, expected) in [
+            (
+                JobOutcome::Succeeded,
+                QueryJobStatus::Pending,
+                Some((QueryJobStatus::Succeeded, None)),
+            ),
+            (
+                JobOutcome::Succeeded,
+                QueryJobStatus::Running,
+                Some((QueryJobStatus::Succeeded, None)),
+            ),
+            (
+                JobOutcome::Succeeded,
+                QueryJobStatus::CancelRequested,
+                Some((
+                    QueryJobStatus::Cancelled,
+                    Some(CANCELLED_AFTER_COMPLETION_MESSAGE),
+                )),
+            ),
+            (
+                JobOutcome::Succeeded,
+                QueryJobStatus::Cancelling,
+                Some((
+                    QueryJobStatus::Cancelled,
+                    Some(CANCELLED_AFTER_COMPLETION_MESSAGE),
+                )),
+            ),
+            (JobOutcome::Succeeded, QueryJobStatus::Succeeded, None),
+            (JobOutcome::Succeeded, QueryJobStatus::Failed, None),
+            (JobOutcome::Succeeded, QueryJobStatus::Cancelled, None),
+            (JobOutcome::Succeeded, QueryJobStatus::Killed, None),
+            (JobOutcome::Cancelled, QueryJobStatus::Pending, None),
+            (
+                JobOutcome::Cancelled,
+                QueryJobStatus::Running,
+                Some((QueryJobStatus::Failed, Some(CANCELLED_UNEXPECTED_MESSAGE))),
+            ),
+            (
+                JobOutcome::Cancelled,
+                QueryJobStatus::CancelRequested,
+                Some((QueryJobStatus::Cancelled, Some(CANCELLED_MESSAGE))),
+            ),
+            (
+                JobOutcome::Cancelled,
+                QueryJobStatus::Cancelling,
+                Some((QueryJobStatus::Cancelled, Some(CANCELLED_MESSAGE))),
+            ),
+            (JobOutcome::Cancelled, QueryJobStatus::Succeeded, None),
+            (JobOutcome::Cancelled, QueryJobStatus::Failed, None),
+            (JobOutcome::Cancelled, QueryJobStatus::Cancelled, None),
+            (JobOutcome::Cancelled, QueryJobStatus::Killed, None),
+            (
+                failed.clone(),
+                QueryJobStatus::Pending,
+                Some((QueryJobStatus::Failed, Some(ERROR_MESSAGE))),
+            ),
+            (
+                failed.clone(),
+                QueryJobStatus::Running,
+                Some((QueryJobStatus::Failed, Some(ERROR_MESSAGE))),
+            ),
+            (
+                failed.clone(),
+                QueryJobStatus::CancelRequested,
+                Some((QueryJobStatus::Failed, Some(ERROR_MESSAGE))),
+            ),
+            (
+                failed.clone(),
+                QueryJobStatus::Cancelling,
+                Some((QueryJobStatus::Failed, Some(ERROR_MESSAGE))),
+            ),
+            (failed.clone(), QueryJobStatus::Succeeded, None),
+            (failed.clone(), QueryJobStatus::Failed, None),
+            (failed.clone(), QueryJobStatus::Cancelled, None),
+            (failed, QueryJobStatus::Killed, None),
+        ] {
+            let to = QueryJobStatus::from(&outcome);
+            let resolved = match lifecycle.resolve_terminal_status(outcome.clone(), current_status)
+            {
+                Ok(resolved) => Ok(resolved),
+                Err(Error::InvalidJobStatusTransition { from, to }) => Err((from, to)),
+                Err(error) => panic!("unexpected error: {error}"),
+            };
+            assert_eq!(
+                resolved,
+                expected
+                    .map(|(status, message)| (status, message.map(str::to_owned)))
+                    .ok_or((current_status, to)),
+                "outcome {outcome:?}, current status {current_status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn job_outcome_fails_the_job_unless_it_is_gone_cancelled_or_already_terminal() {
+        for (error, expected) in [
+            (Error::JobMetadataCorrupted(1), None),
+            (
+                Error::InvalidJobStatusTransition {
+                    from: QueryJobStatus::Succeeded,
+                    to: QueryJobStatus::Failed,
+                },
+                None,
+            ),
+            (
+                Error::InvalidJobStatusTransition {
+                    from: QueryJobStatus::Running,
+                    to: QueryJobStatus::Running,
+                },
+                Some(JobOutcome::Failed {
+                    error_message: "Job failed: invalid job status transition from Running to \
+                                    Running"
+                        .to_owned(),
+                }),
+            ),
+            (Error::JobCancelled, Some(JobOutcome::Cancelled)),
+            (
+                Error::InvalidJobConfig("unknown dataset".to_owned()),
+                Some(JobOutcome::Failed {
+                    error_message: "Job failed: invalid job configuration: unknown dataset"
+                        .to_owned(),
+                }),
+            ),
+        ] {
+            assert_eq!(error.job_outcome(), expected, "error {error:?}");
+        }
     }
 
     /// A Spider job submitter that registers every job as [`SPIDER_JOB_ID`] unless it's configured

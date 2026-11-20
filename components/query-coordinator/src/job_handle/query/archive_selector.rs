@@ -50,7 +50,7 @@ impl ArchiveSelector<'_> {
     /// * Forwards [`Self::fetch_archives`]'s return values on failure.
     pub(super) async fn select(&self) -> Result<Vec<(ArchiveMetadata, ExecutionPolicy)>, Error> {
         let datasets = self.deduplicate_and_validate_requested_datasets()?;
-        self.context.ensure_datasets_exist(datasets.iter()).await?;
+        self.context.ensure_datasets_exist(&datasets).await?;
 
         let mut selected_archives = Vec::new();
         for dataset in &datasets {
@@ -135,12 +135,6 @@ impl ArchiveSelector<'_> {
                 .push(" AND `end_timestamp` >= ")
                 .push_bind(begin_timestamp);
         }
-        if let Some(lower_bound) = self.archive_end_ts_lower_bound_millisecs {
-            query_builder
-                .push(" AND (`end_timestamp` >= ")
-                .push_bind(lower_bound)
-                .push(" OR `end_timestamp` = 0)");
-        }
 
         Ok(query_builder
             .build_query_as::<ArchiveRowProjection>()
@@ -148,6 +142,9 @@ impl ArchiveSelector<'_> {
             .await?
             .into_iter()
             .map(|row| row.into_metadata(dataset.clone()))
+            .filter(|archive| {
+                archive.is_within_retention(self.archive_end_ts_lower_bound_millisecs)
+            })
             .collect())
     }
 }

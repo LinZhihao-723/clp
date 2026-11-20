@@ -120,11 +120,7 @@ impl<SubmitterType: SpiderJobSubmitter> JobHandle for QueryJobHandle<SubmitterTy
     async fn run(self) -> Result<(), Error> {
         tracing::info!(job_id = % self.lifecycle.job_id(), "Starting query job.");
 
-        let result = self.plan_and_run().await;
-        if let Err(error) = &result {
-            self.lifecycle.finalize_on_error(error).await;
-        }
-        result
+        self.lifecycle.run_to_terminal(self.plan_and_run()).await
     }
 
     async fn recover(self, spider_job_id: SpiderJobId) -> Result<(), Error> {

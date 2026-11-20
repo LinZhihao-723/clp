@@ -101,7 +101,7 @@ mod tests {
             "query::clp_s_extract_json"
         );
         assert_eq!(task.get_execution_policy(), &execution_policy);
-        assert_eq!(task.get_input_dep_indices().len(), 1);
+        assert_eq!(task.get_input_dep_indices().as_slice(), &[0]);
         assert_eq!(
             graph
                 .get_task_input(TaskInputOutputIndex {

@@ -1,5 +1,7 @@
 //! Archive metadata lookups and the archive-derived task settings shared by job handles.
 
+use std::collections::HashSet;
+
 use clp_rust_utils::dataset::DatasetName;
 use clp_rust_utils::types::ArchiveId;
 use spider_core::task::ExecutionPolicy;
@@ -143,8 +145,8 @@ impl JobHandleContext {
 
     /// Checks that every dataset in `datasets` exists in the metadata database.
     ///
-    /// `datasets` is assumed to be non-empty and free of duplicates, since an empty set would make
-    /// the generated `IN` clause invalid SQL, and a duplicate would never be counted as existing.
+    /// `datasets` is assumed to be non-empty, since an empty set would make the generated `IN`
+    /// clause invalid SQL.
     ///
     /// # Errors
     ///
@@ -154,9 +156,8 @@ impl JobHandleContext {
     /// * Forwards [`sqlx::query::QueryScalar::fetch_one`]'s return values on failure.
     pub(super) async fn ensure_datasets_exist(
         &self,
-        datasets: impl ExactSizeIterator<Item = &DatasetName>,
+        datasets: &HashSet<DatasetName>,
     ) -> Result<(), Error> {
-        let num_datasets = datasets.len();
         let datasets_table = self.db_config.datasets_table_name();
         let mut query_builder = sqlx::QueryBuilder::<sqlx::MySql>::new(format!(
             "SELECT COUNT(*) FROM `{datasets_table}` WHERE CAST(`name` AS BINARY) IN ("
@@ -171,7 +172,7 @@ impl JobHandleContext {
             .build_query_scalar()
             .fetch_one(&self.db_pool)
             .await?;
-        if usize::try_from(num_existing_datasets).ok() != Some(num_datasets) {
+        if usize::try_from(num_existing_datasets).ok() != Some(datasets.len()) {
             return Err(Error::InvalidJobConfig(
                 "one or more requested datasets don't exist".to_owned(),
             ));
@@ -180,8 +181,7 @@ impl JobHandleContext {
         Ok(())
     }
 
-    /// Fetches the metadata of the archive identified by `archive_id` in `dataset`, which must
-    /// exist.
+    /// Fetches the metadata of the archive identified by `archive_id` in `dataset`.
     ///
     /// # Returns
     ///
